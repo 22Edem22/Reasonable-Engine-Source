@@ -481,6 +481,17 @@ class NewProjectDialog(QDialog):
     # UI level selection
     def _levels_changed(self, _checked: bool) -> None:
         self._levels_touched = True
+        if not hasattr(self, "summary_label"):
+            return
+        levels = self.selected_ui_levels()
+        if not levels:
+            last = UI_LEVELS[-1]
+            for level in UI_LEVELS:
+                if level != last:
+                    self.level_checks[level].setChecked(False)
+            self.level_checks[last].setChecked(True)
+            self._levels_touched = True
+            levels = [last]
         self._refresh_summary()
 
     def _apply_level_defaults_from_type(self, _checked: bool) -> None:
@@ -662,10 +673,11 @@ class NewProjectDialog(QDialog):
                 f"Папка: {self.folder_edit.text().strip() or '—'}"
             )
             return
+        levels = self.selected_ui_levels()
+        level_labels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in levels) or "—"
         self.summary_label.setText(
             f"{kind} · {mode}\n"
-            "Окно: 1280 × 720 · можно менять размер\n"
-            "Режим окна и заметки — после создания\n"
+            f"Интерфейс: {level_labels}\n"
             f"Папка: {self.folder_edit.text().strip() or '—'}"
         )
 
@@ -681,6 +693,17 @@ class NewProjectDialog(QDialog):
     # ------------------------------------------------------------------
     def _create_project(self) -> None:
         name = self.name_edit.text().strip() or self.goal_edit.text().strip()[:58] or "Новый проект"
+        if not PROJECT_NAME_RE.match(name):
+            QMessageBox.warning(
+                self,
+                "Название проекта",
+                "Название должно быть на английском: начинаться с буквы, содержать только "
+                "латинские буквы, цифры, пробелы, дефис или подчёркивание (2–60 символов).\n"
+                "Например: Task Manager или my-great-game",
+            )
+            self.name_edit.setFocus()
+            self.name_edit.selectAll()
+            return
         parent = Path(self.folder_edit.text().strip() or str(default_projects_dir(self.settings)))
         try:
             parent.mkdir(parents=True, exist_ok=True)
@@ -701,9 +724,9 @@ class NewProjectDialog(QDialog):
             resizable=True,
             orientation="landscape",
             template="blank" if self.starter == "blank" else None,
+            ui_levels=self.selected_ui_levels() or None,
         )
         manifest["ai"]["image_style"] = "flat"
-        manifest["preview"] = {"skip_splash": False}
         root = choose_project_dir(parent, name)
         self._creating = True
         self.back_button.hide()

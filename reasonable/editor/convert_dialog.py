@@ -121,11 +121,6 @@ class ConvertDialog(QDialog):
         self.folder_edit.textChanged.connect(self._refresh_preview)
         self.orientation_combo.currentIndexChanged.connect(self._refresh_preview)
         self.agent_combo.currentIndexChanged.connect(self._refresh_preview)
-        self.window_combo.currentIndexChanged.connect(self._refresh_preview)
-        self.resizable_combo.currentIndexChanged.connect(self._refresh_preview)
-        self.resolution_combo.currentIndexChanged.connect(self._resolution_changed)
-        self.width_spin.valueChanged.connect(self._refresh_preview)
-        self.height_spin.valueChanged.connect(self._refresh_preview)
         self.reset_check.toggled.connect(self._refresh_preview)
 
         self.platform_buttons[self.target].setChecked(True)
@@ -246,61 +241,29 @@ class ConvertDialog(QDialog):
             self.agent_combo.addItem(label, value)
         form.addRow("Режим агента", self.agent_combo)
 
-        self.window_combo = QComboBox()
-        for label, value in (
-            ("Как в проекте", None),
-            ("Окно", "windowed"),
-            ("Полноэкранный", "fullscreen"),
-        ):
-            self.window_combo.addItem(label, value)
-        form.addRow("Режим окна", self.window_combo)
+        self.level_checks: dict[str, QCheckBox] = {}
+        from reasonable.core.project import UI_LEVELS, UI_LEVEL_LABELS
 
-        self.resizable_combo = QComboBox()
-        for label, value in (
-            ("Как в проекте", None),
-            ("Размер меняется", "yes"),
-            ("Фиксированный размер", "no"),
-        ):
-            self.resizable_combo.addItem(label, value)
-        form.addRow("Изменение размера", self.resizable_combo)
-
-        self.resolution_combo = QComboBox()
-        for label, value in (
-            ("Как в проекте", None),
-            ("1280 × 720 · 16:9", (1280, 720)),
-            ("1920 × 1080 · 16:9", (1920, 1080)),
-            ("1024 × 768 · 4:3", (1024, 768)),
-            ("720 × 1280 · портрет", (720, 1280)),
-            ("1080 × 1920 · портрет", (1080, 1920)),
-            ("Свои размеры", "custom"),
-        ):
-            self.resolution_combo.addItem(label, value)
-        form.addRow("Базовое разрешение", self.resolution_combo)
-
-        self.custom_size = QWidget()
-        custom_row = QHBoxLayout(self.custom_size)
-        custom_row.setContentsMargins(0, 0, 0, 0)
-        custom_row.setSpacing(8)
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(320, 3840)
-        self.width_spin.setValue(int(self.project.window.get("width", 1280)))
-        self.height_spin = QSpinBox()
-        self.height_spin.setRange(240, 2160)
-        self.height_spin.setValue(int(self.project.window.get("height", 720)))
-        custom_row.addWidget(self.width_spin)
-        custom_row.addWidget(QLabel("×"))
-        custom_row.addWidget(self.height_spin)
-        custom_row.addStretch(1)
-        self.custom_size.hide()
-        form.addRow("Свои размеры", self.custom_size)
+        levels_row = QHBoxLayout()
+        levels_row.setSpacing(8)
+        current_levels = set(self.project.ui_levels)
+        for level in UI_LEVELS:
+            check = QCheckBox(UI_LEVEL_LABELS[level])
+            check.setChecked(level in current_levels)
+            check.toggled.connect(self._levels_changed)
+            self.level_checks[level] = check
+            levels_row.addWidget(check)
+        levels_row.addStretch(1)
+        form.addRow("Уровень интерфейса", levels_row)
 
         card.layout().addLayout(form)
         self.reset_check = QCheckBox("Сбросить план, прогресс и ленту событий в новом проекте")
         card.layout().addWidget(self.reset_check)
         card.layout().addWidget(
             muted(
-                "Конвертация не заменяет шаблон игры на приложение и не импортирует чужие движки: "
-                "это меняет смысл проекта и делается вручную или агентом.",
+                "Окно, разрешение и ориентацию агент подберёт сам — здесь это не настраивается. "
+                "Код и ассеты не переписываются: после создания попросите агента адаптировать "
+                "компоновку под новую платформу. APK собирается через buildozer на Linux/WSL2.",
                 size=8,
             )
         )
