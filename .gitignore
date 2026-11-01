@@ -1,0 +1,42 @@
+# Reasonable Engine / Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+
+# Build and test artifacts
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors and OS
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Local settings and logs
+settings.json
+*.log
+
+# Default project folder created by the editor
+/Projects/
+
+# Version history snapshots inside projects
+.reasonable/
+
+# Exports and Android builds
+exports/
+bin/
+.buildozer/
+*.apk
+*.aab
