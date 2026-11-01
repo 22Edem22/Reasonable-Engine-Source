@@ -12,7 +12,7 @@
 python -m unittest discover -s tests -v
 ```
 
-Ожидаемый результат на версии 0.1.0: **64 теста, OK**.
+Ожидаемый результат на версии RE-1.01: **106 тестов, OK**.
 
 Для читаемого вывода в Windows PowerShell:
 
@@ -101,7 +101,7 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_editor -v
 
 ### Установщик на чистой машине
 
-- [ ] `build_installer.bat` создаёт `dist\ReasonableEngine-Setup-0.1.0.exe`.
+- [ ] `build_installer.bat` создаёт `dist\ReasonableEngine-Setup-RE-1.01.exe`.
 - [ ] Установщик показывает лицензию (`installer\EULA.txt`) и не требует прав администратора.
 - [ ] После установки в `%LOCALAPPDATA%\Programs\Reasonable Engine` есть `ReasonableEngine.exe`, `ReasonablePlayer.exe`, `runtime\python\python.exe` и `Projects`.
 - [ ] `ReasonableEngine.exe --self-test` в папке установки проходит все проверки.

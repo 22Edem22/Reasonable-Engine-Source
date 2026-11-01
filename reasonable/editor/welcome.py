@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from reasonable import branding
 from reasonable.core.paths import DOCS_DIR
 from reasonable.core.settings import Settings
-from reasonable.version import VERSION
+from reasonable.version import VERSION_LABEL
 
 from . import theme
 from .widgets import Badge, Card, ProjectCard, muted, title_label
@@ -73,7 +73,7 @@ class WelcomePage(QWidget):
         name.setObjectName("title")
         name.setFont(theme.display_font(13, 700))
         names.addWidget(name)
-        sub = QLabel(f"версия {VERSION} · {branding.TAGLINE_RU}")
+        sub = QLabel(f"версия {VERSION_LABEL} · {branding.TAGLINE_RU}")
         sub.setObjectName("dim")
         sub.setFont(theme.ui_font(9))
         names.addWidget(sub)

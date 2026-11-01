@@ -8,7 +8,7 @@ The module is intentionally free of editor/Qt imports so exported games and
 Android builds only need pygame and the Python standard library.
 """
 
-from reasonable import VERSION, VERSION_NAME
+from reasonable import VERSION, VERSION_LABEL, VERSION_NAME
 
 from .app import App, Game, UIApp
 from .audio import Audio, play_sound
@@ -90,6 +90,7 @@ from .utils import (
 
 __all__ = [
     "VERSION",
+    "VERSION_LABEL",
     "VERSION_NAME",
     "App",
     "Game",

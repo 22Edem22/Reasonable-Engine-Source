@@ -16,7 +16,12 @@
   #define OutputDir "..\dist"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "1.0.0"
+#endif
+; Публичный лейбл релиза (RE-1.01, RE-1.02, ...) — идёт в имя установщика и в
+; «Установка и удаление программ». VersionInfoVersion остаётся числовой.
+#ifndef ReleaseLabel
+  #define ReleaseLabel AppVersion
 #endif
 
 #define AppName "Reasonable Engine"
@@ -28,7 +33,7 @@
 AppId={{8C0B2F8E-6D34-4A55-9C64-5B7A2D7E9F10}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName={#AppName} {#AppVersion}
+AppVerName={#AppName} {#ReleaseLabel}
 AppPublisher={#AppPublisher}
 VersionInfoVersion={#AppVersion}
 VersionInfoDescription={#AppName} installer
@@ -39,7 +44,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 LicenseFile=EULA.txt
 OutputDir={#OutputDir}
-OutputBaseFilename=ReasonableEngine-Setup-{#AppVersion}
+OutputBaseFilename=ReasonableEngine-Setup-{#ReleaseLabel}
 SetupIconFile=..\reasonable\assets\brand\logo.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName}

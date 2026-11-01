@@ -21,7 +21,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from reasonable.version import VERSION
+from reasonable.version import VERSION_LABEL
 
 from .paths import atomic_write_text, is_relative_to, now_iso, slugify, unique_directory
 from .progress import ensure_state, record_event, set_plan, set_status
@@ -288,7 +288,7 @@ def _write_conversion_doc(project: Project, plan: dict[str, Any], record: dict[s
 - Новая платформа: **{PLATFORM_NAMES[plan['target']]}**
 - Дата: {record['at']}
 - Исходная папка: `{source}`
-- Версия движка: Reasonable Engine {VERSION}
+- Версия движка: Reasonable Engine {VERSION_LABEL}
 
 Исходный проект не изменялся. Это отдельная папка со своей копией кода,
 ассетов и встроенного движка.
@@ -412,7 +412,7 @@ def convert_project(
                 "platform": plan["target"],
             },
             "changes": plan["changes"],
-            "engine_version": VERSION,
+            "engine_version": VERSION_LABEL,
         }
         manifest = dict(project.manifest)
         manifest["name"] = plan["target_name"]
@@ -420,7 +420,7 @@ def convert_project(
         manifest["platform"] = plan["target"]
         manifest["orientation"] = plan["orientation"]
         manifest["mode"] = plan["mode"]
-        manifest["engine_version"] = VERSION
+        manifest["engine_version"] = VERSION_LABEL
         manifest["ui_levels"] = plan["ui_levels"]
         manifest["window"] = {
             **project.window,

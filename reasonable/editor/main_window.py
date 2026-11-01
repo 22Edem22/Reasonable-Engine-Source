@@ -26,7 +26,7 @@ from reasonable.core.logging_setup import configure_logging
 from reasonable.core.paths import BRAND_DIR
 from reasonable.core.project import Project
 from reasonable.core.settings import Settings
-from reasonable.version import VERSION, VERSION_NAME
+from reasonable.version import VERSION, VERSION_LABEL, VERSION_NAME
 
 from . import theme
 from .new_project import NewProjectDialog
@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
 
         self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage(f"Reasonable Engine {VERSION_NAME} ({VERSION}) готова к работе.")
+        self.statusBar().showMessage(f"Reasonable Engine {VERSION_NAME} ({VERSION_LABEL}) готова к работе.")
 
         self._build_menus()
         self._update_actions()
@@ -419,7 +419,7 @@ class MainWindow(QMainWindow):
         box.setIconPixmap(theme.logo_pixmap(96))
         box.setText(
             f"<h2 style='color:#F0F2F4'>Reasonable Engine {VERSION_NAME}</h2>"
-            f"<p style='color:#9AA1AB'>версия {VERSION} · {branding.TAGLINE_RU}</p>"
+            f"<p style='color:#9AA1AB'>версия {VERSION_LABEL} · {branding.TAGLINE_RU}</p>"
             "<p>Редактор игр и приложений с ИИ-агентом, спрайтами, "
             "живым прогрессом и экспортом на Windows и Android.</p>"
             "<p style='color:#9AA1AB'>Python · PySide6 · pygame · Pillow</p>"

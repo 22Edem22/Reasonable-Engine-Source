@@ -43,13 +43,15 @@ def _ensure_utf8() -> None:
             pass
 
 
-def _read_version() -> str:
+def _read_version() -> tuple[str, str]:
     namespace: dict[str, str] = {}
     try:
         exec(VERSION_FILE.read_text(encoding="utf-8"), namespace)
     except OSError:
-        return "0.0.0"
-    return str(namespace.get("VERSION") or "0.0.0")
+        return "0.0.0", "RE-0.01"
+    version = str(namespace.get("VERSION") or "0.0.0")
+    label = str(namespace.get("VERSION_LABEL") or version)
+    return version, label
 
 
 def _run(command: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = None) -> int:
@@ -242,13 +244,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 3
 
-    version = _read_version()
+    version, label = _read_version()
     output = dist
     command = [
         str(iscc),
         f"/DPayloadDir={payload}",
         f"/DOutputDir={output}",
         f"/DAppVersion={version}",
+        f"/DReleaseLabel={label}",
         str(ISS),
     ]
     code = _run(command)
@@ -256,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         print("ОШИБКА: Inno Setup завершился с ошибкой.")
         return code or 1
 
-    setup = output / f"ReasonableEngine-Setup-{version}.exe"
+    setup = output / f"ReasonableEngine-Setup-{label}.exe"
     if not setup.is_file():
         print(f"ОШИБКА: ожидался {setup}, но файл не создан.")
         return 1

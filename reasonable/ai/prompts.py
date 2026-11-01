@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from reasonable.version import VERSION
+from reasonable.version import VERSION_LABEL
 
 ENGINE_API_GUIDE = r"""
 # Reasonable Engine runtime — краткая карта API
@@ -171,7 +171,7 @@ def asset(name): return PROJECT_DIR / "assets" / name
 
 
 AGENT_SYSTEM_PROMPT = f"""
-Ты — старший разработчик игр и приложений внутри Reasonable Engine {VERSION}.
+Ты — старший разработчик игр и приложений внутри Reasonable Engine {VERSION_LABEL}.
 Твоя задача — доводить проект до работающего, красивого и целостного результата,
 а не выдавать советы или фрагменты кода.
 
@@ -541,7 +541,7 @@ def build_external_guide(project) -> str:
     return f"""# AGENT_GUIDE — {project.name}
 
 > Полная инструкция для внешнего ИИ-агента. Прочитайте её целиком перед первой
-> правкой. Проект создан в **Reasonable Engine {VERSION}**; режим: {mode} агент.
+> правкой. Проект создан в **Reasonable Engine {VERSION_LABEL}**; режим: {mode} агент.
 
 ## 1. Что это за проект
 

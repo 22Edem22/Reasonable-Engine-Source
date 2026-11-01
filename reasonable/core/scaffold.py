@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from reasonable.version import VERSION
+from reasonable.version import VERSION_LABEL
 
 from .paths import atomic_write_text, now_iso, slugify
 from .progress import ensure_state, record_event, set_plan, set_status
@@ -161,7 +161,7 @@ def _write_readme(project) -> None:
 
 {goal}
 
-> {project_type.capitalize()}, созданный в **Reasonable Engine {VERSION}**.
+> {project_type.capitalize()}, созданный в **Reasonable Engine {VERSION_LABEL}**.
 > Режим разработки: **{'встроенный ИИ-агент' if project.mode == 'builtin' else 'внешний ИИ-агент'}**.
 > Уровень интерфейса: **{levels_text}**.
 
@@ -418,7 +418,7 @@ def scaffold_project(project) -> None:
     _write_readme(project)
     _write_launchers(project)
     _write_support_files(project)
-    project.manifest["engine_version"] = VERSION
+    project.manifest["engine_version"] = VERSION_LABEL
     project.save()
 
     ensure_state(project.root, project.mode)

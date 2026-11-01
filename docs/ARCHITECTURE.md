@@ -205,7 +205,7 @@ Project.run_env()
     "orientation": "landscape"
   },
   "ai": {"image_style": "flat", "notes": ""},
-  "engine_version": "0.1.0",
+  "engine_version": "RE-1.01",
   "created_at": "…",
   "updated_at": "…"
 }
