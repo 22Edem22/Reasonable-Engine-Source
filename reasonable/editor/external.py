@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from reasonable.core.paths import human_time
 from reasonable.core.progress import (
     activity_is_live,
+    derived_percent,
     read_events,
     read_state,
     scan_recent_files,
@@ -44,22 +45,13 @@ from .widgets import Badge, Card, Separator, muted, title_label
 AGENT_PROMPT = """Ты работаешь над проектом «{name}» в папке:
 {root}
 
-1. Прочитай AGENT_GUIDE.md, AGENTS.md и AGENT_TASKS.md.
-2. Изучи project.json, main.py, assets/ и progress/state.json.
-3. Составь план и обновляй его командами:
-   re.bat plan "задача 1" "задача 2" ...
-4. В начале задачи: re.bat task <id> in_progress
-   В конце: re.bat task <id> done
-5. Сообщай о прогрессе: re.bat progress <0-100> "что готово" --stage "этап"
-   и re.bat event "короткое сообщение".
-6. Проверяй запуск: re.bat validate и re.bat run --headless
-7. В конце выполни re.bat done "краткий итог" — только после того, как файлы проекта
-   действительно изменены, validate пройден и проект запускается.
+1. Прочитай AGENT_GUIDE.md, skills/ и progress/state.json — там полные правила и API движка.
+2. Работай автономно: меняй файлы, генерируй ассеты, проверяй запуск (re.bat validate, re.bat run --headless).
+3. Обновляй план и прогресс через re.bat (plan/task/progress/event) — пользователь видит его в Reasonable Engine.
+4. Заверши через re.bat done "итог" только когда проект запускается и задача выполнена.
 
-Работай самостоятельно, меняй файлы проекта, генерируй ассеты при необходимости.
-Установка библиотеки через pip — это не выполненная задача: после неё продолжай
-писать код, проверять и доводить проект до рабочего состояния.
-Не трогай папку _engine — это встроенная копия движка."""
+Не трогай папку _engine — это встроенная копия движка. Шаги не ограничены:
+работай до результата, не повторяй одно и то же действие."""
 
 
 class ExternalAgentPanel(QWidget):
@@ -121,7 +113,7 @@ class ExternalAgentPanel(QWidget):
         pack_button.setObjectName("teal")
         pack_button.clicked.connect(self._regenerate_pack)
         row.addWidget(pack_button)
-        folder_button = QPushButton("Открыть папку")
+        folder_button = QPushButton("Открыть папку проекта")
         folder_button.clicked.connect(self._open_folder)
         row.addWidget(folder_button)
         card.layout().addLayout(row)
@@ -141,9 +133,9 @@ class ExternalAgentPanel(QWidget):
         card = Card()
         card.layout().addWidget(title_label("Как подключить агента", 13))
         steps = (
-            ("1", "Откройте папку проекта", "В Claude Code, Codex CLI, Cursor, Cline или другом агенте выберите папку проекта."),
-            ("2", "Дайте агенту инструкцию", "Скопируйте промпт ниже или попросите прочитать AGENT_GUIDE.md."),
-            ("3", "Следите за прогрессом", "Агент отмечает задачи и события через re.bat — панель обновляется сама."),
+            ("1", "Откройте папку проекта", "В Claude Code, Codex CLI, Cursor, Cline или другом агенте откройте папку проекта."),
+            ("2", "Вставьте промпт", "Скопируйте промпт ниже и вставьте его агенту — при желании сначала допишите свою задачу."),
+            ("3", "Смотрите прогресс здесь", "Агент обновляет план и процент сам — эта панель следит за папкой проекта."),
         )
         for number, title, text in steps:
             row = QHBoxLayout()
@@ -222,63 +214,11 @@ class ExternalAgentPanel(QWidget):
         self._update_prompt_preview()
         layout.addWidget(prompt_card)
 
-        commands = Card(soft=True)
-        commands.layout().addWidget(title_label("Команды прогресса", 11))
-        for title, command in (
-            ("Показать состояние", "re.bat status"),
-            ("Новый план", 're.bat plan "Экран меню" "Уровни" "Проверка"'),
-            ("Начать задачу", "re.bat task t1 in_progress"),
-            ("Завершить задачу", "re.bat task t1 done"),
-            ("Процент и этап", 're.bat progress 40 "Готов экран меню" --stage "UI"'),
-            ("Событие", 're.bat event "Добавил анимацию кнопок"'),
-            ("Завершить проект", 're.bat done "Проект готов"'),
-        ):
-            row = QHBoxLayout()
-            row.setSpacing(8)
-            label = QLabel(title)
-            label.setObjectName("muted")
-            label.setFont(theme.ui_font(9))
-            label.setFixedWidth(130)
-            row.addWidget(label)
-            code = QLabel(command)
-            code.setFont(theme.ui_font(9))
-            code.setWordWrap(True)
-            code.setMinimumWidth(0)
-            code.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            code.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            code.setStyleSheet(
-                "background: #12151A; color: #C9CED6; border: 1px solid #262B33;"
-                "border-radius: 6px; padding: 5px 8px;"
-            )
-            row.addWidget(code, 1)
-            copy = QPushButton("Копировать")
-            copy.setObjectName("ghost")
-            copy.setFixedHeight(26)
-            copy.setToolTip("Скопировать команду")
-            copy.clicked.connect(lambda checked=False, value=command: self._copy(value))
-            row.addWidget(copy)
-            commands.layout().addLayout(row)
-        layout.addWidget(commands)
-
-        files = Card(soft=True)
-        files.layout().addWidget(title_label("Созданные инструкции", 11))
-        for name, text in (
-            ("AGENT_GUIDE.md", "Полное руководство: API движка, структура, правила и команды."),
-            ("EXTERNAL_AGENT.md", "Короткая инструкция для подключения любого агента."),
-            ("AGENTS.md / CLAUDE.md", "Автозагружаемые правила для Codex, Claude Code и других."),
-            (".cursor/rules", "Правила для Cursor."),
-            (".github/copilot-instructions.md", "Инструкции для GitHub Copilot."),
-            ("skills/*", "Навыки: игровой цикл, UI, спрайты, прогресс, экспорт."),
-            ("AGENT_TASKS.md", "Чек-лист задач, который агент отмечает."),
-        ):
-            row = QHBoxLayout()
-            name_label = QLabel(name)
-            name_label.setFont(theme.ui_font(9, 700))
-            name_label.setFixedWidth(210)
-            row.addWidget(name_label)
-            row.addWidget(muted(text, size=9), 1)
-            files.layout().addLayout(row)
-        layout.addWidget(files)
+        # The agent pack contents are intentionally not enumerated here: the
+        # user only needs to know the pack exists and is up to date.
+        pack_status = muted("Пакет для агента готов ✓  (AGENT_GUIDE.md, skills/, AGENTS.md, re.bat)", size=9)
+        layout.addWidget(pack_status)
+        self.pack_status = pack_status
         layout.addStretch(1)
         return scroll
 
@@ -420,8 +360,10 @@ class ExternalAgentPanel(QWidget):
             paths = generate_agent_pack(self.project)
         except Exception as exc:
             self.status_message.emit(f"Не удалось обновить пакет: {exc}")
+            self.pack_status.setText("Не удалось обновить пакет — попробуйте ещё раз.")
             return
-        self.status_message.emit(f"Пакет агента обновлён: {len(paths)} файлов.")
+        self.pack_status.setText("Пакет для агента готов ✓  (AGENT_GUIDE.md, skills/, AGENTS.md, re.bat)")
+        self.status_message.emit("Пакет агента обновлён.")
         self.status_badge.setText("ПАКЕТ ОБНОВЛЁН")
         self.status_badge.set_tone("teal")
         QTimer.singleShot(1800, self.refresh)
@@ -463,7 +405,7 @@ class ExternalAgentPanel(QWidget):
         if not force and signature == self._state_signature:
             return
         self._state_signature = signature
-        percent = int(float(state.get("percent", 0) or 0))
+        percent = int(round(derived_percent(state)))
         self.progress.setValue(percent)
         self.percent_label.setText(f"{percent}%")
         stage = state.get("stage") or "Ожидание"

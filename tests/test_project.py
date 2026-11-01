@@ -99,11 +99,10 @@ class ProjectTests(unittest.TestCase):
         self.assertTrue(any("точки входа" in issue.message.lower() for issue in problems))
 
     def test_run_env_includes_project_and_engine(self) -> None:
-        env = self.project.run_env(skip_splash=True)
+        env = self.project.run_env()
         paths = env["PYTHONPATH"].split(os.pathsep)
         self.assertEqual(paths[0], str(self.root / "_engine"))
         self.assertEqual(paths[1], str(self.root))
-        self.assertEqual(env.get("RE_SKIP_SPLASH"), "1")
         self.assertEqual(self.project.run_command()[-1], str(self.root / "main.py"))
 
 

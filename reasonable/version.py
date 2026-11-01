@@ -1,2 +1,2 @@
-VERSION = "0.2.0"
-VERSION_NAME = "Comet"
+VERSION = "1.0.0"
+VERSION_NAME = "1"

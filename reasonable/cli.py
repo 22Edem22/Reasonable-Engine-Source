@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from reasonable.version import VERSION, VERSION_NAME
+from reasonable.version import VERSION
 
 from .core.paths import app_data_dir, slugify, unique_directory
 from .core.progress import (
@@ -379,7 +379,7 @@ def cmd_settings(args: argparse.Namespace) -> int:
 
 
 def cmd_version(args: argparse.Namespace) -> int:
-    print(f"Reasonable Engine {VERSION} «{VERSION_NAME}»")
+    print(f"Reasonable Engine {VERSION}")
     print(f"Python {sys.version.split()[0]} · {sys.platform}")
     return 0
 
@@ -531,7 +531,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_version(args)
     if not getattr(args, "command", None):
         parser.print_help()
-        print(f"\nReasonable Engine {VERSION} «{VERSION_NAME}» · настройки: {app_data_dir()}")
+        print(f"\nReasonable Engine {VERSION} · настройки: {app_data_dir()}")
         return 0
     try:
         return int(args.func(args))

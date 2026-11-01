@@ -919,20 +919,21 @@ class ProjectPage(QWidget):
         self.converted.emit(path)
 
     def _update_header(self) -> None:
+        from reasonable.core.project import UI_LEVEL_LABELS
+
         self.name_label.setText(_shorten(self.project.name, 32))
         self.goal_label_header.setText(self.project.goal or "Цель пока не описана")
         self.type_badge.setText("ИГРА" if self.project.project_type == "game" else "ПРИЛОЖЕНИЕ")
         self.platform_badge.setText("WINDOWS" if self.project.platform == "windows" else "ANDROID")
         self.mode_badge.setText("ВСТРОЕННЫЙ ИИ" if self.project.mode == "builtin" else "ВНЕШНИЙ АГЕНТ")
         self.project_icon.setPixmap(project_icon_pixmap(self.project.icon_path, 48))
-        window = self.project.window
+        levels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in self.project.ui_levels)
         self.side_meta.setText(
             f"{'Windows' if self.project.platform == 'windows' else 'Android'} · "
-            f"{window.get('width', 1280)} × {window.get('height', 720)} · "
-            f"{'полный экран' if self.project.fullscreen else 'окно'}\n"
-            f"{'размер меняется' if self.project.resizable else 'фиксированный размер'} · "
             f"{'портрет' if self.project.manifest.get('orientation') == 'portrait' else 'альбом'}\n"
-            f"{'Python/pygame' if self.project.project_type == 'game' else 'Python/pygame UI'}"
+            f"Интерфейс: {levels}\n"
+            f"{'Python/pygame' if self.project.project_type == 'game' else 'Python/pygame UI'} · "
+            "окно настроит агент"
         )
         self._update_header_model()
         self._update_side_ai()

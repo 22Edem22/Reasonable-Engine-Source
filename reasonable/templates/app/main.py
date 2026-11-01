@@ -12,10 +12,25 @@ import sys
 import time
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
-for _candidate in (PROJECT_DIR / "_engine", PROJECT_DIR):
+if getattr(sys, "frozen", False):
+    # PyInstaller build: project files (project.json, data.json) sit next to
+    # the executable; bundled data lives inside the PyInstaller bundle.
+    PROJECT_DIR = Path(sys.executable).resolve().parent
+    BUNDLE_DIR = Path(__file__).resolve().parent
+else:
+    PROJECT_DIR = Path(__file__).resolve().parent
+    BUNDLE_DIR = PROJECT_DIR
+for _candidate in (PROJECT_DIR / "_engine", PROJECT_DIR, BUNDLE_DIR):
     if (_candidate / "reasonable").is_dir() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
+
+
+def _project_file(relative: str) -> Path:
+    """Locate a project file in both source and frozen (exe) modes."""
+    candidate = PROJECT_DIR / relative
+    if candidate.exists():
+        return candidate
+    return BUNDLE_DIR / relative
 
 import pygame
 
@@ -51,7 +66,7 @@ def window_settings() -> tuple[tuple[int, int], bool, bool]:
     """Read window preferences from project.json with safe defaults."""
     data = {}
     try:
-        data = json.loads((PROJECT_DIR / "project.json").read_text(encoding="utf-8"))
+        data = json.loads(_project_file("project.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         pass
     window = data.get("window") if isinstance(data, dict) else {}
@@ -192,7 +207,7 @@ class PlannerApp(UIApp):
     def build_sidebar(self) -> Panel:
         side = Panel(padding=24, spacing=18, background=(18, 20, 25), border=None, radius=0, shadow=False, width=250)
         brand = HStack(spacing=10, align_y="center")
-        logo = ImageWidget(PROJECT_DIR / "assets" / "icon.png", width=44, height=44, radius=12)
+        logo = ImageWidget(_project_file("assets/icon.png"), width=44, height=44, radius=12)
         brand.add(logo, VStack(spacing=0, align_x="left").add(Label("REASONABLE", size=12, bold=True, color_value=THEME.accent), Label(APP_NAME, size=15, bold=True)))
         side.add(brand)
         side.add(Widget(height=8))

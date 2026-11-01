@@ -55,7 +55,7 @@ class EditorTests(unittest.TestCase):
         # Two content steps: idea -> name/location. Window mode, notes and the
         # first agent task are intentionally not part of the wizard.
         cls.wizard._next()
-        cls.wizard.name_edit.setText("Тестовая игра")
+        cls.wizard.name_edit.setText("Test Game")
         cls.wizard.folder_edit.setText(str(cls.base / "projects"))
         cls.wizard._next()
         cls.outcome = wait_for_worker(cls.wizard.worker)
@@ -88,7 +88,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(len(self.wizard.step_pills), 2)
         for attribute in ("prompts_edit", "width_spin", "height_spin", "orientation_combo", "style_combo"):
             self.assertFalse(hasattr(self.wizard, attribute), attribute)
-        self.assertIn("после создания", self.wizard.summary_label.text())
+        self.assertIn("Интерфейс:", self.wizard.summary_label.text())
 
     def test_wizard_mode_toggle_refreshes_summary(self) -> None:
         # Regression: toggling mode used to call a missing method.
@@ -121,7 +121,7 @@ class EditorTests(unittest.TestCase):
             self.assertTrue(dialog.mode_buttons["builtin"].isHidden())
             self.assertIn("Пустой проект", dialog.summary_label.text())
             dialog._next()
-            dialog.name_edit.setText("Пустой тест")
+            dialog.name_edit.setText("Blank Test")
             dialog.folder_edit.setText(str(self.base / "blank-wizard"))
             dialog._next()
             outcome = wait_for_worker(dialog.worker)
@@ -175,7 +175,7 @@ class EditorTests(unittest.TestCase):
             self.assertIn("Собери меню и первый уровень", preview)
             self.assertIn(str(self.project.root), preview)
             self.assertIn("ПЕРВАЯ ЗАДАЧА", preview)
-            self.assertIn("не выполненная задача", preview)
+            self.assertIn("AGENT_GUIDE.md", preview)
             self.assertIn("Задача добавлена в промпт", panel.prompt_hint.text())
         finally:
             panel.timer.stop()
@@ -293,8 +293,8 @@ class EditorTests(unittest.TestCase):
             self.assertIsNone(page.external)
             self.assertTrue(callable(page.chat.prepare_run))
             self.assertIn("·", page.header_model.text())
-            self.assertIn("1280 × 720", page.side_meta.text())
-            self.assertIn("окно", page.side_meta.text())
+            self.assertIn("Интерфейс:", page.side_meta.text())
+            self.assertNotIn("×", page.side_meta.text())
             self.assertEqual(page.platform_badge.text(), "WINDOWS")
             self.assertEqual(page.convert_button.text(), "Конвертировать…")
             for index in range(4):
@@ -306,30 +306,29 @@ class EditorTests(unittest.TestCase):
             window.close()
             window.deleteLater()
 
-    def test_project_settings_edits_notes_and_window(self) -> None:
+    def test_project_settings_edits_notes_and_keeps_window_to_agent(self) -> None:
         from reasonable.editor.project_settings import ProjectSettingsDialog
 
         dialog = ProjectSettingsDialog(self.project)
         try:
             self.assertFalse(hasattr(dialog, "prompts_edit"))
+            # Window settings are not user-visible: the agent chooses them.
+            self.assertFalse(hasattr(dialog, "width_spin"))
+            self.assertFalse(hasattr(dialog, "window_mode_combo"))
             dialog.notes_edit.setPlainText("Меню, три уровня и сохранение рекорда.")
-            dialog.window_mode_combo.setCurrentIndex(1)
-            dialog.width_spin.setValue(1024)
-            dialog.height_spin.setValue(640)
-            dialog.resizable_check.setChecked(False)
             dialog._save()
             project = Project.load(self.project.root)
             self.assertEqual(project.notes, "Меню, три уровня и сохранение рекорда.")
-            self.assertEqual(project.window_mode, "fullscreen")
-            self.assertFalse(project.resizable)
-            self.assertEqual(project.window["width"], 1024)
+            # The window block survives the save untouched (agent's domain).
+            self.assertEqual(project.window["width"], 1280)
+            self.assertEqual(project.window["height"], 720)
+            self.assertEqual(project.window_mode, "windowed")
+            self.assertTrue(project.resizable)
             self.assertNotIn("prompts", project.manifest)
         finally:
             dialog.deleteLater()
             # Restore the shared fixture for the other tests.
             self.project.manifest["notes"] = ""
-            window = self.project.manifest.setdefault("window", {})
-            window.update({"width": 1280, "height": 720, "mode": "windowed", "resizable": True})
             self.project.save()
 
 

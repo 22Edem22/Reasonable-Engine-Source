@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
 
         self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage(f"Reasonable Engine {VERSION} «{VERSION_NAME}» готова к работе.")
+        self.statusBar().showMessage(f"Reasonable Engine {VERSION_NAME} ({VERSION}) готова к работе.")
 
         self._build_menus()
         self._update_actions()
@@ -418,8 +418,8 @@ class MainWindow(QMainWindow):
         box.setWindowTitle("О Reasonable Engine")
         box.setIconPixmap(theme.logo_pixmap(96))
         box.setText(
-            f"<h2 style='color:#F0F2F4'>Reasonable Engine {VERSION}</h2>"
-            f"<p style='color:#9AA1AB'>{VERSION_NAME} · {branding.TAGLINE_RU}</p>"
+            f"<h2 style='color:#F0F2F4'>Reasonable Engine {VERSION_NAME}</h2>"
+            f"<p style='color:#9AA1AB'>версия {VERSION} · {branding.TAGLINE_RU}</p>"
             "<p>Редактор игр и приложений с ИИ-агентом, спрайтами, "
             "живым прогрессом и экспортом на Windows и Android.</p>"
             "<p style='color:#9AA1AB'>Python · PySide6 · pygame · Pillow</p>"

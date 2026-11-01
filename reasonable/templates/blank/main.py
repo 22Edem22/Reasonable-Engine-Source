@@ -14,10 +14,25 @@ import json
 import sys
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
-for _candidate in (PROJECT_DIR / "_engine", PROJECT_DIR):
+if getattr(sys, "frozen", False):
+    # PyInstaller build: project files (project.json, data.json) sit next to
+    # the executable; bundled data lives inside the PyInstaller bundle.
+    PROJECT_DIR = Path(sys.executable).resolve().parent
+    BUNDLE_DIR = Path(__file__).resolve().parent
+else:
+    PROJECT_DIR = Path(__file__).resolve().parent
+    BUNDLE_DIR = PROJECT_DIR
+for _candidate in (PROJECT_DIR / "_engine", PROJECT_DIR, BUNDLE_DIR):
     if (_candidate / "reasonable").is_dir() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
+
+
+def _project_file(relative: str) -> Path:
+    """Locate a project file in both source and frozen (exe) modes."""
+    candidate = PROJECT_DIR / relative
+    if candidate.exists():
+        return candidate
+    return BUNDLE_DIR / relative
 
 import pygame  # noqa: E402
 
@@ -30,7 +45,7 @@ def window_settings() -> tuple[tuple[int, int], bool, bool]:
     """Read window preferences from project.json with safe defaults."""
     data = {}
     try:
-        data = json.loads((PROJECT_DIR / "project.json").read_text(encoding="utf-8"))
+        data = json.loads(_project_file("project.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         pass
     window = data.get("window") if isinstance(data, dict) else {}

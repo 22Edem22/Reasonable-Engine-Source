@@ -1,22 +1,25 @@
-"""Windows and Android export.
+"""Windows and Android export with live progress.
 
 Windows: a self-contained folder (project + vendored runtime + launcher) and an
-optional PyInstaller executable.
+optional PyInstaller executable. Every stage reports (stage text, stage
+percent, overall percent) through a callback, and there is a separate overall
+percent for the whole build — the dialog shows both.
 
-Android: a ready-to-build python-for-android/buildozer project packaged as a ZIP,
-plus step-by-step instructions and a GitHub Actions workflow. Buildozer itself
-requires Linux/WSL, which is stated honestly in the UI and docs.
+Exports go to the user's Desktop by default. Android export produces a
+ready-to-build python-for-android/buildozer project packaged as a ZIP, plus
+step-by-step instructions and a GitHub Actions workflow.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .core.paths import atomic_write_text, now_iso, read_json, slugify
 from .core.project import Project
@@ -37,9 +40,45 @@ COPY_IGNORE = {
     "ai_config.json",
 }
 
+# (stage_text, stage_percent, overall_percent) — the dialog shows the last two
+# as separate bars so the user always sees both the step and the whole build.
+ProgressCB = Callable[[str, float, float], None]
+
+
+def desktop_dir() -> Path:
+    """The user's Desktop: the default destination for exports."""
+    home = Path.home()
+    for candidate in (
+        Path(os.environ.get("USERPROFILE", "")) / "Desktop" if os.environ.get("USERPROFILE") else None,
+        Path(os.environ.get("ONEDRIVE", "")) / "Desktop" if os.environ.get("ONEDRIVE") else None,
+        home / "Desktop",
+        home / "Рабочий стол",
+    ):
+        if candidate is not None and candidate.is_dir():
+            return candidate
+    return home
+
+
+def exe_file_name(value: str, project: Project) -> str:
+    """Validate the user-provided .exe name; latin slug or the project slug."""
+    cleaned = re.sub(r"[^A-Za-z0-9 _-]", "", str(value or "")).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not re.match(r"^[A-Za-z]", cleaned or ""):
+        cleaned = slugify(project.name, "project") or "reasonable-app"
+    return re.sub(r"[\s]+", "-", cleaned)[:64] or "reasonable-app"
+
 
 def _safe_name(value: str) -> str:
     return slugify(value, "project")
+
+
+def _report(progress: ProgressCB | None, stage: str, stage_pct: float, overall: float) -> None:
+    if progress is None:
+        return
+    try:
+        progress(stage, max(0.0, min(100.0, stage_pct)), max(0.0, min(100.0, overall)))
+    except Exception:
+        pass
 
 
 def _pick_output(project: Project, output: str | Path | None, default_name: str, *, suffix: str = "") -> Path:
@@ -48,7 +87,8 @@ def _pick_output(project: Project, output: str | Path | None, default_name: str,
         if suffix and path.suffix.lower() != suffix:
             path = path.with_suffix(suffix)
     else:
-        path = project.root / "dist" / default_name
+        # Default export destination: the Desktop.
+        path = desktop_dir() / default_name
     if path.exists():
         # Only overwrite our own previous exports; never a random user folder.
         marker = path / EXPORT_MARKER if path.is_dir() else None
@@ -66,17 +106,44 @@ def _pick_output(project: Project, output: str | Path | None, default_name: str,
     return path
 
 
-def _copy_project(project: Project, destination: Path) -> None:
-    def ignore(directory: str, names: list[str]) -> set[str]:
-        result = set()
-        for name in names:
-            if name in COPY_IGNORE or name.endswith(".pyc") or name.endswith(".spec"):
-                result.add(name)
-            if name.startswith(".") and name not in {".github"}:
-                result.add(name)
-        return result
+def _copy_ignore(directory: str, names: list[str]) -> set[str]:
+    result = set()
+    for name in names:
+        if name in COPY_IGNORE or name.endswith(".pyc") or name.endswith(".spec"):
+            result.add(name)
+        if name.startswith(".") and name not in {".github"}:
+            result.add(name)
+    return result
 
-    shutil.copytree(project.root, destination, ignore=ignore, dirs_exist_ok=True)
+
+def _copy_project(
+    project: Project,
+    destination: Path,
+    *,
+    progress: ProgressCB | None = None,
+    stage: str = "Копирую файлы проекта",
+    span: tuple[float, float] = (4, 34),
+) -> None:
+    """Copy the project with incremental progress (never silently hangs)."""
+    source = project.root
+    files: list[tuple[Path, Path]] = []
+    for path in source.rglob("*"):
+        relative = path.relative_to(source)
+        if _copy_ignore(str(path.parent), [relative.name]) or not path.is_file():
+            continue
+        # Re-check ignore rules for ancestors (rglob alone does not skip dirs).
+        if any(part in COPY_IGNORE for part in relative.parts[:-1]):
+            continue
+        files.append((path, destination / relative))
+    total = len(files) or 1
+    start, end = span
+    chunk = max(1, total // 40)
+    for index, (src, dst) in enumerate(files, start=1):
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        if index % chunk == 0 or index == total:
+            fraction = index / total
+            _report(progress, f"{stage} · {index}/{total}", fraction * 100, start + (end - start) * fraction)
     # The copy skips bytecode, and a source project may hold plain .py while a
     # release project holds .pyc. Re-vendor so the export always has a complete
     # runtime in the format this build uses.
@@ -145,7 +212,6 @@ Reasonable Engine.
    ```
 
 Если окно закрывается сразу — запустите `Play.bat` и прочитайте сообщение.
-Проверка без заставки: `set RE_SKIP_SPLASH=1`.
 
 ## Состав
 
@@ -184,14 +250,25 @@ def export_windows(
     *,
     mode: str = "folder",
     one_file: bool = False,
+    exe_name: str = "",
+    progress: ProgressCB | None = None,
 ) -> dict[str, Any]:
     name = _safe_name(project.name) + "-windows"
     destination = _pick_output(project, output, name)
     if mode == "pyinstaller":
-        return _export_windows_pyinstaller(project, destination, one_file=one_file)
+        return _export_windows_pyinstaller(
+            project,
+            destination,
+            one_file=one_file,
+            exe_name=exe_name,
+            progress=progress,
+        )
 
+    _report(progress, "Подготовка", 0, 0)
     destination.mkdir(parents=True, exist_ok=True)
-    _copy_project(project, destination)
+    _report(progress, "Подготовка", 100, 4)
+    _copy_project(project, destination, progress=progress, span=(4, 40))
+    _report(progress, "Иконка и лаунчер", 10, 62)
     atomic_write_text(destination / EXPORT_MARKER, f"Reasonable Engine export {now_iso()}\n")
     icon = _make_ico(project, destination)
     launcher = _windows_launcher(project, destination)
@@ -206,6 +283,7 @@ def export_windows(
 """
         % now_iso(),
     )
+    _report(progress, "Финализация", 100, 100)
     return {
         "ok": True,
         "target": "windows",
@@ -226,7 +304,14 @@ def _find_pyinstaller() -> str | None:
         return None
 
 
-def _export_windows_pyinstaller(project: Project, destination: Path, *, one_file: bool = False) -> dict[str, Any]:
+def _export_windows_pyinstaller(
+    project: Project,
+    destination: Path,
+    *,
+    one_file: bool = False,
+    exe_name: str = "",
+    progress: ProgressCB | None = None,
+) -> dict[str, Any]:
     python = _find_pyinstaller()
     if python is None:
         raise RuntimeError(
@@ -238,13 +323,19 @@ def _export_windows_pyinstaller(project: Project, destination: Path, *, one_file
         shutil.rmtree(work)
     work.mkdir(parents=True, exist_ok=True)
     source = work / "source"
-    _copy_project(project, source)
+    _report(progress, "Подготовка", 0, 0)
+    _copy_project(project, source, progress=progress, span=(4, 34))
     from .core.scaffold import vendor_engine
 
     # The exported executable embeds the runtime into PyInstaller's archive, so
     # it needs importable source at build time and exposes no .py files anyway.
+    _report(progress, "Встраиваю движок", 60, 40)
     vendor_engine(source, protected=False)
+    _report(progress, "Встраиваю движок", 100, 48)
     icon = _make_ico(project, work)
+    _report(progress, "Иконка и конфигурация", 100, 58)
+
+    binary_name = exe_file_name(exe_name, project)
     command = [
         python,
         "-m",
@@ -253,7 +344,7 @@ def _export_windows_pyinstaller(project: Project, destination: Path, *, one_file
         "--clean",
         "--windowed",
         "--name",
-        project.name,
+        binary_name,
         "--distpath",
         str(destination),
         "--workpath",
@@ -266,37 +357,69 @@ def _export_windows_pyinstaller(project: Project, destination: Path, *, one_file
         f"{source / 'assets'}{os.pathsep}assets",
         "--add-data",
         f"{source / '_engine' / 'reasonable'}{os.pathsep}reasonable",
-        "--collect-submodules",
-        "reasonable",
         "--collect-data",
         "reasonable",
+        # The editor and templates never belong inside a game/app executable:
+        # pulling them in made builds huge and could even break the exe.
+        "--exclude-module",
+        "PySide6",
+        "--exclude-module",
+        "shiboken6",
+        "--exclude-module",
+        "reasonable.editor",
+        "--exclude-module",
+        "reasonable.templates",
     ]
     if icon is not None:
         command += ["--icon", str(icon)]
     if one_file:
         command.append("--onefile")
     command.append(str(source / "main.py"))
-    result = subprocess.run(
+
+    process = subprocess.Popen(
         command,
         cwd=str(source),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
         errors="replace",
+        bufsize=1,
     )
-    if result.returncode != 0:
-        log = (result.stdout or "") + "\n" + (result.stderr or "")
+    log_lines: list[str] = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        log_lines.append(line)
+        if len(log_lines) % 12 == 0:
+            # Forward motion while PyInstaller works; exact percent is unknowable.
+            local = min(100.0, len(log_lines) * 0.35)
+            _report(progress, "Сборка exe (PyInstaller)", local, 58 + local * 0.36)
+    code = process.wait()
+    if code != 0:
+        log = "".join(log_lines)
         atomic_write_text(work / "pyinstaller.log", log)
         raise RuntimeError(f"PyInstaller завершился с ошибкой. Лог: {work / 'pyinstaller.log'}")
-    exe = destination / (project.name + ".exe")
+    exe = destination / (binary_name + ".exe")
+    if not exe.exists():
+        found = sorted(destination.glob("*.exe"))
+        if not found:
+            atomic_write_text(work / "pyinstaller.log", "".join(log_lines))
+            raise RuntimeError("PyInstaller не создал .exe. Лог: " + str(work / "pyinstaller.log"))
+        exe = found[0]
+    # Frozen templates read the manifest next to the executable.
+    try:
+        shutil.copy2(source / "project.json", destination / "project.json")
+    except OSError:
+        pass
     atomic_write_text(destination / EXPORT_MARKER, f"Reasonable Engine PyInstaller export {now_iso()}\n")
+    _report(progress, "Финализация", 100, 100)
     return {
         "ok": True,
         "target": "windows",
         "mode": "pyinstaller",
         "path": str(destination),
         "exe": str(exe) if exe.exists() else "",
-        "message": "Windows .exe собран. Проверьте папку dist.",
+        "message": f"Windows .exe собран: {exe.name}.",
     }
 
 
@@ -437,7 +560,7 @@ README_ANDROID.md       эта инструкция
 
 - Логи: `adb logcat | grep -i python`
 - Быстрый прогон без окна на ПК:
-  `SDL_VIDEODRIVER=dummy RE_SKIP_SPLASH=1 RE_FRAMES=5 python main.py`
+  `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy RE_FRAMES=5 python main.py`
 - Если p4a не находит pygame, замените в `buildozer.spec`
   `requirements = python3,pygame` на поддерживаемую вашей версией p4a строку.
 
@@ -490,6 +613,7 @@ def export_android(
     output: str | Path | None = None,
     *,
     zip_result: bool = True,
+    progress: ProgressCB | None = None,
 ) -> dict[str, Any]:
     name = _safe_name(project.name) + "-android"
     archive_override: Path | None = None
@@ -499,13 +623,17 @@ def export_android(
             archive_override = out_path.resolve()
             output = archive_override.with_suffix("")
     destination = _pick_output(project, output, name)
+    _report(progress, "Подготовка", 0, 0)
     destination.mkdir(parents=True, exist_ok=True)
-    _copy_project(project, destination)
+    _report(progress, "Подготовка", 100, 5)
+    _copy_project(project, destination, progress=progress, stage="Копирую файлы проекта", span=(5, 35))
     from .core.scaffold import vendor_engine
 
     # python-for-android rebuilds the runtime for the device, so an Android
     # package always gets importable source rather than host-specific .pyc.
+    _report(progress, "Встраиваю движок", 60, 42)
     vendor_engine(destination, protected=False)
+    _report(progress, "Встраиваю движок", 100, 50)
     # The entry point must be main.py for buildozer.
     if project.entry.name != "main.py":
         shutil.copy2(project.entry, destination / "main.py")
@@ -523,8 +651,10 @@ def export_android(
         if brand.exists():
             shutil.copy2(brand, presplash)
     atomic_write_text(destination / "buildozer.spec", _android_spec(project))
-    atomic_write_text(destination / ".github/workflows/android.yml", _android_workflow())
-    atomic_write_text(destination / EXPORT_MARKER, f"Reasonable Engine Android export {now_iso()}\n")
+    _report(progress, "Конфиги и инструкции", 100, 62)
+    workflow_dir = destination / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(workflow_dir / "android.yml", _android_workflow())
     _android_readme(project, destination)
     result: dict[str, Any] = {
         "ok": True,
@@ -537,10 +667,15 @@ def export_android(
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         if archive_path.exists():
             archive_path.unlink()
+        members = [path for path in destination.rglob("*") if path.is_file()]
+        total = len(members) or 1
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-            for path in destination.rglob("*"):
-                if path.is_file():
-                    archive.write(path, Path(destination.name) / path.relative_to(destination))
+            for index, path in enumerate(members, start=1):
+                archive.write(path, Path(destination.name) / path.relative_to(destination))
+                if index % 20 == 0 or index == total:
+                    fraction = index / total
+                    _report(progress, f"Упаковка ZIP · {index}/{total}", fraction * 100, 62 + fraction * 35)
         result["zip"] = str(archive_path)
         result["message"] = f"Android-пакет готов: {archive_path.name}. Собирайте buildozer на Linux/WSL."
+    _report(progress, "Финализация", 100, 100)
     return result

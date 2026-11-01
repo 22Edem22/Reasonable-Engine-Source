@@ -187,7 +187,6 @@ re.bat validate --json
 
 ```bat
 re.bat run
-re.bat run --no-splash
 re.bat run --headless
 re.bat run --headless --frames 12
 re.bat run --timeout 60
@@ -195,10 +194,9 @@ re.bat run --timeout 60
 
 | Флаг | Значение |
 |---|---|
-| `--headless` | Запуск без окна: `SDL_VIDEODRIVER=dummy`, `SDL_AUDIODRIVER=dummy`, splash отключён |
+| `--headless` | Запуск без окна: `SDL_VIDEODRIVER=dummy`, `SDL_AUDIODRIVER=dummy`; заставка завершается мгновенно |
 | `--frames N` | Остановиться после N кадров (по умолчанию 8, только с `--headless`) |
 | `--timeout SEC` | Принудительно завершить через SEC секунд; `0` — без лимита |
-| `--no-splash` | Пропустить заставку Reasonable Engine |
 
 Команда возвращает код завершения дочернего процесса. Таймаут — код `3`.
 

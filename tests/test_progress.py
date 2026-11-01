@@ -4,6 +4,7 @@ from pathlib import Path
 
 from reasonable.core.progress import (
     activity_is_live,
+    derived_percent,
     ensure_state,
     finish_progress,
     read_events,
@@ -81,6 +82,37 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(state["percent"], 100.0)
         self.assertTrue(all(task["status"] == "done" for task in state["tasks"]))
         self.assertTrue(activity_is_live(self.root))
+
+    def test_derived_percent_prefers_reported_percent(self) -> None:
+        self.assertEqual(derived_percent({"percent": 0, "tasks": []}), 0.0)
+        self.assertEqual(derived_percent({"percent": 37, "tasks": []}), 37.0)
+        self.assertEqual(derived_percent({"percent": 250}), 100.0)
+
+    def test_derived_percent_counts_tasks_when_report_is_zero(self) -> None:
+        state = {
+            "percent": 0,
+            "tasks": [
+                {"id": "t1", "status": "done"},
+                {"id": "t2", "status": "done"},
+                {"id": "t3", "status": "in_progress"},
+                {"id": "t4", "status": "pending"},
+            ],
+        }
+        self.assertEqual(derived_percent(state), 50.0)
+        state["tasks"][2]["status"] = "skipped"
+        self.assertEqual(derived_percent(state), 75.0)
+
+    def test_task_updates_lift_stored_percent(self) -> None:
+        set_plan(self.root, ["Раз", "Два", "Три", "Четыре"])
+        self.assertEqual(read_state(self.root)["percent"], 0)
+        update_task(self.root, "t1", "done")
+        state = read_state(self.root)
+        self.assertEqual(state["percent"], 25.0)
+        # An explicitly reported percent is never lowered by task updates.
+        set_progress(self.root, 80)
+        update_task(self.root, "t2", "done")
+        state = read_state(self.root)
+        self.assertEqual(state["percent"], 80.0)
 
 
 if __name__ == "__main__":

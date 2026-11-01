@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -121,6 +120,8 @@ class ConvertDialog(QDialog):
         self.folder_edit.textChanged.connect(self._refresh_preview)
         self.orientation_combo.currentIndexChanged.connect(self._refresh_preview)
         self.agent_combo.currentIndexChanged.connect(self._refresh_preview)
+        for check in self.level_checks.values():
+            check.toggled.connect(self._refresh_preview)
         self.reset_check.toggled.connect(self._refresh_preview)
 
         self.platform_buttons[self.target].setChecked(True)
@@ -250,7 +251,7 @@ class ConvertDialog(QDialog):
         for level in UI_LEVELS:
             check = QCheckBox(UI_LEVEL_LABELS[level])
             check.setChecked(level in current_levels)
-            check.toggled.connect(self._levels_changed)
+            check.toggled.connect(self._refresh_preview)
             self.level_checks[level] = check
             levels_row.addWidget(check)
         levels_row.addStretch(1)
@@ -292,7 +293,7 @@ class ConvertDialog(QDialog):
         card.layout().addWidget(title_label("Что важно знать", 10))
         card.layout().addWidget(
             muted(
-                "Платформа — главная ось конвертации. Ориентация, агент, окно и разрешение "
+                "Платформа — главная ось конвертации. Ориентация, агент и уровни интерфейса "
                 "применяются к копии сразу. Код и ассеты не переписываются: после создания "
                 "попросите агента адаптировать компоновку, управление и safe margins под Android. "
                 "APK по-прежнему собирается через buildozer на Linux/WSL2.",
@@ -303,23 +304,14 @@ class ConvertDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _target_options(self) -> dict:
-        resolution = self.resolution_combo.currentData()
-        width = height = None
-        if isinstance(resolution, tuple):
-            width, height = resolution
-        elif resolution == "custom":
-            width = int(self.width_spin.value())
-            height = int(self.height_spin.value())
-        name = self.name_edit.text().strip()
         return {
-            "name": name or None,
+            "name": self.name_edit.text().strip() or None,
             "output": self.folder_edit.text().strip() or None,
             "orientation": self.orientation_combo.currentData(),
             "mode": self.agent_combo.currentData(),
-            "window_mode": self.window_combo.currentData(),
-            "resizable": self.resizable_combo.currentData(),
-            "width": width,
-            "height": height,
+            # Window size and mode belong to the agent — never part of the
+            # conversion options shown to the user.
+            "ui_levels": [level for level, check in self.level_checks.items() if check.isChecked()] or None,
             "reset_progress": bool(self.reset_check.isChecked()),
         }
 
@@ -345,10 +337,6 @@ class ConvertDialog(QDialog):
                 self.platform_hint.text()
                 + " Платформа не меняется — это будет новая версия проекта."
             )
-        self._refresh_preview()
-
-    def _resolution_changed(self, _index: int) -> None:
-        self.custom_size.setVisible(self.resolution_combo.currentData() == "custom")
         self._refresh_preview()
 
     def _browse(self) -> None:
@@ -382,7 +370,7 @@ class ConvertDialog(QDialog):
             self.preview_badge.setText("БЕЗ ИЗМЕНЕНИЙ")
             self.preview_badge.set_tone("gold")
             self.preview_text.setText(
-                "Измените платформу, имя, ориентацию, окно, агент или прогресс — "
+                "Измените платформу, имя, ориентацию, уровни интерфейса, агент или прогресс — "
                 "точную копию можно создать только с хотя бы одним отличием."
             )
         self.preview_path.setText(f"Новый проект: {plan['target_root']}")

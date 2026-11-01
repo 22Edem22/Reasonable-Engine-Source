@@ -11,12 +11,11 @@ from reasonable.core.project import Project, default_manifest
 
 
 def _run_project(project: Project, frames: int = 4) -> subprocess.CompletedProcess:
-    env = project.run_env(skip_splash=True)
+    env = project.run_env()
     env.update(
         {
             "SDL_VIDEODRIVER": "dummy",
             "SDL_AUDIODRIVER": "dummy",
-            "RE_SKIP_SPLASH": "1",
             "RE_FRAMES": str(frames),
         }
     )
@@ -84,11 +83,20 @@ class ScaffoldTests(unittest.TestCase):
             self.assertTrue(project.has_vendored_engine())
 
     def test_agent_pack_is_complete(self) -> None:
-        for project in (self.game, self.app):
+        for project, type_skill in (
+            (self.game, "game-development.md"),
+            (self.app, "app-development.md"),
+        ):
             self.assertTrue((project.root / "AGENT_GUIDE.md").is_file())
             self.assertTrue((project.root / "AGENTS.md").is_file())
             self.assertTrue((project.root / "CLAUDE.md").is_file())
-            self.assertTrue((project.root / "skills" / "game-development.md").is_file())
+            # Base skills plus the type-specific skill; skills for other
+            # interface levels must not leak in (no garbage in the pack).
+            self.assertTrue((project.root / "skills" / type_skill).is_file())
+            self.assertTrue((project.root / "skills" / "engine-basics.md").is_file())
+            self.assertTrue((project.root / "skills" / "ui-standard-widgets.md").is_file())
+            self.assertTrue((project.root / "skills" / "progress-and-handoff.md").is_file())
+            self.assertFalse((project.root / "skills" / "ui-simple-tkinter.md").is_file())
             self.assertTrue((project.root / ".cursor" / "rules" / "reasonable-engine.mdc").is_file())
             guide = (project.root / "AGENT_GUIDE.md").read_text(encoding="utf-8")
             self.assertIn("re.bat progress", guide)
@@ -121,7 +129,7 @@ class ScaffoldTests(unittest.TestCase):
         run_text = (self.game.root / "run.bat").read_text(encoding="utf-8")
         self.assertIn('cd /d "%ROOT%"', run_text)
         readme = (self.game.root / "README.md").read_text(encoding="utf-8")
-        self.assertIn("RE_SKIP_SPLASH", readme)
+        self.assertNotIn("RE_SKIP_SPLASH", readme)
         self.assertIn("Android", readme)
         self.assertIn("ИИ-агент", readme)
         self.assertIn("F11", readme)
@@ -139,7 +147,7 @@ class ScaffoldTests(unittest.TestCase):
                 {"width": 900, "height": 600, "mode": "fullscreen", "resizable": False}
             )
             manifest_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            env = self.game.run_env(skip_splash=True)
+            env = self.game.run_env()
             env.update({"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"})
             command = (
                 "import main; "
@@ -189,6 +197,28 @@ class ScaffoldTests(unittest.TestCase):
         marker.write_text("# broken\n", encoding="utf-8")
         self.game.sync_engine()
         self.assertIn("class Game", marker.read_text(encoding="utf-8"))
+
+    def test_simple_ui_level_uses_tkinter_template_without_pygame_art(self) -> None:
+        simple = Project.create(
+            self.base / "simple-app",
+            default_manifest(
+                "Утилита",
+                project_type="app",
+                mode="builtin",
+                goal="Простая программа с окнами и списками",
+                ui_levels=["simple"],
+            ),
+        )
+        source = (simple.root / "main.py").read_text(encoding="utf-8")
+        self.assertIn("tkinter", source)
+        self.assertIn("play_engine_splash", source)
+        self.assertFalse((simple.root / "assets" / "background.png").exists())
+        self.assertFalse(any((simple.root / "assets" / "sprites").glob("*.png")))
+        # The simple-level agent pack carries the tkinter skill only.
+        self.assertTrue((simple.root / "skills" / "ui-simple-tkinter.md").is_file())
+        self.assertFalse((simple.root / "skills" / "ui-advanced-scenes.md").is_file())
+        result = _run_project(simple)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
 
     def test_protected_vendoring_ships_bytecode_only(self) -> None:
         from reasonable.core.scaffold import vendor_engine

@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 from reasonable.core.project import Project, default_manifest
-from reasonable.export import export_android, export_windows
+from reasonable.export import desktop_dir, export_android, export_windows
 
 
 class ExportTests(unittest.TestCase):
@@ -47,7 +47,6 @@ class ExportTests(unittest.TestCase):
             {
                 "SDL_VIDEODRIVER": "dummy",
                 "SDL_AUDIODRIVER": "dummy",
-                "RE_SKIP_SPLASH": "1",
                 "RE_FRAMES": "4",
             }
         )
@@ -70,6 +69,27 @@ class ExportTests(unittest.TestCase):
         result = export_windows(self.project, foreign)
         self.assertNotEqual(Path(result["path"]), foreign)
         self.assertTrue((foreign / "keep.txt").is_file())
+
+    def test_progress_callback_reports_stages_and_overall(self) -> None:
+        reports: list[tuple[str, float, float]] = []
+        result = export_windows(
+            self.project,
+            self.base / "progress-win",
+            progress=lambda stage, stage_pct, overall: reports.append((stage, stage_pct, overall)),
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(reports)
+        stages = {stage for stage, _stage_pct, _overall in reports}
+        self.assertTrue(any("Копирую" in stage for stage in stages), stages)
+        overalls = [overall for _stage, _stage_pct, overall in reports]
+        for previous, current in zip(overalls, overalls[1:]):
+            self.assertGreaterEqual(current, previous - 0.001)
+        self.assertEqual(overalls[-1], 100.0)
+        first_stage = reports[0][0]
+        self.assertTrue(first_stage)
+
+    def test_desktop_dir_exists(self) -> None:
+        self.assertTrue(desktop_dir().exists())
 
     def test_android_package_and_instructions(self) -> None:
         result = export_android(self.project, self.base / "android.zip")

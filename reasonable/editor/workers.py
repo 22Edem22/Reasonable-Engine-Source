@@ -161,25 +161,42 @@ class SpriteWorker(QThread):
 
 class ExportWorker(QThread):
     stage = Signal(str)
+    progress = Signal(str, float, float)  # stage text, stage %, overall %
     done = Signal(object)
     failed = Signal(str, str)
 
-    def __init__(self, project: Project, target: str, output: str, mode: str = "folder") -> None:
+    def __init__(
+        self,
+        project: Project,
+        target: str,
+        output: str,
+        mode: str = "folder",
+        exe_name: str = "",
+    ) -> None:
         super().__init__()
         self.project = project
         self.target = target
         self.output = output
         self.mode = mode
+        self.exe_name = exe_name
 
     def run(self) -> None:  # noqa: D401
         try:
             from reasonable.export import export_android, export_windows
 
-            self.stage.emit("Копирую проект и движок…")
+            def on_progress(stage_text: str, stage_pct: float, overall_pct: float) -> None:
+                self.progress.emit(stage_text, stage_pct, overall_pct)
+
             if self.target == "android":
-                result = export_android(self.project, output=self.output or None)
+                result = export_android(self.project, output=self.output or None, progress=on_progress)
             else:
-                result = export_windows(self.project, output=self.output or None, mode=self.mode)
+                result = export_windows(
+                    self.project,
+                    output=self.output or None,
+                    mode=self.mode,
+                    exe_name=self.exe_name,
+                    progress=on_progress,
+                )
             self.done.emit(result)
         except Exception as exc:  # pragma: no cover - GUI path
             self.failed.emit(str(exc), traceback.format_exc())

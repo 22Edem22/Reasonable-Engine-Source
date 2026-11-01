@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (
 
 from reasonable.ai.agent import AgentEvent
 from reasonable.ai.providers import config_status, short_provider_name
-from reasonable.core.progress import read_state
+from reasonable.core import chatlog
+from reasonable.core.progress import derived_percent, read_state
 from reasonable.core.settings import Settings
 
 from . import theme
@@ -243,6 +244,36 @@ class ChatPanel(QWidget):
         layout.addWidget(self._build_input())
 
         self.refresh_state()
+        self._restore_history()
+
+    # ------------------------------------------------------------------
+    def _restore_history(self) -> None:
+        """Show the conversation saved in the project across sessions.
+
+        The agent itself stores every user task and its final answer in
+        ``.reasonable/chat.json``; here we render the last messages as bubbles
+        so the user (and the next session) sees the full story.
+        """
+        try:
+            history = chatlog.load_chat(self.project.root)
+        except Exception:
+            return
+        recent = [item for item in history if item.get("role") in ("user", "assistant", "error")]
+        for item in recent[-40:]:
+            role = str(item.get("role") or "assistant")
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            self._append(role, text)
+
+    def _remember(self, role: str, text: str) -> None:
+        """Persist a message the UI produced (the agent persists its own)."""
+        if not text.strip():
+            return
+        try:
+            chatlog.append_message(self.project.root, role, text)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     def _build_header(self) -> QFrame:
@@ -541,7 +572,7 @@ class ChatPanel(QWidget):
         else:
             self.status_badge.setText("ГОТОВ")
             self.status_badge.set_tone("default")
-        self.progress.setValue(int(state.get("percent", 0) or 0))
+        self.progress.setValue(int(round(derived_percent(state))))
         stage = state.get("stage") or ""
         if tasks:
             self.step_label.setText(f"{stage}  ·  задачи {done}/{len(tasks)}")
@@ -617,8 +648,11 @@ class ChatPanel(QWidget):
             self.step_label.setText(event.text)
         elif kind == "step":
             step = event.data.get("step", "")
-            total = event.data.get("max_steps", "")
-            self.step_label.setText(f"Шаг {step} из {total} · агент работает…")
+            total = event.data.get("max_steps") or 0
+            if total:
+                self.step_label.setText(f"Шаг {step} из {total} · агент работает…")
+            else:
+                self.step_label.setText(f"Шаг {step} · агент работает…")
         elif kind == "assistant":
             if not event.text.strip():
                 return
@@ -680,6 +714,7 @@ class ChatPanel(QWidget):
         self._finish("ОШИБКА", f"Ошибка: {message}")
         if message and message != self._last_error_text:
             self._append("error", message)
+            self._remember("error", "⚠ " + message)
         self.finished.emit()
 
     def _on_cancelled(self) -> None:
@@ -696,7 +731,7 @@ class ChatPanel(QWidget):
         self.step_label.setToolTip(message)
         state = read_state(self.project.root)
         self.progress.setRange(0, 100)
-        self.progress.setValue(int(state.get("percent", 0) or 0))
+        self.progress.setValue(int(round(derived_percent(state))))
         self._render_plan(state.get("tasks") or [])
 
     def stop_agent(self) -> None:
@@ -717,6 +752,10 @@ class ChatPanel(QWidget):
                 widget.deleteLater()
         self._message_count = 0
         self._changes_card = None
+        try:
+            chatlog.clear_chat(self.project.root)
+        except Exception:
+            pass
         self._show_intro()
         self.refresh_state()
 

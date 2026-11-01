@@ -79,7 +79,7 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_editor -v
 - **Тесты не собирают APK.** Проверяется содержимое Android ZIP и `buildozer.spec`, но buildozer требует Linux/WSL2.
 - **Тесты конвертации не мутируют исходник.** Они проверяют новую папку, `CONVERSION.md`, `converted_from`, пересборку `_engine/` и сохранность исходного проекта.
 - **Frozen self-test** (`dist\ReasonableEngine.exe --self-test`) проверяет уже упакованный `.exe`, а не исходники. В установленной версии он дополнительно проверяет `ReasonablePlayer.exe`, портативный Python и папку `Projects` внутри папки установки. Отчёт можно записать в файл через `REASONABLE_SELF_TEST_REPORT`.
-- **Headless-запуск** использует `SDL_VIDEODRIVER=dummy`, `SDL_AUDIODRIVER=dummy`, `RE_SKIP_SPLASH=1` и `RE_FRAMES`.
+- **Headless-запуск** использует `SDL_VIDEODRIVER=dummy`, `SDL_AUDIODRIVER=dummy` и `RE_FRAMES`; заставка при этом завершается мгновенно сама.
 - **Временные папки** создаются через `tempfile.TemporaryDirectory`, поэтому тесты не трогают ваши проекты и настройки.
 - **Настройки редактора** в тестах направляются в временную папку через `REASONABLE_HOME` или `Settings(path=...)`.
 - **PySide6 опционален для не-editor тестов.** `test_editor.py` пропускается, если PySide6 не установлен.

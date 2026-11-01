@@ -7,9 +7,9 @@ import sys
 
 def _run() -> int:
     if "--version" in sys.argv or "-V" in sys.argv:
-        from reasonable.version import VERSION, VERSION_NAME
+        from reasonable.version import VERSION
 
-        print(f"Reasonable Engine {VERSION} «{VERSION_NAME}»")
+        print(f"Reasonable Engine {VERSION}")
         return 0
     try:
         from reasonable.editor import main

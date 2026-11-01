@@ -6,7 +6,6 @@ from PySide6.QtCore import Signal
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -15,7 +14,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -46,15 +44,15 @@ class ProjectSettingsDialog(QDialog):
         header.addWidget(title)
         header.addStretch(1)
         self.advanced_check = QCheckBox("Расширенные параметры")
-        self.advanced_check.setToolTip("Окно, ориентация и параметры Android.")
+        self.advanced_check.setToolTip("Версия Android и служебные параметры.")
         header.addWidget(self.advanced_check)
         header.addWidget(Badge("ИГРА" if project.project_type == "game" else "ПРИЛОЖЕНИЕ", "default"))
         header.addWidget(Badge("WINDOWS" if project.platform == "windows" else "ANDROID", "default"))
         header.addWidget(Badge("ВСТРОЕННЫЙ" if project.mode == "builtin" else "ВНЕШНИЙ", "default"))
         layout.addLayout(header)
         layout.addWidget(muted(
-            "Меняйте название, цель и заметки в любой момент. Окно, ориентация и Android — "
-            "под переключателем «Расширенные параметры». Папка проекта остаётся на месте.",
+            "Меняйте название, цель и заметки в любой момент. Расширенные параметры — "
+            "под переключателем. Папка проекта остаётся на месте.",
             size=9,
         ))
 
@@ -93,48 +91,25 @@ class ProjectSettingsDialog(QDialog):
         card.layout().addLayout(form)
         self.body_layout.addWidget(card)
 
-        window_card = Card(soft=True)
-        window_form = QFormLayout()
-        window_form.setSpacing(10)
-        self.window_mode_combo = QComboBox()
-        self.window_mode_combo.addItem("Окно", "windowed")
-        self.window_mode_combo.addItem("Полноэкранный", "fullscreen")
-        self.window_mode_combo.setCurrentIndex(1 if project.fullscreen else 0)
-        window_form.addRow("Режим запуска", self.window_mode_combo)
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(320, 3840)
-        self.width_spin.setValue(int(project.window.get("width", 1280)))
-        window_form.addRow("Базовая ширина", self.width_spin)
-        self.height_spin = QSpinBox()
-        self.height_spin.setRange(240, 2160)
-        self.height_spin.setValue(int(project.window.get("height", 720)))
-        window_form.addRow("Базовая высота", self.height_spin)
-        self.resizable_check = QCheckBox("Разрешить менять размер окна")
-        self.resizable_check.setChecked(project.resizable)
-        window_form.addRow("", self.resizable_check)
-        self.orientation_combo = QComboBox()
-        self.orientation_combo.addItem("Альбомная", "landscape")
-        self.orientation_combo.addItem("Портретная", "portrait")
-        current = str(project.manifest.get("orientation") or "landscape")
-        self.orientation_combo.setCurrentIndex(1 if current == "portrait" else 0)
-        window_form.addRow("Ориентация", self.orientation_combo)
+        advanced = Card(soft=True)
+        advanced_form = QFormLayout()
+        advanced_form.setSpacing(10)
         self.version_edit = QLineEdit(str((project.manifest.get("android") or {}).get("version") or "1.0.0"))
         self.version_edit.setCursorPosition(0)
-        window_form.addRow("Версия Android", self.version_edit)
-        window_card.layout().addLayout(window_form)
-        window_card.layout().addWidget(
+        advanced_form.addRow("Версия Android", self.version_edit)
+        advanced.layout().addLayout(advanced_form)
+        advanced.layout().addWidget(
             muted(
-                "Параметры окна читаются из project.json при запуске. F11 переключает "
-                "полный экран, RE_FULLSCREEN=1 запускает сразу на весь экран. Android-ориентация "
-                "применяется при следующем экспорте. Платформа проекта меняется через "
-                "«Конвертировать…» — создаётся новый проект, эта папка остаётся как есть.",
+                "Параметры окна агент настраивает сам — пользователь их не видит. "
+                "Ориентация экрана для Android применяется при следующем экспорте. "
+                "Платформа проекта меняется через «Конвертировать…» — создаётся новый "
+                "проект, эта папка остаётся как есть.",
                 size=8,
             )
         )
-        self.body_layout.addWidget(window_card)
-        self.window_card = window_card
-        window_card.hide()
-        self.advanced_check.toggled.connect(window_card.setVisible)
+        self.body_layout.addWidget(advanced)
+        advanced.hide()
+        self.advanced_check.toggled.connect(advanced.setVisible)
         self.body_layout.addStretch(1)
 
         buttons = QHBoxLayout()
@@ -154,23 +129,15 @@ class ProjectSettingsDialog(QDialog):
         if not name:
             QMessageBox.warning(self, "Название", "Название проекта не может быть пустым.")
             return
-        width = int(self.width_spin.value())
-        height = int(self.height_spin.value())
         self.project.manifest["name"] = name
         self.project.manifest["author"] = self.author_edit.text().strip()
         self.project.manifest["goal"] = self.goal_edit.text().strip()
         self.project.manifest["notes"] = self.notes_edit.toPlainText().strip()
         self.project.manifest.pop("prompts", None)
+        # The window block belongs to the agent; never rewrite it here.
         window = self.project.manifest.setdefault("window", {})
-        window["width"] = width
-        window["height"] = height
-        window["title"] = name
-        window["mode"] = self.window_mode_combo.currentData() or "windowed"
-        window["resizable"] = bool(self.resizable_check.isChecked())
-        orientation = self.orientation_combo.currentData() or "landscape"
-        self.project.manifest["orientation"] = orientation
+        window.setdefault("title", name)
         android = self.project.manifest.setdefault("android", {})
-        android["orientation"] = orientation
         android["version"] = self.version_edit.text().strip() or "1.0.0"
         try:
             self.project.save()
