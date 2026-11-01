@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -41,13 +40,11 @@ from reasonable.core.history import (
 )
 from reasonable.core.paths import human_time
 from reasonable.core.progress import (
+    derived_percent,
     read_events,
     read_state,
     record_event,
     scan_recent_files,
-    set_plan,
-    set_progress,
-    update_task,
 )
 from reasonable.core.settings import Settings
 
@@ -240,9 +237,13 @@ class ProjectPage(QWidget):
         self.header_status = Badge("ОЖИДАНИЕ", "default")
         layout.addWidget(self.header_status)
 
-        export = QPushButton("Экспорт")
+        export = QPushButton("⤴  Экспорт")
+        export.setObjectName("teal")
+        export.setMinimumWidth(120)
+        export.setStyleSheet("font-size: 13px; font-weight: 700; padding: 8px 14px;")
+        export.setToolTip("Собрать проект в exe / APK / портативную папку (по умолчанию на Рабочий стол)")
         export.clicked.connect(self._open_export)
-        layout.addWidget(export)
+        layout.insertWidget(1, export)
 
         self.run_button = QPushButton("▶  Запустить")
         self.run_button.setObjectName("primary")
@@ -533,20 +534,8 @@ class ProjectPage(QWidget):
         task_header = QHBoxLayout()
         task_header.addWidget(title_label("План работ", 12))
         task_header.addStretch(1)
-        add_task = QPushButton("+")
-        add_task.setObjectName("ghost")
-        add_task.setFixedSize(28, 28)
-        add_task.setToolTip("Добавить задачу")
-        add_task.clicked.connect(self._add_task)
-        task_header.addWidget(add_task)
-        set_percent = QPushButton("%")
-        set_percent.setObjectName("ghost")
-        set_percent.setFixedSize(28, 28)
-        set_percent.setToolTip("Обновить прогресс вручную")
-        set_percent.clicked.connect(self._set_percent)
-        task_header.addWidget(set_percent)
         tasks_card.layout().addLayout(task_header)
-        self.tasks_card_hint = muted("Клик по статусу меняет задачу. Агент обновляет план сам.", size=8)
+        self.tasks_card_hint = muted("План ведёт ИИ-агент. Здесь он показывается для чтения.", size=8)
         tasks_card.layout().addWidget(self.tasks_card_hint)
         self.task_host = QVBoxLayout()
         self.task_host.setSpacing(5)
@@ -1082,8 +1071,7 @@ class ProjectPage(QWidget):
             QMessageBox.warning(self, "Нет точки входа", f"Файл {self.project.entry.name} не найден.")
             return
         env = QProcessEnvironment()
-        skip_splash = bool((self.settings.data.get("preview") or {}).get("skip_splash"))
-        for key, value in self.project.run_env(skip_splash=skip_splash).items():
+        for key, value in self.project.run_env().items():
             env.insert(key, value)
         env.insert("PYTHONUNBUFFERED", "1")
         self._process_output = ""
@@ -1221,7 +1209,7 @@ class ProjectPage(QWidget):
         if not force and signature == self._state_signature:
             return
         self._state_signature = signature
-        percent = int(float(state.get("percent", 0) or 0))
+        percent = int(round(derived_percent(state)))
         status = str(state.get("status") or "idle")
         text, tone = STATUS_MAP.get(status, ("ОЖИДАНИЕ", "default"))
         self.overview_status.setText(text)
@@ -1276,16 +1264,10 @@ class ProjectPage(QWidget):
                 "in_progress": (">", "#C9AD73"),
                 "skipped": ("–", "#6F7680"),
             }.get(status, ("·", "#6F7680"))
-            marker = QPushButton(icon)
-            marker.setObjectName("ghost")
+            marker = QLabel(icon)
             marker.setFixedSize(26, 26)
-            marker.setToolTip("Клик — следующий статус · правый клик — выбрать")
-            marker.setStyleSheet(f"color: {color}; font-weight: 900; font-size: 14px; padding: 0;")
-            marker.clicked.connect(lambda checked=False, t=task: self._cycle_task(t))
-            marker.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            marker.customContextMenuRequested.connect(
-                lambda position, t=task, b=marker: self._task_menu(t, b, position)
-            )
+            marker.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            marker.setStyleSheet(f"color: {color}; font-weight: 900; font-size: 14px; background: transparent;")
             layout.addWidget(marker)
             title = QLabel(str(task.get("title", "")))
             title.setWordWrap(True)
@@ -1304,54 +1286,6 @@ class ProjectPage(QWidget):
             task_id.setFont(theme.ui_font(8))
             layout.addWidget(task_id)
             self.task_host.addWidget(row)
-
-    def _cycle_task(self, task: dict) -> None:
-        order = {"pending": "in_progress", "in_progress": "done", "done": "pending", "skipped": "pending"}
-        new_status = order.get(str(task.get("status")), "in_progress")
-        self._set_task_status(task.get("id"), new_status)
-
-    def _task_menu(self, task: dict, button: QPushButton, position) -> None:
-        menu = QMenu(self)
-        actions = {}
-        for status, label in (("pending", "Ожидает"), ("in_progress", "В работе"), ("done", "Готово"), ("skipped", "Пропущено")):
-            action = menu.addAction(label)
-            actions[action] = status
-        selected = menu.exec(button.mapToGlobal(position))
-        if selected in actions:
-            self._set_task_status(task.get("id"), actions[selected])
-
-    def _set_task_status(self, task_id, status: str) -> None:
-        try:
-            update_task(self.project.root, str(task_id), status)
-        except Exception as exc:
-            QMessageBox.warning(self, "Задача", str(exc))
-            return
-        self._tick_refresh(force=True)
-        self.status_message.emit(f"Задача {task_id}: {status}")
-
-    def _add_task(self) -> None:
-        title, ok = QInputDialog.getText(self, "Новая задача", "Название задачи:")
-        if not ok or not title.strip():
-            return
-        state = read_state(self.project.root)
-        tasks = [str(task.get("title", "")) for task in state.get("tasks") or []]
-        tasks.append(title.strip())
-        set_plan(self.project.root, tasks)
-        self._tick_refresh(force=True)
-        self.status_message.emit("Задача добавлена в план.")
-
-    def _set_percent(self) -> None:
-        state = read_state(self.project.root)
-        current = int(float(state.get("percent", 0) or 0))
-        value, ok = QInputDialog.getInt(self, "Прогресс проекта", "Процент готовности:", current, 0, 100, 1)
-        if not ok:
-            return
-        stage, ok2 = QInputDialog.getText(self, "Этап", "Название этапа:", text=str(state.get("stage") or ""))
-        if not ok2:
-            return
-        set_progress(self.project.root, value, stage=stage or None, message="Прогресс обновлён вручную.")
-        self._tick_refresh(force=True)
-        self.status_message.emit(f"Прогресс: {value}%")
 
     def _refresh_events(self, force: bool) -> None:
         events = read_events(self.project.root, limit=30)

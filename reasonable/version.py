@@ -1,2 +1,2 @@
-VERSION = "0.1.0"
-VERSION_NAME = "Spark"
+VERSION = "0.2.0"
+VERSION_NAME = "Comet"
