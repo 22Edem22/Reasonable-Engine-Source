@@ -25,7 +25,7 @@ from reasonable.version import VERSION
 
 from .paths import atomic_write_text, is_relative_to, now_iso, slugify, unique_directory
 from .progress import ensure_state, record_event, set_plan, set_status
-from .project import ENGINE_DIR_NAME, Project
+from .project import ENGINE_DIR_NAME, UI_LEVEL_LABELS, Project, normalise_ui_levels
 
 PLATFORM_NAMES = {"windows": "Windows", "android": "Android"}
 ORIENTATION_NAMES = {"landscape": "альбомная", "portrait": "портретная"}
@@ -145,6 +145,11 @@ def conversion_plan(
     new_window_mode = _choice(window_mode, project.window_mode, WINDOW_MODE_NAMES, "режим окна")
     new_resizable = _normalise_resizable(resizable, project.resizable)
 
+    old_ui_levels = list(project.ui_levels)
+    new_ui_levels = normalise_ui_levels(
+        ui_levels if ui_levels is not None else old_ui_levels, project.project_type
+    )
+
     window = project.window
     current_width = int(window.get("width", 1280))
     current_height = int(window.get("height", 720))
@@ -202,6 +207,10 @@ def conversion_plan(
             "Изменение размера окна: "
             + ("выключено → включено" if new_resizable else "включено → выключено")
         )
+    if new_ui_levels != old_ui_levels:
+        old_labels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in old_ui_levels)
+        new_labels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in new_ui_levels)
+        changes.append(f"Интерфейс: {old_labels} → {new_labels}")
     if reset_progress:
         changes.append("Прогресс, план и лента событий: сбросить")
 
@@ -218,6 +227,7 @@ def conversion_plan(
         "resizable": new_resizable,
         "width": new_width,
         "height": new_height,
+        "ui_levels": new_ui_levels,
         "android": android,
         "reset_progress": bool(reset_progress),
         "changes": changes,
@@ -361,6 +371,7 @@ def convert_project(
     resizable: Any = None,
     width: int | None = None,
     height: int | None = None,
+    ui_levels: list[str] | None = None,
     reset_progress: bool = False,
 ) -> dict[str, Any]:
     """Create a converted copy of ``project`` and return a JSON-safe summary."""
@@ -375,12 +386,13 @@ def convert_project(
         resizable=resizable,
         width=width,
         height=height,
+        ui_levels=ui_levels,
         reset_progress=reset_progress,
     )
     if not plan["has_changes"]:
         raise ValueError(
             "Все выбранные параметры совпадают с исходным проектом. "
-            "Измените платформу, имя, ориентацию, окно, режим агента или сбросьте прогресс."
+            "Измените платформу, имя, ориентацию, окно, интерфейс, режим агента или сбросьте прогресс."
         )
 
     target_root: Path = plan["target_root"]
@@ -409,6 +421,7 @@ def convert_project(
         manifest["orientation"] = plan["orientation"]
         manifest["mode"] = plan["mode"]
         manifest["engine_version"] = VERSION
+        manifest["ui_levels"] = plan["ui_levels"]
         manifest["window"] = {
             **project.window,
             "width": plan["width"],
