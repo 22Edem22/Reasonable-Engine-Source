@@ -145,6 +145,73 @@ class Agent:
         )
 
     # ------------------------------------------------------------------
+    # Loop protection
+    # ------------------------------------------------------------------
+    def _track_tool_call(self, name: str, output: str) -> None:
+        """Remember identical tool results to detect endless repetition."""
+        signature = (name, output[:400])
+        if getattr(self, "_last_tool_signature", None) == signature:
+            self._repeat_count = getattr(self, "_repeat_count", 0) + 1
+        else:
+            self._last_tool_signature = signature
+            self._repeat_count = 0
+
+    def _stuck_after_repeats(self, allowed: int = 6) -> bool:
+        """True when the same tool call produced the same result too many times."""
+        return getattr(self, "_repeat_count", 0) >= allowed
+
+    # ------------------------------------------------------------------
+    # Durable chat history
+    # ------------------------------------------------------------------
+    def _seed_chat_history(self) -> None:
+        """Prepend the saved conversation from previous sessions."""
+        try:
+            from ..core.chatlog import recent_messages
+
+            history = recent_messages(self.project.root, limit=20)
+        except Exception:
+            return
+        if not history:
+            return
+        seed: list[dict[str, Any]] = []
+        for item in history:
+            content = str(item.get("text") or "").strip()
+            if not content:
+                continue
+            role = "assistant" if item.get("role") == "assistant" else "user"
+            seed.append({"role": role, "content": content})
+        if not seed:
+            return
+        # Keep the real system prompt first; the fresh user message stays last.
+        history_note = {
+            "role": "user",
+            "content": (
+                "История предыдущих сессий этого проекта (для контекста, не отвечай на неё):\n"
+                + "\n".join(
+                    f"{'Пользователь' if m['role'] == 'user' else 'Агент'}: {m['content'][:600]}"
+                    for m in seed
+                )
+            ),
+        }
+        # messages[0] is the system prompt; insert the history before the new message.
+        insert_at = 1 if self.messages and self.messages[0].get("role") == "system" else 0
+        self.messages.insert(insert_at, history_note)
+
+    def _persist_chat(self, user_message: str | None) -> None:
+        """Save this session's user message and the agent's answer."""
+        try:
+            from ..core.chatlog import append_message
+
+            if user_message and user_message.strip():
+                append_message(self.project.root, "user", user_message)
+            final = (self.final_text or self.incomplete_reason or "").strip()
+            if final:
+                append_message(self.project.root, "assistant", final)
+        except Exception:
+            pass
+
+
+    # ------------------------------------------------------------------
     def _snapshot_label(self, user_message: str | None) -> str:
         text = " ".join(str(user_message or self.project.goal or "").split())
         if not text:
@@ -242,16 +309,27 @@ class Agent:
         # Every run is reversible: the snapshot is taken before the first tool
         # call and its metadata is extended with the files that changed.
         self._create_snapshot(user_message)
-        max_steps = int(self.settings.data.get("agent", {}).get("max_steps", 60))
+        # 0 = unlimited: the agent works until the task is really done. The
+        # old 60-step cap only produced «Работа не завершена» noise.
+        try:
+            max_steps = int(self.settings.data.get("agent", {}).get("max_steps") or 0)
+        except (TypeError, ValueError):
+            max_steps = 0
         temperature = float(self.settings.data.get("agent", {}).get("temperature", 0.65))
+        # Restore the conversation from previous sessions so the agent
+        # remembers what the user already asked and what was answered.
+        self._seed_chat_history()
         set_status(self.project.root, "running", "Агент изучает проект…", event_type="agent")
         record_event(self.project.root, "agent", "Встроенный агент начал работу.")
         self.emit("status", "Агент изучает проект…")
 
         try:
-            for step in range(1, max_steps + 1):
+            step = 0
+            while True:
+                step += 1
                 self._check_cancel()
-                self.emit("step", f"Шаг {step}", step=step, max_steps=max_steps)
+                limit_label = f" из {max_steps}" if max_steps else ""
+                self.emit("step", f"Шаг {step}{limit_label}", step=step, max_steps=max_steps)
                 self._trim_history()
                 try:
                     result = self.client.chat(
@@ -327,6 +405,22 @@ class Agent:
                         event_type="tool",
                     )
                     output = self.tools.call(call.name, call.arguments)
+                    # Loop protection: the same tool with the same arguments
+                    # over and over means the model is stuck.
+                    self._track_tool_call(call.name, output)
+                    if self._stuck_after_repeats():
+                        self.incomplete_reason = (
+                            "Агент повторял одно и то же действие без результата, поэтому был остановлен. "
+                            "Опишите задачу по-другому или продолжите с этого места."
+                        )
+                        set_status(
+                            self.project.root,
+                            "idle",
+                            self.incomplete_reason[:300],
+                            event_type="agent",
+                        )
+                        self.emit("incomplete", self.incomplete_reason)
+                        return self.final_text
                     self.messages.append(
                         {
                             "role": "tool",
@@ -386,12 +480,12 @@ class Agent:
                 if not self.incomplete_reason:
                     if readiness["ready"]:
                         self.incomplete_reason = (
-                            "Достигнут лимит шагов, но проект уже проходит проверку. "
+                            "Агент остановился, но проект уже проходит проверку. "
                             "Можно запустить агента ещё раз для полировки."
                         )
                     else:
                         self.incomplete_reason = (
-                            "Достигнут лимит шагов. Работа не завершена: "
+                            "Агент остановился раньше времени. Не выполнено: "
                             + "; ".join(readiness["missing"])
                         )
                 set_status(
@@ -419,6 +513,7 @@ class Agent:
             set_status(self.project.root, "error", self.last_error[:300], event_type="error")
             return ""
         finally:
+            self._persist_chat(user_message)
             self._sync_history()
             if self.cancel.is_set():
                 set_status(self.project.root, "idle", "Работа остановлена пользователем.", event_type="agent")

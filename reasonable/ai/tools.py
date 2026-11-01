@@ -502,7 +502,7 @@ class AgentTools:
         entry = self.project.entry
         if not entry.exists():
             raise ToolError("Точка входа main.py не найдена.")
-        env = self.project.run_env(skip_splash=True)
+        env = self.project.run_env()
         env["SDL_VIDEODRIVER"] = "dummy"
         env["SDL_AUDIODRIVER"] = "dummy"
         env["RE_FRAMES"] = str(max(1, min(600, int(frames))))

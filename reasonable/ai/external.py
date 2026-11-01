@@ -18,9 +18,9 @@ from reasonable.core.paths import atomic_write_text
 
 from .prompts import (
     EXTERNAL_CONNECTION_GUIDE,
-    SKILLS,
     build_agent_tasks,
     build_external_guide,
+    skills_for_project,
 )
 
 PACK_VERSION = 1
@@ -67,8 +67,19 @@ alwaysApply: true
 
 """ + short,
     )
-    for filename, content in SKILLS.items():
+    wanted = skills_for_project(project)
+    for filename, content in wanted.items():
         write(f"skills/{filename}", content)
+    # Remove skills left from another interface-level selection so the project
+    # never accumulates tools it does not use.
+    skills_dir = root / "skills"
+    if skills_dir.is_dir():
+        for path in skills_dir.glob("*.md"):
+            if path.name not in wanted:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
     if not (root / "AGENT_TASKS.md").exists():
         write("AGENT_TASKS.md", build_agent_tasks(project))
     else:

@@ -46,8 +46,8 @@ class MenuScene(Scene):
 `Scene`: `add(node)`, `remove`, `find`, `find_all`, `closest`, `camera`,
 `tweens`, `particles`, `burst`, `shake`, `time`, `ui`.
 
-Заставка Reasonable Engine включается автоматически (`splash=True`) и
-проигрывается перед игрой/приложением. `RE_SKIP_SPLASH=1` отключает её для тестов.
+Заставка Reasonable Engine включается автоматически (`splash=True`) и всегда
+проигрывается перед игрой/приложением — отключить или пропустить её нельзя.
 `F11` — полноэкранный режим. Базовый размер, `window.mode` и `window.resizable`
 читаются из `project.json`; шаблоны уже делают это и не требуют правки кода при
 изменении настроек окна.
@@ -157,7 +157,8 @@ def asset(name): return PROJECT_DIR / "assets" / name
 - Адаптивность: окно можно менять, на Android — касания и safe margins.
 - Никаких заглушек «TODO» в готовом экране; каждая кнопка должна работать.
 - Запускайте `python main.py` и проверяйте результат после крупных изменений.
-- Для тестов без окна: `SDL_VIDEODRIVER=dummy RE_SKIP_SPLASH=1 RE_FRAMES=3 python main.py`.
+- Для тестов без окна: `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy RE_FRAMES=3 python main.py`
+  (заставка при таком запуске завершается мгновенно сама).
 
 ## Ограничения
 
@@ -187,14 +188,20 @@ AGENT_SYSTEM_PROMPT = f"""
 6. Спрайты и фоны создавай инструментом `generate_sprite` / `generate_background`.
    Сначала пробуй удалённую модель (настройки изображений), при недоступности
    инструмент сам сделает офлайн-ассет; не рисуй десятки спрайтов вручную.
-7. Обновляй прогресс через `report_progress` и заверши `finish` только когда
-   проект запускается и задача действительно выполнена.
-8. Общайся с пользователем по-русски, кратко. В финале перечисли, что сделано,
-   как запустить и что можно улучшить дальше.
-9. Если tool calling недоступен, верни ровно один JSON-объект в блоке ```json
-   с полями "tool" и "arguments" — например
-   {{"tool": "write_file", "arguments": {{"path": "notes.md", "content": "..."}}}}
-   и жди результат. Не пиши такой JSON, если инструменты работают нативно.
+7. Обновляй прогресс через `report_progress` после каждого крупного шага — это
+   процент, который видит пользователь. Заверши `finish` только когда проект
+   запускается и задача действительно выполнена.
+8. Не повторяй одно и то же действие: если инструмент или правка не сработала —
+   измени подход, а не повторяй вызов. Шаги не ограничены, работай до
+   результата. Если что-то принципиально не получается — сообщи пользователю.
+9. Помни контекст: в сообщениях есть история предыдущих сессий — опирайся на неё
+   и не переделывай уже принятое пользователем без необходимости.
+10. Общайся с пользователем по-русски, кратко. В финале перечисли, что сделано,
+    как запустить и что можно улучшить дальше.
+11. Если tool calling недоступен, верни ровно один JSON-объект в блоке ```json
+    с полями "tool" и "arguments" — например
+    {{"tool": "write_file", "arguments": {{"path": "notes.md", "content": "..."}}}}
+    и жди результат. Не пиши такой JSON, если инструменты работают нативно.
 
 КАЧЕСТВО
 - Игры: понятная цель, управление, обратная связь, звук/частицы, экран паузы и
@@ -240,7 +247,6 @@ def _conversion_note(project) -> str:
 
 
 def build_agent_system_prompt(project) -> str:
-    window = project.manifest.get("window") or {}
     return (
         AGENT_SYSTEM_PROMPT
         + f"""
@@ -250,10 +256,15 @@ def build_agent_system_prompt(project) -> str:
 - Тип: {'игра' if project.project_type == 'game' else 'приложение'}
 {_platform_lines(project)}
 - Папка: {project.root}
-- Окно: {window.get('width', 1280)}x{window.get('height', 720)}, режим: {project.window_mode}, изменение размера: {'да' if project.resizable else 'нет'}, ориентация: {project.manifest.get('orientation', 'landscape')}
+- Уровень интерфейса: {', '.join(project.ui_levels)} — используемые навыки уже положены в skills/
 - Главная цель: {project.goal or 'не указана'}
 - Заметки пользователя: {project.notes or 'нет'}
 - Точка входа: {project.manifest.get('entry', 'main.py')}
+
+ОКНО
+Размер и режим окна выбираешь сам под задачу — пользователь эти настройки не
+видит. Меняй код шаблона свободно (по умолчанию окно 1280×720 с изменением
+размера, F11 — полный экран).
 
 ТЕКУЩИЙ ПЛАН
 {_progress_lines(project)}
@@ -387,15 +398,146 @@ re.bat validate
 - Windows-экспорт: **Файл → Экспорт → Папка Windows** (самодостаточная папка с
   рантаймом и `.bat`), опционально PyInstaller `.exe`.
 """,
+    "ui-simple-tkinter.md": r"""# Навык: простой интерфейс (tkinter)
+
+Уровень «Простой» — обычные оконные программы Windows: утилиты, формы, списки,
+настройки. Используется стандартный tkinter, внешний вид аккуратный, тёмная
+тема движка с акцентом `#D97757`.
+
+Когда выбирать:
+- утилиты и «рабочие лошадки»: конвертеры, планировщики, панели управления;
+- формы с полями, таблицами и кнопками;
+- программы, где важна скорость и простота, а не игровая графика.
+
+Правила:
+- Заставка Reasonable Engine проигрывается до открытия tkinter-окна (шаблон
+  `simple` уже делает это) — не убирайте её и не рисуйте свою.
+- Окно: `geometry` не фиксируйте жёстко без нужды; задавайте разумный размер
+  и `minsize`. Название окна = имя проекта.
+- Стилизация: `ttk.Style` с тёмной темой; крупные кнопки, отступы 10–16 px,
+  читаемые шрифты (`Segoe UI`, размер 10–12).
+- Данные: `data.json` рядом с проектом, атомарная запись (tmp + replace).
+- Все действия должны реально работать: добавление, изменение, удаление,
+  сохранение. Никаких заглушек.
+- Не используйте pygame-рендеринг внутри tkinter-окна и наоборот.
+
+Каркас:
+```python
+import json, tkinter as tk
+from tkinter import ttk
+from pathlib import Path
+
+PROJECT_DIR = Path(__file__).resolve().parent
+DATA = PROJECT_DIR / "data.json"
+
+class App(tk.Tk):
+    def __init__(self, title: str):
+        super().__init__()
+        self.title(title)
+        self.geometry("760x520")
+        self.minsize(560, 380)
+        self.configure(bg="#101216")
+        header = ttk.Label(self, text=title, font=("Segoe UI", 14, "bold"))
+        header.pack(padx=16, pady=(14, 6), anchor="w")
+        # список, форма добавления, кнопки — соберите под задачу проекта
+```
+""",
+    "ui-standard-widgets.md": r"""# Навык: стандартный интерфейс (виджеты движка)
+
+Уровень «Стандартный» — готовый UI-набор Reasonable Engine: тёмная тема,
+виджеты, прокрутка, вкладки. Основной выбор для приложений и меню игр.
+
+Используйте:
+```python
+from reasonable.runtime import (
+    UIApp, Panel, VStack, HStack, Grid, Label, Button, IconButton, Entry,
+    Toggle, Slider, ProgressBar, ScrollView, Tabs, ImageWidget, Badge, Card,
+)
+
+class App(UIApp):
+    def build_ui(self):
+        root = Panel(padding=24, spacing=16)
+        root.add(Label("Заголовок", size=28, bold=True))
+        row = HStack(spacing=12)
+        self.input = Entry("Введите значение", on_submit=self.apply)
+        row.add(self.input, Button("Применить", self.apply, height=46))
+        root.add(row)
+        self.list_view = ScrollView(VStack(spacing=8), expand_y=True)
+        root.add(self.list_view)
+        return root
+```
+
+Правила:
+- Один акцентный цвет; панели `Panel(panel_alt=...)`; радиусы из `Theme`.
+- Списки — `ScrollView` + строки-виджеты; у строк: заголовок, вторичный текст,
+  действие. Пустое состояние обязательно («Пока ничего нет»).
+- Кнопки: `variant="primary"` для главного действия, `secondary`/`ghost` — для
+  остальных; `danger` для удаления.
+- Ввод: `Entry(on_submit=...)` + кнопка; не полагайтесь только на Enter.
+- Никогда не обращайтесь к `event.pos` у событий колеса мыши — в движке это
+  уже безопасно, но не пишите такой код сами; наследуйте `Widget.handle_event`
+  и используйте только атрибуты, которые точно есть у типа события.
+- Сохраняйте данные в `data.json` атомарно; ИИ-ассистент — `AIChatPanel`.
+""",
+    "ui-advanced-scenes.md": r"""# Навык: продвинутый интерфейс (сцены и графика)
+
+Уровень «Продвинутый» — собственная графика и игровой рендер: сцены, камера,
+частицы, твины, кастомные виджеты. Выбор для игр и визуально насыщенных
+приложений.
+
+Инструменты:
+- `Game` + `Scene`: экраны меню/игры/паузы; `game.set_scene`, `push_scene`.
+- Камера: `scene.camera.pos/zoom/target/smooth/bounds`, `shake(force, time)`.
+- Эффекты: `scene.burst(...)`, `ParticleSystem`, `TweenManager`, `draw_glow`,
+  `draw_gradient`, `draw_rounded_rect`, `draw_wrapped_text`.
+- Узлы: `Sprite`, `AnimatedSprite`, `Text`, `Shape`; `node.tween(...)`.
+- Ввод: `game.input`, `VirtualJoystick`, `TouchButton` для касаний.
+- Сохранения: `SaveData("Имя", "save.json")`.
+
+Правила:
+- HUD рисуйте поверх сцены: контраст, safe margins 24–40 px, размер шрифта ≥ 16.
+- Кэшируйте статичные Surface; не создавайте Surface каждый кадр.
+- Анимации через твины/частицы, а не мигание; 60 FPS на 1280×720.
+- Экраны: меню → игра → пауза → проигрыш/победа → рестарт; всё работает.
+- Рецепты сложных экранов смотрите в шаблоне `game`.
+""",
+}
+
+
+def skills_for_project(project) -> dict[str, str]:
+    """Only the skills this project actually needs — no extra files.
+
+    Base knowledge + a type-specific skill + one skill per selected interface
+    level. A pure-tkinter project never receives the advanced-scenes skill and
+    a game never receives the tkinter skill unless the user picked that level.
+    """
+    result: dict[str, str] = {}
+    for name in ("engine-basics.md", "sprites-and-assets.md", "progress-and-handoff.md", "android-and-export.md"):
+        if name in SKILLS:
+            result[name] = SKILLS[name]
+    type_skill = "game-development.md" if project.project_type == "game" else "app-development.md"
+    if type_skill in SKILLS:
+        result[type_skill] = SKILLS[type_skill]
+    for level in project.ui_levels:
+        skill = {"simple": "ui-simple-tkinter.md", "standard": "ui-standard-widgets.md", "advanced": "ui-advanced-scenes.md"}.get(level)
+        if skill and skill in SKILLS:
+            result[skill] = SKILLS[skill]
+    return result
+
+
+UI_LEVEL_LABELS_RU = {
+    "simple": "простой (tkinter)",
+    "standard": "стандартный (виджеты движка)",
+    "advanced": "продвинутый (сцены и графика)",
 }
 
 
 def build_external_guide(project) -> str:
-    window = project.manifest.get("window") or {}
     kind = "игра" if project.project_type == "game" else "приложение"
     mode = "встроенный" if project.mode == "builtin" else "внешний"
     platform = "Android" if getattr(project, "platform", "windows") == "android" else "Windows"
-    skills = "\n".join(f"- [`skills/{name}`](skills/{name})" for name in SKILLS)
+    skills = "\n".join(f"- [`skills/{name}`](skills/{name})" for name in skills_for_project(project))
+    levels = ", ".join(UI_LEVEL_LABELS_RU.get(level, level) for level in project.ui_levels)
     return f"""# AGENT_GUIDE — {project.name}
 
 > Полная инструкция для внешнего ИИ-агента. Прочитайте её целиком перед первой
@@ -406,10 +548,11 @@ def build_external_guide(project) -> str:
 - **Название:** {project.name}
 - **Тип:** {kind}
 - **Платформа:** {platform}
+- **Уровень интерфейса:** {levels} — соответствующие навыки уже в `skills/`
 {_conversion_note(project)}
 - **Главная цель:** {project.goal or 'не указана'}
-- **Окно:** {window.get('width', 1280)}×{window.get('height', 720)}, режим: {project.window_mode}, изменение размера: {'да' if project.resizable else 'нет'}
-- **Ориентация:** {project.manifest.get('orientation', 'landscape')}
+- **Окно:** размер и режим выбирает агент под задачу; пользователь эти
+  настройки не видит. База — окно 1280×720 с изменением размера, F11 — полный экран.
 - **Точка входа:** `{project.manifest.get('entry', 'main.py')}`
 - **Папка:** `{project.root}`
 
@@ -424,6 +567,10 @@ def build_external_guide(project) -> str:
 Ты — автономный разработчик. Доведи проект до состояния, когда он запускается,
 выглядит цельно и полностью выполняет цель. Не ограничивайся советами и
 фрагментами: меняй файлы, создавай ассеты, проверяй результат.
+
+Без этого движка проект сделать так же круто нельзя: виджеты, заставка,
+камера, частицы, сохранения, генерация ассетов и проверка запуска — встроены.
+Пользуйся ими (`reasonable.runtime`, `skills/`) вместо самодельных аналогов.
 
 ## 3. Обязательный рабочий цикл
 
@@ -444,10 +591,12 @@ Headless-проверка (Windows PowerShell / cmd):
 
 ```bat
 set SDL_VIDEODRIVER=dummy
-set RE_SKIP_SPLASH=1
+set SDL_AUDIODRIVER=dummy
 set RE_FRAMES=5
 python main.py
 ```
+
+(Заставка при headless-запуске завершается мгновенно сама.)
 
 ## 4. Правила
 
@@ -532,52 +681,15 @@ re.bat done "Краткий итог для пользователя"
 """
 
 
-EXTERNAL_CONNECTION_GUIDE = """# Подключение внешнего ИИ-агента к Reasonable Engine
+EXTERNAL_CONNECTION_GUIDE = """# Подключение внешнего ИИ-агента
 
-Внешний агент (Claude Code, OpenAI Codex CLI, Cursor, Cline, Windsurf, Continue,
-Aider и другие) работает с обычной папкой проекта. Reasonable Engine в это время
-показывает прогресс, файлы, задачи и позволяет запускать проект.
+1. Откройте папку проекта в вашем ИИ-агенте (Claude Code, Codex CLI, Cursor,
+   Cline, Windsurf, Aider…).
+2. Вставьте готовый промпт из панели «ИИ-агент» в Reasonable Engine.
+3. Следите за прогрессом в той же панели — агент обновляет его сам через `re.bat`.
 
-## Шаги
-
-1. Создайте проект в редакторе и выберите режим **«Сторонний ИИ-агент»**.
-2. Нажмите **«Открыть папку проекта»** и откройте её в своём агенте.
-3. Попросите агента: *«Прочитай AGENT_GUIDE.md, skills/ и progress/state.json,
-   затем продолжи разработку по плану»*.
-4. Агент вызывает `re.bat` (Windows) или `re.sh` (Linux/WSL), чтобы обновлять
-   план, задачи, события и процент готовности.
-5. Вернитесь в Reasonable Engine — раздел **«ИИ-агент»** обновляется
-   автоматически каждую секунду. Кнопки «Проверить» и «Запустить» доступны там же.
-
-## Что получает агент
-
-- `AGENT_GUIDE.md` — роль, правила, API движка, цикл работы.
-- `skills/*.md` — навыки по играм, приложениям, спрайтам, прогрессу, Android.
-- `AGENTS.md`, `CLAUDE.md`, `.cursor/rules/`, `.github/copilot-instructions.md`
-  — короткие указатели для конкретных инструментов.
-- `re.bat` / `re.sh` — CLI без установки зависимостей редактора.
-- `project.json` и `progress/` — единый источник истины.
-
-## Команды для агента
-
-```bat
-re.bat plan "Собрать меню" "Добавить уровни" "Проверить сборку"
-re.bat task t1 in_progress
-re.bat progress 30 "Готов экран меню"
-re.bat event "Добавлены спрайты"
-re.bat validate
-re.bat done "Проект готов"
-```
-
-## Важно
-
-- Не запускайте встроенного и внешнего агента одновременно над одними файлами.
-- Прогресс появится в редакторе, даже если он был закрыт во время работы агента:
-  файлы сохраняются в проекте.
-- Android-сборка требует Linux/WSL; внешний агент может подготовить пакет и
-  выполнить сборку там, где установлен buildozer.
-- API-ключи не передавайте агенту в промпте. Для изображений без ключа
-  используются процедурные спрайты, для текста — выбранный вами провайдер.
+Всё остальное (инструкции, навыки, API движка) агент читает в файлах проекта:
+`AGENT_GUIDE.md`, `skills/`, `AGENTS.md`, `CLAUDE.md`.
 """
 
 

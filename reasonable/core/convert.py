@@ -123,6 +123,7 @@ def conversion_plan(
     resizable: Any = None,
     width: int | None = None,
     height: int | None = None,
+    ui_levels: list[str] | None = None,
     reset_progress: bool = False,
 ) -> dict[str, Any]:
     """Validate conversion options and describe the resulting project.

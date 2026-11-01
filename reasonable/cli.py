@@ -182,9 +182,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not project.entry.exists():
         print("Точка входа не найдена.", file=sys.stderr)
         return 2
-    env = project.run_env(skip_splash=args.no_splash)
+    env = project.run_env()
     if args.headless:
-        env.update({"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "RE_SKIP_SPLASH": "1"})
+        # Headless runs have no visible window; the splash finishes instantly.
+        env.update({"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"})
         env["RE_FRAMES"] = str(max(1, args.frames))
     try:
         process = subprocess.run(
@@ -443,7 +444,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--headless", action="store_true", help="Без окна, несколько кадров")
     p.add_argument("--frames", type=int, default=8)
     p.add_argument("--timeout", type=int, default=0)
-    p.add_argument("--no-splash", action="store_true")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("sprite", help="Сгенерировать спрайт")

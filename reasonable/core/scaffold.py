@@ -93,10 +93,9 @@ def _generate_assets(project) -> None:
     (assets / "backgrounds").mkdir(parents=True, exist_ok=True)
     (assets / "audio").mkdir(parents=True, exist_ok=True)
     icon_path = assets / "icon.png"
-    background_path = assets / "background.png"
     goal = project.goal or project.name
     try:
-        from reasonable.ai.sprites import generate_background, generate_icon, generate_sprite
+        from reasonable.ai.sprites import generate_icon
 
         generate_icon(
             f"glowing star symbol for {goal}",
@@ -106,6 +105,11 @@ def _generate_assets(project) -> None:
         )
     except Exception:
         _fallback_icon(icon_path)
+    # A pure-tkinter project needs no pygame artwork: no background and no
+    # sprites, so the project never ships files its interface level never uses.
+    if project.ui_levels == ["simple"]:
+        return
+    background_path = assets / "background.png"
     try:
         from reasonable.ai.sprites import generate_background
 
@@ -150,15 +154,16 @@ def _write_readme(project) -> None:
     goal = project.goal or "Цель пока не описана — добавьте её в настройках проекта."
     notes = project.notes or "Первая задача агенту пишется уже после создания проекта — в разделе «ИИ-агент»."
     project_type = "игра" if project.project_type == "game" else "приложение"
-    window = project.manifest.get("window") or {}
-    window_text = "полноэкранный" if project.fullscreen else "окно"
-    resize_text = "можно менять размер" if project.resizable else "фиксированный размер"
+    from .project import UI_LEVEL_LABELS
+
+    levels_text = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in project.ui_levels)
     readme = f"""# {project.name}
 
 {goal}
 
 > {project_type.capitalize()}, созданный в **Reasonable Engine {VERSION}**.
 > Режим разработки: **{'встроенный ИИ-агент' if project.mode == 'builtin' else 'внешний ИИ-агент'}**.
+> Уровень интерфейса: **{levels_text}**.
 
 ## Быстрый запуск
 
@@ -172,8 +177,8 @@ run.bat
 python main.py
 ```
 
-Перед проектом всегда проигрывается заставка Reasonable Engine. Для отладки её
-можно пропустить переменной окружения `RE_SKIP_SPLASH=1`.
+Перед проектом всегда проигрывается заставка Reasonable Engine — она является
+частью движка, и отключить её нельзя.
 
 ## Первая задача агенту
 
@@ -183,14 +188,10 @@ python main.py
 в панели подключения. Это позволяет сначала увидеть проект, а потом решить,
 с чего начать.
 
-## Окно и адаптивность
+## Окно
 
-- Режим запуска: **{window_text}**.
-- Базовый размер: **{window.get('width', 1280)} × {window.get('height', 720)}**.
-- Изменение размера: **{resize_text}**.
-- `F11` переключает полноэкранный режим в любой момент.
-- Переменная `RE_FULLSCREEN=1` запускает проект сразу на весь экран.
-- Эти параметры меняются в **настройках проекта**, а не при создании.
+Размер и режим окна выбирает ИИ-агент под задачу проекта — специальные
+настройки не требуются. `F11` переключает полноэкранный режим в любой момент.
 
 ## Заметки и требования
 
@@ -394,8 +395,12 @@ def scaffold_project(project) -> None:
         (project.root / folder).mkdir(parents=True, exist_ok=True)
 
     template_name = str(project.manifest.get("template") or project.project_type)
-    if template_name not in {"game", "app", "blank"}:
+    if template_name not in {"game", "app", "blank", "simple"}:
         template_name = project.project_type
+    # A project built only on the "simple (tkinter)" level uses the tkinter
+    # template and never receives pygame artwork or widget skills.
+    if template_name in {"game", "app"} and project.ui_levels == ["simple"]:
+        template_name = "simple"
     from .paths import TEMPLATES_DIR
 
     template_main = TEMPLATES_DIR / template_name / "main.py"
