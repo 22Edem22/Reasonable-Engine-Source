@@ -1,0 +1,67 @@
+name: "🐞 Ошибка (Bug report)"
+description: "Что-то работает не так — помогите воспроизвести и исправить"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что сообщаете! Один issue — одна проблема.
+        Прежде чем создать, проверьте [FAQ](../../../blob/main/docs/ru/faq.md) и существующие issues.
+  - type: input
+    id: version
+    attributes:
+      label: Версия Reasonable Engine
+      description: "Окно «О программе» или python -m reasonable --version. Пример: RE-1.01"
+      placeholder: "RE-1.01"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Где возникла проблема
+      options:
+        - Редактор (интерфейс)
+        - ИИ-агент (встроенный)
+        - Внешний агент (подключение, прогресс)
+        - Запуск проекта (pygame/tkinter)
+        - Экспорт (Windows/exe/Android)
+        - Установка / обновление
+        - Другое
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      description: "По пунктам, начиная с «Открыть…»"
+      placeholder: |
+        1. Создаю проект типа «Игра»
+        2. Нажимаю «Экспорт»
+        3. Выбираю exe…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемый результат
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактический результат
+      description: "Текст ошибки, скриншот, консоль запуска"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: ОС
+      placeholder: "Windows 11 23H2"
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Дополнительно
+      description: "Тип проекта, уровни интерфейса, провайдер ИИ — если относится к делу"

@@ -1,0 +1,8 @@
+# System junk
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Local notes and drafts
+*.tmp
+~$*

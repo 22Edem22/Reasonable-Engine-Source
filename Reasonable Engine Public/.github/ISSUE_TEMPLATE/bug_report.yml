@@ -1,0 +1,67 @@
+name: "🐞 Bug report"
+description: "Something doesn't work as expected — help reproduce and fix it"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! One issue — one problem.
+        Before creating, please check the [FAQ](../blob/main/docs/faq.md) and existing issues.
+  - type: input
+    id: version
+    attributes:
+      label: Reasonable Engine version
+      description: "The About window or python -m reasonable --version. Example: RE-1.01"
+      placeholder: "RE-1.01"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where the problem occurred
+      options:
+        - Editor (UI)
+        - AI agent (built-in)
+        - External agent (connection, progress)
+        - Project launch (pygame/tkinter)
+        - Export (Windows/exe/Android)
+        - Installation / update
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: "Step by step, starting with 'Open…'"
+      placeholder: |
+        1. I create a project of the "Game" type
+        2. I click "Export"
+        3. I pick the exe…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: "Error text, screenshot, launch console"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Windows 11 23H2"
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional info
+      description: "Project type, interface levels, AI provider — if relevant"

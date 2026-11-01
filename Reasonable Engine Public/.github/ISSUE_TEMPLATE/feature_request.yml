@@ -1,0 +1,50 @@
+name: "💡 Feature request"
+description: "What the engine is missing — an idea with a concrete scenario"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the task you are trying to solve — a concrete scenario is worth
+        more than an abstract button.
+        Suggestion statuses: `question`, `accepted`, `planned`, `wontfix`.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What task is left unsolved
+      description: "What you are doing now and where you get stuck"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: "How this could work in the editor"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the engine this relates to
+      options:
+        - AI agent
+        - Interface levels / templates
+        - Assets and generation
+        - Export
+        - Editor (UI)
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds
+      description: "How you solve the task today"
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: "I checked the [FAQ](../blob/main/docs/faq.md) and existing issues"
+          required: true

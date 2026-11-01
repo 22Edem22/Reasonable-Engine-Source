@@ -1,0 +1,49 @@
+name: "💡 Предложение (Feature request)"
+description: "Чего не хватает движку — идея с конкретным сценарием"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Опишите задачу, которую вы решаете, — конкретный сценарий ценнее абстрактной кнопки.
+        Статусы предложений: `question`, `accepted`, `planned`, `wontfix`.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какая задача не решается
+      description: "Что вы делаете сейчас и в чём затык"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Предлагаемое решение
+      description: "Как это могло бы работать в редакторе"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: К какой части движка относится
+      options:
+        - ИИ-агент
+        - Уровни интерфейса / шаблоны
+        - Ассеты и генерация
+        - Экспорт
+        - Редактор (интерфейс)
+        - Документация
+        - Другое
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Обходные пути
+      description: "Как вы решаете задачу сейчас"
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Подтверждение
+      options:
+        - label: "Я проверил [FAQ](../../../blob/main/docs/ru/faq.md) и существующие issues"
+          required: true
