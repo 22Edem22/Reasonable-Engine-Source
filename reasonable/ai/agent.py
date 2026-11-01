@@ -1,0 +1,439 @@
+"""Autonomous agent loop used by the editor.
+
+The agent talks to any OpenAI-compatible or Anthropic model with native tool
+calling, executes tools inside the project, and mirrors its state into
+``progress/`` so the UI stays alive even if a step takes a while.
+"""
+
+from __future__ import annotations
+
+import json
+import queue
+import re
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+from reasonable.core.history import create_snapshot, update_snapshot
+from reasonable.core.progress import record_event, set_progress, set_status
+from reasonable.core.settings import Settings
+
+from .client import AIClient, AIError, ChatResult, ToolCall
+from .prompts import build_agent_system_prompt, build_initial_user_message
+from .tools import TOOL_SCHEMAS, AgentTools
+
+
+@dataclass
+class AgentEvent:
+    kind: str
+    text: str = ""
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+EventCallback = Callable[[AgentEvent], None]
+CancelFlag = threading.Event
+
+
+class AgentCancelled(RuntimeError):
+    pass
+
+
+_FALLBACK_TOOL_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+
+def _parse_fallback_tool(content: str) -> tuple[str, dict] | None:
+    """Support models that emulate tool calls as a fenced JSON object."""
+    for match in _FALLBACK_TOOL_RE.finditer(content or ""):
+        try:
+            payload = json.loads(match.group(1))
+        except ValueError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        name = payload.get("tool") or payload.get("name")
+        arguments = payload.get("arguments") or payload.get("input") or {}
+        if isinstance(name, str) and isinstance(arguments, dict):
+            return name, arguments
+    return None
+
+
+def _assistant_message(result: ChatResult) -> dict[str, Any]:
+    message: dict[str, Any] = {"role": "assistant", "content": result.content or ""}
+    if result.tool_calls:
+        message["tool_calls"] = [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments, ensure_ascii=False),
+                },
+            }
+            for call in result.tool_calls
+        ]
+    return message
+
+
+class Agent:
+    def __init__(
+        self,
+        project,
+        settings: Settings | None = None,
+        *,
+        on_event: EventCallback | None = None,
+        cancel: CancelFlag | None = None,
+        provider_config: dict[str, Any] | None = None,
+        image_config: dict[str, Any] | None = None,
+    ) -> None:
+        self.project = project
+        self.settings = settings or Settings()
+        self.on_event = on_event
+        self.cancel = cancel or threading.Event()
+        self.config = provider_config or self.settings.get_provider_config()
+        self.client = AIClient(self.config, timeout=180, retries=2)
+        self.image_config = image_config or self.settings.image_config()
+        self.tools = AgentTools(project, image_config=self.image_config)
+        self.messages: list[dict[str, Any]] = []
+        self.finished = False
+        self.final_text = ""
+        self.last_error = ""
+        self.incomplete_reason = ""
+        self.snapshot: dict[str, Any] | None = None
+        self.changes: list[dict[str, Any]] = []
+        self.outcome = ""
+        self._nudges = 0
+        self._install_nudged = False
+
+    # ------------------------------------------------------------------
+    def emit(self, kind: str, text: str = "", **data: Any) -> None:
+        if self.on_event is None:
+            return
+        try:
+            self.on_event(AgentEvent(kind, text, data))
+        except Exception:
+            pass
+
+    def _check_cancel(self) -> None:
+        if self.cancel.is_set():
+            raise AgentCancelled("Работа агента остановлена пользователем.")
+
+    def _trim_history(self) -> None:
+        try:
+            limit = max(12, int(self.settings.data.get("agent", {}).get("context_messages", 36)))
+        except Exception:
+            limit = 36
+        if len(self.messages) <= limit + 1:
+            return
+        system = self.messages[0]
+        recent = self.messages[-limit:]
+        # Anthropic requires a tool_result to follow its tool_use; start at a
+        # clean user message so trimming never creates an orphan.
+        while recent and recent[0].get("role") in {"tool", "assistant"}:
+            recent.pop(0)
+        self.messages = [system] + recent
+
+    def _continuation_nudge(self, readiness: dict[str, Any]) -> str:
+        missing = "; ".join(readiness.get("missing") or [])
+        return (
+            "Работа ещё не завершена. Не заканчивай и не пиши итоговый отчёт. "
+            f"Не выполнено: {missing}. "
+            "Продолжай менять файлы проекта, затем вызови validate_project, исправь "
+            "все ошибки и вызови run_project. Только после успешного запуска вызывай finish. "
+            "Установка библиотеки через pip или чтение файлов не является результатом."
+        )
+
+    # ------------------------------------------------------------------
+    def _snapshot_label(self, user_message: str | None) -> str:
+        text = " ".join(str(user_message or self.project.goal or "").split())
+        if not text:
+            return "Перед запуском ИИ-агента"
+        return text[:110]
+
+    def _create_snapshot(self, user_message: str | None) -> None:
+        """Keep the exact state the agent is about to change."""
+        try:
+            self.snapshot = create_snapshot(
+                self.project,
+                label=self._snapshot_label(user_message),
+                reason="agent",
+            )
+            self.emit(
+                "snapshot",
+                "Создан снимок проекта",
+                snapshot=self.snapshot,
+            )
+        except Exception as exc:
+            self.snapshot = None
+            self.emit(
+                "snapshot_error",
+                f"Не удалось создать снимок проекта: {exc}",
+            )
+
+    def _sync_history(self) -> None:
+        """Attach the changed-file audit trail to the pre-run snapshot."""
+        self.changes = self.tools.changed_files
+        if self.cancel.is_set():
+            outcome = "cancelled"
+        elif self.last_error:
+            outcome = "error"
+        elif self.finished:
+            outcome = "done"
+        elif self.incomplete_reason:
+            outcome = "incomplete"
+        else:
+            outcome = "stopped"
+        self.outcome = outcome
+        if self.snapshot:
+            try:
+                updated = update_snapshot(
+                    self.project,
+                    str(self.snapshot.get("id")),
+                    changed_files=self.changes,
+                    outcome=outcome,
+                    final_text=(self.final_text or "")[:4000],
+                )
+                if updated is not None:
+                    self.snapshot = updated
+            except Exception:
+                pass
+        if self.changes:
+            labels = {"create": "создан", "edit": "изменён", "delete": "удалён", "generate": "сгенерирован"}
+            preview = ", ".join(
+                f"{item.get('path')} ({labels.get(str(item.get('action')), 'изменён')})"
+                for item in self.changes[:6]
+            )
+            try:
+                record_event(
+                    self.project.root,
+                    "changes",
+                    f"Агент изменил файлов: {len(self.changes)} — {preview}",
+                    {"files": self.changes, "outcome": outcome},
+                )
+            except Exception:
+                pass
+        self.emit(
+            "changes",
+            f"Изменено файлов: {len(self.changes)}" if self.changes else "Файлы проекта не изменились",
+            files=self.changes,
+            snapshot=self.snapshot,
+            outcome=outcome,
+        )
+
+    # ------------------------------------------------------------------
+    def run(self, user_message: str | None = None) -> str:
+        self.finished = False
+        self.final_text = ""
+        self.last_error = ""
+        self.incomplete_reason = ""
+        self.snapshot = None
+        self.changes = []
+        self.outcome = ""
+        self._nudges = 0
+        self._install_nudged = False
+        self.messages = [{"role": "system", "content": build_agent_system_prompt(self.project)}]
+        self.messages.append(
+            {
+                "role": "user",
+                "content": user_message or build_initial_user_message(self.project),
+            }
+        )
+        # Every run is reversible: the snapshot is taken before the first tool
+        # call and its metadata is extended with the files that changed.
+        self._create_snapshot(user_message)
+        max_steps = int(self.settings.data.get("agent", {}).get("max_steps", 60))
+        temperature = float(self.settings.data.get("agent", {}).get("temperature", 0.65))
+        set_status(self.project.root, "running", "Агент изучает проект…", event_type="agent")
+        record_event(self.project.root, "agent", "Встроенный агент начал работу.")
+        self.emit("status", "Агент изучает проект…")
+
+        try:
+            for step in range(1, max_steps + 1):
+                self._check_cancel()
+                self.emit("step", f"Шаг {step}", step=step, max_steps=max_steps)
+                self._trim_history()
+                try:
+                    result = self.client.chat(
+                        self.messages,
+                        TOOL_SCHEMAS,
+                        temperature=temperature,
+                    )
+                except AIError as exc:
+                    # Retry once without tools: some free endpoints reject the
+                    # tools field but still answer, and the fallback JSON protocol
+                    # in the system prompt can keep the agent productive.
+                    if step == 1 and exc.status in {400, 404, 422}:
+                        self.emit("status", "Провайдер не принял инструменты — пробую текстовый режим…")
+                        result = self.client.chat(self.messages, None, temperature=temperature)
+                    else:
+                        raise
+
+                if result.usage:
+                    self.emit("usage", usage=result.usage)
+
+                calls = list(result.tool_calls)
+                if not calls:
+                    fallback = _parse_fallback_tool(result.content)
+                    if fallback is not None:
+                        name, arguments = fallback
+                        calls = [
+                            ToolCall(
+                                id=f"fallback_{step}",
+                                name=name,
+                                arguments=arguments,
+                                raw_arguments=json.dumps(arguments, ensure_ascii=False),
+                            )
+                        ]
+                        result.tool_calls = calls
+
+                if result.content:
+                    self.emit("assistant", result.content)
+                self.messages.append(_assistant_message(result))
+
+                if not calls:
+                    readiness = self.tools.readiness()
+                    if readiness["ready"]:
+                        message = result.content.strip() or "Готово."
+                        # Finalize the shared progress state even when the model
+                        # ends with plain text instead of calling finish.
+                        self.tools.tool_finish(message)
+                        self.final_text = message
+                        self.finished = True
+                        break
+                    # A model that stops calling tools before doing any work is
+                    # the classic "installed pip and declared victory" failure.
+                    # Nudge it back to real edits instead of accepting the text.
+                    if self._nudges < 3:
+                        self._nudges += 1
+                        self.emit("status", "Работа не завершена — продолжаю и прошу агента доделать…")
+                        self.messages.append({"role": "user", "content": self._continuation_nudge(readiness)})
+                        continue
+                    self.incomplete_reason = (
+                        "Агент остановился, не изменив проект и не пройдя проверку. "
+                        "Уточните задачу или запустите его снова."
+                    )
+                    break
+
+                touched_files = False
+                installed_package = False
+                for call in calls:
+                    self._check_cancel()
+                    self.emit("tool_start", call.name, tool=call.name, arguments=call.arguments)
+                    set_status(
+                        self.project.root,
+                        "running",
+                        f"Инструмент: {call.name}",
+                        event_type="tool",
+                    )
+                    output = self.tools.call(call.name, call.arguments)
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "name": call.name,
+                            "content": output,
+                        }
+                    )
+                    try:
+                        parsed = json.loads(output)
+                    except ValueError:
+                        parsed = {"raw": output[:500]}
+                    if call.name in {
+                        "write_file",
+                        "edit_file",
+                        "delete_path",
+                        "generate_sprite",
+                        "generate_background",
+                    } and parsed.get("ok", True):
+                        touched_files = True
+                    if parsed.get("package_install"):
+                        installed_package = True
+                    self.emit(
+                        "tool_result",
+                        call.name,
+                        tool=call.name,
+                        success=bool(parsed.get("ok", True)),
+                        result=output[:5000],
+                    )
+                    if call.name == "finish" and parsed.get("ok"):
+                        self.finished = True
+                        self.final_text = call.arguments.get("message", "Проект готов.")
+                        break
+                if self.finished:
+                    break
+                if (
+                    installed_package
+                    and not touched_files
+                    and self.tools.files_changed == 0
+                    and not self._install_nudged
+                ):
+                    self._install_nudged = True
+                    self.emit("status", "Установка библиотеки — не результат. Прошу агента продолжить работу…")
+                    self.messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Установка библиотеки или пакета не является выполненной задачей. "
+                                "Теперь напиши или измени файлы проекта, реализуй задачу, затем "
+                                "вызови validate_project и run_project. Finish до этого запрещён."
+                            ),
+                        }
+                    )
+
+            if not self.finished and not self.cancel.is_set():
+                readiness = self.tools.readiness()
+                if not self.incomplete_reason:
+                    if readiness["ready"]:
+                        self.incomplete_reason = (
+                            "Достигнут лимит шагов, но проект уже проходит проверку. "
+                            "Можно запустить агента ещё раз для полировки."
+                        )
+                    else:
+                        self.incomplete_reason = (
+                            "Достигнут лимит шагов. Работа не завершена: "
+                            + "; ".join(readiness["missing"])
+                        )
+                set_status(
+                    self.project.root,
+                    "idle",
+                    self.incomplete_reason[:300],
+                    event_type="agent",
+                )
+                self.emit("incomplete", self.incomplete_reason)
+            if self.finished:
+                self.emit("done", self.final_text or "Готово.")
+            return self.final_text
+        except AgentCancelled as exc:
+            self.emit("cancelled", str(exc))
+            set_status(self.project.root, "idle", "Работа остановлена пользователем.", event_type="agent")
+            return ""
+        except AIError as exc:
+            self.last_error = exc.message
+            self.emit("error", exc.message, detail=exc.detail)
+            set_status(self.project.root, "error", exc.message[:300], event_type="error")
+            return ""
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            self.emit("error", self.last_error)
+            set_status(self.project.root, "error", self.last_error[:300], event_type="error")
+            return ""
+        finally:
+            self._sync_history()
+            if self.cancel.is_set():
+                set_status(self.project.root, "idle", "Работа остановлена пользователем.", event_type="agent")
+
+
+def run_agent_in_thread(
+    project,
+    settings: Settings | None = None,
+    *,
+    message: str | None = None,
+    on_event: EventCallback | None = None,
+    cancel: CancelFlag | None = None,
+) -> tuple[Agent, threading.Thread]:
+    """Convenience for GUI workers: start the agent on a daemon thread."""
+    agent = Agent(project, settings, on_event=on_event, cancel=cancel)
+    thread = threading.Thread(target=agent.run, args=(message,), daemon=True, name="ReasonableAgent")
+    thread.start()
+    return agent, thread
