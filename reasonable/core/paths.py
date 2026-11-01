@@ -267,6 +267,13 @@ _TRANSLIT = {
 }
 
 
+def to_latin(value: str) -> str:
+    """Transliterate cyrillic (and strip accents) without touching other chars."""
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return "".join(_TRANSLIT.get(ch.lower(), ch) if ch.isalpha() else ch for ch in value)
+
+
 def slugify(value: str, fallback: str = "project") -> str:
     value = value.strip().lower()
     value = "".join(_TRANSLIT.get(ch, ch) for ch in value)

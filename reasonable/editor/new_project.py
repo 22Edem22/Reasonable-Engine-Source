@@ -19,6 +19,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -33,12 +34,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from reasonable.core.project import choose_project_dir, default_manifest
+from reasonable.core.paths import slugify
+from reasonable.core.project import (
+    UI_LEVELS,
+    UI_LEVEL_LABELS,
+    choose_project_dir,
+    default_manifest,
+)
 from reasonable.core.settings import Settings
 
 from . import theme
 from .widgets import Badge, Card, muted, title_label
 from .workers import ScaffoldWorker
+
+
+PROJECT_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{0,58}$")
 
 
 def default_projects_dir(settings: Settings | None = None) -> Path:
@@ -237,6 +247,32 @@ class NewProjectDialog(QDialog):
         layout.addLayout(type_row)
 
         layout.addSpacing(8)
+        self.levels_section = self._section("Уровень интерфейса")
+        layout.addWidget(self.levels_section)
+        self.level_checks: dict[str, QCheckBox] = {}
+        levels_hints = {
+            "simple": "Обычные окна, кнопки и списки. Для утилит и программ Windows",
+            "standard": "Готовые виджеты движка: тёмная тема, панели, списки, прокрутка",
+            "advanced": "Своя графика, частицы, анимации. Для игр",
+        }
+        for level in UI_LEVELS:
+            check = QCheckBox(f"{UI_LEVEL_LABELS[level]} — {levels_hints[level]}")
+            check.setStyleSheet("font-size: 10px;")
+            check.toggled.connect(self._levels_changed)
+            self.level_checks[level] = check
+            layout.addWidget(check)
+        self.levels_hint = muted(
+            "Можно выбрать несколько: в проект лягут только нужные инструменты и навыки.",
+            size=9,
+        )
+        self.levels_hint.setWordWrap(True)
+        layout.addWidget(self.levels_hint)
+        self._levels_touched = False
+        self._apply_level_defaults()
+        for button in self.type_buttons.values():
+            button.toggled.connect(self._apply_level_defaults_from_type)
+
+        layout.addSpacing(8)
         self.mode_section = self._section("Кто будет собирать проект")
         layout.addWidget(self.mode_section)
         mode_row = QHBoxLayout()
@@ -303,12 +339,18 @@ class NewProjectDialog(QDialog):
 
         name_box = QVBoxLayout()
         name_box.setSpacing(5)
-        name_box.addWidget(self._small_label("Название проекта"))
+        name_box.addWidget(self._small_label("Название проекта (на английском)"))
         self.name_edit = QLineEdit()
         self.name_edit.setMinimumHeight(42)
-        self.name_edit.setPlaceholderText("Мой грандиозный проект")
+        self.name_edit.setPlaceholderText("My Great Project")
         self.name_edit.textEdited.connect(self._name_edited)
         name_box.addWidget(self.name_edit)
+        self.name_hint = muted(
+            "Латиницей, например «Task Manager». Используется для папки и файлов проекта.",
+            size=9,
+        )
+        self.name_hint.setWordWrap(True)
+        name_box.addWidget(self.name_hint)
         layout.addLayout(name_box)
 
         folder_box = QVBoxLayout()
@@ -425,13 +467,41 @@ class NewProjectDialog(QDialog):
 
     def _goal_changed(self, text: str) -> None:
         if not self._name_touched:
-            name = re.sub(r"\s+", " ", text).strip()
-            name = name[:58]
+            from reasonable.core.paths import to_latin
+
+            name = re.sub(r"\s+", " ", to_latin(text)).strip()
+            name = re.sub(r"[^A-Za-z0-9 _-]+", "", name)[:58].strip()
             self.name_edit.setText(name)
         self._update_finish_hint()
 
     def _name_edited(self, _text: str) -> None:
         self._name_touched = True
+
+    # ------------------------------------------------------------------
+    # UI level selection
+    def _levels_changed(self, _checked: bool) -> None:
+        self._levels_touched = True
+        self._refresh_summary()
+
+    def _apply_level_defaults_from_type(self, _checked: bool) -> None:
+        self._apply_level_defaults()
+
+    def _apply_level_defaults(self) -> None:
+        """Reset the checkboxes to sensible defaults for the chosen type."""
+        if self.starter == "blank":
+            defaults = ["standard"]
+        elif self.project_type() == "game":
+            defaults = ["advanced", "standard"]
+        else:
+            defaults = ["standard"]
+        for level, check in self.level_checks.items():
+            check.blockSignals(True)
+            check.setChecked(level in defaults)
+            check.blockSignals(False)
+        self._levels_touched = False
+
+    def selected_ui_levels(self) -> list[str]:
+        return [level for level in UI_LEVELS if self.level_checks[level].isChecked()]
 
     def _mode_changed(self, _checked: bool) -> None:
         if self.mode() == "external":
@@ -469,6 +539,9 @@ class NewProjectDialog(QDialog):
             self.mode_section,
             self.mode_hint,
             self.after_card,
+            self.levels_section,
+            self.levels_hint,
+            *self.level_checks.values(),
         ):
             widget.hide()
         for button in (*self.type_buttons.values(), *self.mode_buttons.values()):

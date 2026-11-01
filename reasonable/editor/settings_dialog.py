@@ -262,12 +262,10 @@ class SettingsDialog(QDialog):
 
         preview = Card(soft=True)
         preview.layout().addWidget(title_label("Предпросмотр", 11))
-        self.simple_skip_splash = QCheckBox("Пропускать заставку при запуске из редактора")
-        preview.layout().addWidget(self.simple_skip_splash)
         preview.layout().addWidget(
             muted(
-                "Заставка остаётся в экспортированной игре. Пропуск ускоряет цикл "
-                "«запустить → посмотреть → исправить».",
+                "Заставка Reasonable Engine всегда играет перед запуском проекта — "
+                "и в редакторе, и в готовой игре. Отключить её может только разработчик движка.",
                 size=9,
             )
         )
@@ -277,9 +275,6 @@ class SettingsDialog(QDialog):
 
     def _load_simple(self) -> None:
         self.simple_projects_edit.setText(str(self.settings.data.get("projects_dir") or ""))
-        self.simple_skip_splash.setChecked(
-            bool((self.settings.data.get("preview") or {}).get("skip_splash"))
-        )
         config = self.settings.get_provider_config()
         name = config.get("name") or config.get("id") or "Не выбран"
         model = config.get("model") or "модель не указана"
@@ -825,9 +820,6 @@ class SettingsDialog(QDialog):
         card = Card()
         form = QFormLayout()
         form.setSpacing(12)
-        self.max_steps = QSpinBox()
-        self.max_steps.setRange(6, 200)
-        form.addRow(self._label("Максимум шагов агента"), self.max_steps)
         self.temperature = QDoubleSpinBox()
         self.temperature.setRange(0.0, 1.6)
         self.temperature.setSingleStep(0.05)
@@ -864,12 +856,10 @@ class SettingsDialog(QDialog):
 
         preview = Card(soft=True)
         preview.layout().addWidget(title_label("Предпросмотр и заставка", 11))
-        self.skip_splash = QCheckBox("Пропускать заставку при запуске из редактора")
-        preview.layout().addWidget(self.skip_splash)
         preview.layout().addWidget(
             muted(
-                "По умолчанию заставка Reasonable Engine всегда играет перед проектом — "
-                "и в редакторе, и в экспортированной игре. Пропуск полезен только для быстрой отладки.",
+                "Заставка Reasonable Engine всегда играет перед запуском проекта — "
+                "и в редакторе, и в готовой игре. Отключить её может только разработчик движка.",
                 size=9,
             )
         )
@@ -900,10 +890,8 @@ class SettingsDialog(QDialog):
 
     def _load_agent(self) -> None:
         agent = self.settings.data.get("agent", {})
-        self.max_steps.setValue(int(agent.get("max_steps", 60)))
         self.temperature.setValue(float(agent.get("temperature", 0.65)))
         self.context_messages.setValue(int(agent.get("context_messages", 36)))
-        self.skip_splash.setChecked(bool((self.settings.data.get("preview") or {}).get("skip_splash")))
         self.projects_dir_edit.setText(str(self.settings.data.get("projects_dir") or ""))
 
     # ------------------------------------------------------------------
@@ -912,13 +900,9 @@ class SettingsDialog(QDialog):
         self.settings.active_provider = self._current_provider
         self.settings.data.setdefault("agent", {}).update(
             {
-                "max_steps": int(self.max_steps.value()),
                 "temperature": float(self.temperature.value()),
                 "context_messages": int(self.context_messages.value()),
             }
-        )
-        self.settings.data.setdefault("preview", {})["skip_splash"] = bool(
-            (self.skip_splash if self._advanced else self.simple_skip_splash).isChecked()
         )
         self.settings.data["projects_dir"] = (
             self.projects_dir_edit if self._advanced else self.simple_projects_edit

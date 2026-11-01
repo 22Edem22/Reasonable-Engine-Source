@@ -1082,8 +1082,7 @@ class ProjectPage(QWidget):
             QMessageBox.warning(self, "Нет точки входа", f"Файл {self.project.entry.name} не найден.")
             return
         env = QProcessEnvironment()
-        skip_splash = bool((self.settings.data.get("preview") or {}).get("skip_splash"))
-        for key, value in self.project.run_env(skip_splash=skip_splash).items():
+        for key, value in self.project.run_env().items():
             env.insert(key, value)
         env.insert("PYTHONUNBUFFERED", "1")
         self._process_output = ""
