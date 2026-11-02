@@ -27,6 +27,35 @@ def _log_path() -> Path:
     return base / LOG_NAME
 
 
+def _tkinter_missing_hint(exc: BaseException, entry: Path) -> str | None:
+    """Explain a ModuleNotFoundError raised inside the bundled player.
+
+    ``ReasonablePlayer.exe`` embeds Python + pygame but intentionally has no
+    tkinter (it is excluded in ReasonablePlayer.spec). Projects created on the
+    «Простой (tkinter)» level therefore cannot run inside the player; without
+    this hint the user only sees a raw ``ModuleNotFoundError`` traceback.
+    """
+    name = getattr(exc, "name", "") or ""
+    if not isinstance(exc, ModuleNotFoundError):
+        return None
+    if name != "tkinter" and not name.startswith("tkinter."):
+        return None
+    return (
+        f"Проект «{entry.parent.name}» использует tkinter — окно на уровне\n"
+        "«Простой», а ReasonablePlayer.exe содержит только Python и pygame,\n"
+        "без tkinter.\n\n"
+        "Как запустить:\n"
+        "1) Через редактор: откройте проект в Reasonable Engine и нажмите\n"
+        "   «Запустить» — для tkinter-проектов движок сам выберет Python с\n"
+        "   tkinter (из папки python\\ или системный).\n"
+        "2) Вручную: python\\python.exe main.py (или python main.py, если\n"
+        "   Python установлен).\n"
+        "3) Установите Python с https://www.python.org/downloads/\n"
+        "   (галочка «Add python.exe to PATH») и повторите запуск.\n\n"
+        f"Файл проекта: {entry}"
+    )
+
+
 def _report_error(detail: str) -> None:
     """Write the traceback to a log and, when possible, show a dialog."""
     try:
@@ -109,6 +138,13 @@ def _run_project(entry: Path) -> int:
     except SystemExit as exc:
         code = exc.code
         return int(code) if isinstance(code, int) else (0 if code is None else 1)
+    except ModuleNotFoundError as exc:
+        hint = _tkinter_missing_hint(exc, entry)
+        if hint is not None:
+            _report_error(hint)
+            return 4
+        _report_error(traceback.format_exc())
+        return 1
     except Exception:
         _report_error(traceback.format_exc())
         return 1

@@ -72,12 +72,64 @@ class PathsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             player = Path(tmp) / "ReasonablePlayer.exe"
             player.write_bytes(b"x")
+            entry = Path(tmp) / "main.py"
+            entry.write_text("import pygame\n", encoding="utf-8")
             with mock.patch.object(paths, "is_frozen", return_value=True), mock.patch.object(
                 paths, "player_executable", return_value=player
             ):
-                command = paths.project_launch_command(Path(tmp) / "main.py")
+                command = paths.project_launch_command(entry)
                 self.assertEqual(command[0], str(player))
                 self.assertTrue(command[1].endswith("main.py"))
+
+    def test_tkinter_projects_skip_the_player_even_when_frozen(self) -> None:
+        """ReasonablePlayer.exe has no tkinter — such projects need Python."""
+        from reasonable.core import paths
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            player = root / "ReasonablePlayer.exe"
+            player.write_bytes(b"x")
+            entry = root / "main.py"
+            entry.write_text("import tkinter as tk\nfrom tkinter import ttk\n", encoding="utf-8")
+            (root / "project.json").write_text(
+                json.dumps({"template": "simple", "ui_levels": ["simple"]}), encoding="utf-8"
+            )
+            with mock.patch.object(paths, "is_frozen", return_value=True), mock.patch.object(
+                paths, "player_executable", return_value=player
+            ), mock.patch.dict(os.environ, {}, clear=True):
+                command = paths.project_launch_command(entry, project_root=root)
+                self.assertNotEqual(command[0], str(player))
+                self.assertEqual(command[-1], str(entry))
+
+    def test_entry_uses_tkinter_detects_imports_only(self) -> None:
+        from reasonable.core.paths import entry_uses_tkinter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pygame_entry = Path(tmp) / "main.py"
+            pygame_entry.write_text(
+                '"""Tkinter mention in a docstring."""\nimport pygame\n', encoding="utf-8"
+            )
+            self.assertFalse(entry_uses_tkinter(pygame_entry))
+            tk_entry = Path(tmp) / "app.py"
+            tk_entry.write_text("import tkinter as tk\n", encoding="utf-8")
+            self.assertTrue(entry_uses_tkinter(tk_entry))
+            self.assertFalse(entry_uses_tkinter(Path(tmp) / "missing.py"))
+
+    def test_project_needs_tkinter_reads_manifest(self) -> None:
+        from reasonable.core.paths import project_needs_tkinter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entry = root / "main.py"
+            entry.write_text("import pygame\n", encoding="utf-8")
+            (root / "project.json").write_text(
+                json.dumps({"template": "game", "ui_levels": ["simple"]}), encoding="utf-8"
+            )
+            self.assertTrue(project_needs_tkinter(root, entry))
+            (root / "project.json").write_text(
+                json.dumps({"template": "game", "ui_levels": ["standard"]}), encoding="utf-8"
+            )
+            self.assertFalse(project_needs_tkinter(root, entry))
 
     def test_project_launch_command_uses_python_in_source_checkout(self) -> None:
         from reasonable.core import paths
