@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from reasonable.ai.agent import AgentEvent
 from reasonable.ai.providers import config_status, short_provider_name
 from reasonable.core import chatlog
+from reasonable.core.i18n import t
 from reasonable.core.progress import derived_percent, read_state
 from reasonable.core.settings import Settings
 
@@ -66,9 +67,9 @@ class MessageBubble(QFrame):
         header.setSpacing(7)
         if role == "user":
             avatar = Avatar(22)
-            avatar.set_initials("Вы", "#A8AFB9")
+            avatar.set_initials(t("chat.role_user"), "#A8AFB9")
             header.addWidget(avatar)
-            name = QLabel("Вы")
+            name = QLabel(t("chat.role_user"))
             name.setFont(theme.ui_font(9, 600))
             name.setStyleSheet("color: #A8AFB9;")
         elif role == "assistant":
@@ -84,11 +85,11 @@ class MessageBubble(QFrame):
             avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
             avatar.setStyleSheet("color: #8B929C; font-weight: 600;")
             header.addWidget(avatar)
-            name = QLabel("Инструмент")
+            name = QLabel(t("chat.role_tool"))
             name.setFont(theme.ui_font(8, 600))
             name.setStyleSheet("color: #8B929C;")
         else:
-            name = QLabel("Система")
+            name = QLabel(t("chat.role_system"))
             name.setFont(theme.ui_font(9, 600))
             name.setStyleSheet("color: #C98A90;")
         header.addWidget(name)
@@ -106,7 +107,7 @@ class MessageBubble(QFrame):
         if role == "tool" and len(text) > 360:
             self.body.setText(text[:360] + "…")
             self.more_button = QToolButton()
-            self.more_button.setText("Показать полностью")
+            self.more_button.setText(t("chat.show_full"))
             self.more_button.setObjectName("ghost")
             self.more_button.setCursor(Qt.CursorShape.PointingHandCursor)
             self.more_button.clicked.connect(self._toggle)
@@ -117,11 +118,11 @@ class MessageBubble(QFrame):
         if self.expanded:
             self.body.setText(self.full_text)
             if self.more_button:
-                self.more_button.setText("Свернуть")
+                self.more_button.setText(t("chat.collapse"))
         else:
             self.body.setText(self.full_text[:360] + "…")
             if self.more_button:
-                self.more_button.setText("Показать полностью")
+                self.more_button.setText(t("chat.show_full"))
 
 
 class ChangesCard(Card):
@@ -131,11 +132,17 @@ class ChangesCard(Card):
     restore_requested = Signal(str)
     history_requested = Signal()
 
-    ACTION_LABELS = {
-        "create": ("＋", "создан"),
-        "edit": ("✎", "изменён"),
-        "delete": ("−", "удалён"),
-        "generate": ("✦", "сгенерирован"),
+    ACTION_ICONS = {
+        "create": "＋",
+        "edit": "✎",
+        "delete": "−",
+        "generate": "✦",
+    }
+    ACTION_KEYS = {
+        "create": "chat.action_create",
+        "edit": "chat.action_edit",
+        "delete": "chat.action_delete",
+        "generate": "chat.action_generate",
     }
 
     def __init__(self, files: list[dict], snapshot: dict | None, outcome: str = "", parent: QWidget | None = None) -> None:
@@ -147,19 +154,19 @@ class ChangesCard(Card):
 
         top = QHBoxLayout()
         top.setSpacing(8)
-        heading = QLabel("Что изменил агент")
+        heading = QLabel(t("chat.changes_heading"))
         heading.setFont(theme.ui_font(10, 700))
         heading.setStyleSheet("color: #E7E9EC; background: transparent; border: none;")
         top.addWidget(heading)
         top.addStretch(1)
         tone = "teal" if outcome == "done" else "gold"
-        count = Badge(f"{len(self.files)} файл(ов)", tone)
+        count = Badge(t("chat.file_count", count=len(self.files)), tone)
         top.addWidget(count)
         self.layout().addLayout(top)
 
         if not self.files:
             self.layout().addWidget(
-                muted("Агент не изменил файлы проекта. Проверьте план и формулировку задачи.", size=9)
+                muted(t("chat.no_changes"), size=9)
             )
         else:
             rows = QVBoxLayout()
@@ -168,11 +175,12 @@ class ChangesCard(Card):
             for item in self.files[:14]:
                 path = str(item.get("path") or "")
                 action = str(item.get("action") or "edit")
-                icon, label = self.ACTION_LABELS.get(action, ("·", "изменён"))
+                icon = self.ACTION_ICONS.get(action, "·")
+                label = t(self.ACTION_KEYS.get(action, "chat.action_edit"))
                 button = QPushButton(f"{icon}  {path}")
                 button.setObjectName("ghost")
                 button.setCursor(Qt.CursorShape.PointingHandCursor)
-                button.setToolTip(f"{label}: {path}\nКлик — открыть в редакторе кода")
+                button.setToolTip(f"{label}: {path}\n{t('chat.open_in_code')}")
                 button.setStyleSheet(
                     "QPushButton { text-align: left; padding: 4px 6px; border-radius: 5px; }"
                     "QPushButton:hover { background: #20242B; }"
@@ -183,14 +191,16 @@ class ChangesCard(Card):
                     button.clicked.connect(lambda checked=False, value=path: self.file_requested.emit(value))
                 rows.addWidget(button)
             if len(self.files) > 14:
-                rows.addWidget(muted(f"Ещё {len(self.files) - 14} файл(ов) — полный список в истории.", size=8))
+                rows.addWidget(muted(t("chat.more_files", count=len(self.files) - 14), size=8))
             self.layout().addLayout(rows)
 
         snapshot_id = str(self.snapshot.get("id") or "")
         if snapshot_id:
             note = muted(
-                f"Рабочая версия сохранена перед запуском: «{self.snapshot.get('label') or 'снимок'}». "
-                "Если результат хуже — верните её одним кликом.",
+                t(
+                    "chat.snapshot_note",
+                    label=self.snapshot.get("label") or t("history.snapshot"),
+                ),
                 size=8,
             )
             note.setWordWrap(True)
@@ -199,12 +209,12 @@ class ChangesCard(Card):
         actions = QHBoxLayout()
         actions.setSpacing(7)
         if snapshot_id:
-            undo = QPushButton("↶ Отменить эти изменения")
+            undo = QPushButton(t("chat.undo_button"))
             undo.setObjectName("danger")
-            undo.setToolTip("Восстановить файлы из снимка, созданного перед запуском агента")
+            undo.setToolTip(t("chat.undo_tip"))
             undo.clicked.connect(lambda: self.restore_requested.emit(snapshot_id))
             actions.addWidget(undo)
-        history = QPushButton("История версий")
+        history = QPushButton(t("chat.history_button"))
         history.setObjectName("ghost")
         history.clicked.connect(self.history_requested)
         actions.addWidget(history)
@@ -285,18 +295,19 @@ class ChatPanel(QWidget):
         layout.addWidget(avatar)
         titles = QVBoxLayout()
         titles.setSpacing(1)
-        title = QLabel("ИИ-агент")
+        title = QLabel(t("chat.title"))
         title.setObjectName("title")
         title.setFont(theme.display_font(12, 700))
         titles.addWidget(title)
         config = self.settings.get_provider_config()
-        provider_name = short_provider_name(config.get("name") or config.get("id") or "ИИ")
+        provider_name = short_provider_name(config.get("name") or config.get("id") or t("chat.ai_fallback"))
         self.model_label = muted(
-            f"{provider_name} · {config.get('model') or 'модель не выбрана'}",
+            f"{provider_name} · {config.get('model') or t('chat.model_none')}",
             size=9,
         )
         self.model_label.setToolTip(
-            f"{config.get('name') or config.get('id') or 'ИИ'} · {config.get('model') or 'модель не выбрана'}"
+            f"{config.get('name') or config.get('id') or t('chat.ai_fallback')} · "
+            f"{config.get('model') or t('chat.model_none')}"
         )
         titles.addWidget(self.model_label)
         layout.addLayout(titles)
@@ -304,14 +315,14 @@ class ChatPanel(QWidget):
         self.usage_badge = Badge("", "default")
         self.usage_badge.hide()
         layout.addWidget(self.usage_badge)
-        self.status_badge = Badge("ГОТОВ", "default")
+        self.status_badge = Badge(t("chat.status_ready_badge"), "default")
         layout.addWidget(self.status_badge)
-        self.stop_button = QPushButton("■  Остановить")
+        self.stop_button = QPushButton(t("chat.stop_button"))
         self.stop_button.setObjectName("danger")
         self.stop_button.clicked.connect(self.stop_agent)
         self.stop_button.hide()
         layout.addWidget(self.stop_button)
-        clear = QPushButton("Очистить")
+        clear = QPushButton(t("chat.clear_button"))
         clear.setObjectName("ghost")
         clear.clicked.connect(self.clear_chat)
         layout.addWidget(clear)
@@ -346,20 +357,20 @@ class ChatPanel(QWidget):
         top.addWidget(avatar)
         titles = QVBoxLayout()
         titles.setSpacing(2)
-        heading = QLabel("Опишите первую задачу")
+        heading = QLabel(t("chat.intro_heading"))
         heading.setObjectName("title")
         heading.setFont(theme.display_font(14, 700))
         titles.addWidget(heading)
-        titles.addWidget(muted("Агент прочитает проект, составит план, изменит файлы и проверит запуск.", size=9))
+        titles.addWidget(muted(t("chat.intro_text"), size=9))
         top.addLayout(titles, 1)
         intro.layout().addLayout(top)
         self.stream.addWidget(intro)
 
         suggestions = (
-            ("Собери вертикальный срез", "Собери рабочий вертикальный срез проекта и проверь запуск."),
-            ("Улучши визуал", "Улучши визуал: фон, спрайты, частицы, анимации и переходы."),
-            ("Добавь меню и сохранение", "Добавь главное меню, экран настроек и сохранение прогресса."),
-            ("Проверь и исправь", "Проверь проект, исправь ошибки и доведи его до стабильного запуска."),
+            (t("chat.suggest_vertical_slice"), t("chat.suggest_vertical_slice_prompt")),
+            (t("chat.suggest_visual"), t("chat.suggest_visual_prompt")),
+            (t("chat.suggest_menu"), t("chat.suggest_menu_prompt")),
+            (t("chat.suggest_fix"), t("chat.suggest_fix_prompt")),
         )
         suggestions_grid = QGridLayout()
         suggestions_grid.setContentsMargins(0, 0, 0, 0)
@@ -380,7 +391,7 @@ class ChatPanel(QWidget):
         card.layout().setSpacing(8)
         head = QHBoxLayout()
         head.setSpacing(8)
-        label = QLabel("Текущий план")
+        label = QLabel(t("chat.plan_heading"))
         label.setFont(theme.ui_font(10, 700))
         label.setStyleSheet("color: #E7E9EC; background: transparent; border: none;")
         head.addWidget(label)
@@ -391,10 +402,7 @@ class ChatPanel(QWidget):
         head.addWidget(self._plan_count)
         card.layout().addLayout(head)
 
-        self._plan_hint = muted(
-            "План появится после первой задачи: агент разобьёт работу на шаги и будет отмечать их здесь.",
-            size=9,
-        )
+        self._plan_hint = muted(t("chat.plan_hint"), size=9)
         self._plan_hint.setWordWrap(True)
         card.layout().addWidget(self._plan_hint)
 
@@ -463,7 +471,7 @@ class ChatPanel(QWidget):
             layout.addWidget(title, 1)
             self._plan_rows.addWidget(row)
         if len(tasks) > len(visible):
-            self._plan_rows.addWidget(muted(f"+{len(tasks) - len(visible)} задач — во вкладке «Обзор».", size=8))
+            self._plan_rows.addWidget(muted(t("chat.plan_more_tasks", count=len(tasks) - len(visible)), size=8))
 
     def _build_input(self) -> QFrame:
         frame = QFrame()
@@ -473,17 +481,17 @@ class ChatPanel(QWidget):
         layout.setSpacing(7)
         self.input = QTextEdit()
         self.input.setObjectName("chatInput")
-        self.input.setPlaceholderText("Напишите задачу агенту…  Ctrl+Enter — отправить")
+        self.input.setPlaceholderText(t("chat.input_placeholder"))
         self.input.setMaximumHeight(104)
         self.input.setMinimumHeight(64)
         self.input.installEventFilter(self)
         layout.addWidget(self.input)
 
         bottom = QHBoxLayout()
-        hint = muted("Агент меняет файлы в проекте и показывает прогресс.", size=8)
+        hint = muted(t("chat.input_hint"), size=8)
         bottom.addWidget(hint)
         bottom.addStretch(1)
-        self.send_button = QPushButton("Отправить")
+        self.send_button = QPushButton(t("chat.send_button"))
         self.send_button.setObjectName("primary")
         self.send_button.setMinimumWidth(150)
         self.send_button.clicked.connect(lambda: self.send())
@@ -529,7 +537,7 @@ class ChatPanel(QWidget):
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
         self.focus_input()
-        self.step_label.setText("Задача подготовлена — проверьте текст и отправьте агенту.")
+        self.step_label.setText(t("chat.prefill_note"))
 
     def last_changes(self) -> list[dict]:
         if self._changes_card is None:
@@ -564,27 +572,28 @@ class ChatPanel(QWidget):
         done = sum(1 for task in tasks if task.get("status") == "done")
         status = state.get("status")
         if status == "done":
-            self.status_badge.setText("ГОТОВО")
+            self.status_badge.setText(t("chat.badge_done"))
             self.status_badge.set_tone("default")
         elif status == "error":
-            self.status_badge.setText("ОШИБКА")
+            self.status_badge.setText(t("chat.badge_error"))
             self.status_badge.set_tone("gold")
         else:
-            self.status_badge.setText("ГОТОВ")
+            self.status_badge.setText(t("chat.status_ready_badge"))
             self.status_badge.set_tone("default")
         self.progress.setValue(int(round(derived_percent(state))))
         stage = state.get("stage") or ""
         if tasks:
-            self.step_label.setText(f"{stage}  ·  задачи {done}/{len(tasks)}")
+            self.step_label.setText(t("chat.step_tasks", stage=stage, done=done, total=len(tasks)))
         else:
             self.step_label.setText(stage)
         config = self.settings.get_provider_config()
-        provider_name = short_provider_name(config.get("name") or config.get("id") or "ИИ")
+        provider_name = short_provider_name(config.get("name") or config.get("id") or t("chat.ai_fallback"))
         self.model_label.setText(
-            f"{provider_name} · {config.get('model') or 'модель не выбрана'}"
+            f"{provider_name} · {config.get('model') or t('chat.model_none')}"
         )
         self.model_label.setToolTip(
-            f"{config.get('name') or config.get('id') or 'ИИ'} · {config.get('model') or 'модель не выбрана'}"
+            f"{config.get('name') or config.get('id') or t('chat.ai_fallback')} · "
+            f"{config.get('model') or t('chat.model_none')}"
         )
 
     def _ready_to_run(self) -> bool:
@@ -593,8 +602,8 @@ class ChatPanel(QWidget):
         if not ok:
             QMessageBox.warning(
                 self,
-                "ИИ не настроен",
-                f"{reason}.\n\nОткройте настройки и выберите провайдера или добавьте ключ.",
+                t("chat.not_configured_title"),
+                t("chat.not_configured_text", reason=reason),
             )
             self.settings_requested.emit()
             return False
@@ -628,12 +637,12 @@ class ChatPanel(QWidget):
         self._changes_card = None
         self.send_button.setEnabled(False)
         self.stop_button.setEnabled(True)
-        self.stop_button.setText("■  Остановить")
+        self.stop_button.setText(t("chat.stop_button"))
         self.stop_button.show()
-        self.status_badge.setText("РАБОТАЕТ")
+        self.status_badge.setText(t("chat.badge_working"))
         self.status_badge.set_tone("gold")
         self.progress.setRange(0, 0)
-        self.step_label.setText("Агент изучает проект…")
+        self.step_label.setText(t("chat.studying"))
         self.worker = AgentWorker(self.project, self.settings, message)
         self.worker.event.connect(self._on_event)
         self.worker.done.connect(self._on_done)
@@ -650,16 +659,16 @@ class ChatPanel(QWidget):
             step = event.data.get("step", "")
             total = event.data.get("max_steps") or 0
             if total:
-                self.step_label.setText(f"Шаг {step} из {total} · агент работает…")
+                self.step_label.setText(t("chat.step_progress_total", step=step, total=total))
             else:
-                self.step_label.setText(f"Шаг {step} · агент работает…")
+                self.step_label.setText(t("chat.step_progress", step=step))
         elif kind == "assistant":
             if not event.text.strip():
                 return
             self._append("assistant", event.text)
             self._last_assistant = event.text
         elif kind == "tool_start":
-            self.step_label.setText(f"Инструмент: {event.data.get('tool', '')}")
+            self.step_label.setText(t("chat.tool_label", name=event.data.get("tool", "")))
         elif kind == "tool_result":
             name = event.data.get("tool", "tool")
             result = event.data.get("result", "")
@@ -672,16 +681,16 @@ class ChatPanel(QWidget):
             usage = event.data.get("usage") or {}
             total = usage.get("total_tokens") or usage.get("total") or 0
             if total:
-                self.usage_badge.setText(f"{int(total):,} токенов".replace(",", " "))
+                self.usage_badge.setText(t("chat.token_count", count=f"{int(total):,}".replace(",", " ")))
                 self.usage_badge.show()
         elif kind == "snapshot":
             snapshot = event.data.get("snapshot") or {}
             if snapshot:
                 self._current_snapshot = snapshot
-                self.step_label.setText("Снимок рабочей версии сохранён — изменения можно отменить.")
+                self.step_label.setText(t("chat.snapshot_saved"))
                 self.history_changed.emit()
         elif kind == "snapshot_error":
-            self._append("system", event.text or "Не удалось сохранить снимок проекта.")
+            self._append("system", event.text or t("chat.snapshot_failed"))
         elif kind == "changes":
             files = event.data.get("files") or []
             snapshot = event.data.get("snapshot") or self._current_snapshot
@@ -690,11 +699,11 @@ class ChatPanel(QWidget):
             self._append_changes(files, snapshot, str(event.data.get("outcome") or ""))
             self.history_changed.emit()
         elif kind == "done":
-            self._append("system", event.text or "Готово.")
+            self._append("system", event.text or t("chat.done_short"))
         elif kind == "incomplete":
             self._append(
                 "error",
-                "Работа не завершена: " + (event.text or "агент остановился раньше времени."),
+                t("chat.incomplete_prefix") + (event.text or t("chat.incomplete_default")),
             )
         elif kind == "error":
             self._last_error_text = event.text
@@ -703,22 +712,22 @@ class ChatPanel(QWidget):
             self._append("system", event.text)
 
     def _on_done(self, _text: str) -> None:
-        self._finish("ГОТОВО", "Агент завершил работу. Файлы проекта изменены, проверка и запуск пройдены.")
+        self._finish(t("chat.badge_done"), t("chat.finish_done"))
         self.finished.emit()
 
     def _on_incomplete(self, reason: str) -> None:
-        self._finish("НЕ ЗАВЕРШЕНО", reason or "Агент остановился, не доведя работу до проверки и запуска.")
+        self._finish(t("chat.badge_incomplete"), reason or t("chat.finish_incomplete"))
         self.finished.emit()
 
     def _on_failed(self, message: str) -> None:
-        self._finish("ОШИБКА", f"Ошибка: {message}")
+        self._finish(t("chat.badge_error"), t("chat.finish_failed", message=message))
         if message and message != self._last_error_text:
             self._append("error", message)
             self._remember("error", "⚠ " + message)
         self.finished.emit()
 
     def _on_cancelled(self) -> None:
-        self._finish("ОСТАНОВЛЕН", "Работа остановлена.")
+        self._finish(t("chat.badge_stopped"), t("chat.finish_cancelled"))
         self.finished.emit()
 
     def _finish(self, badge: str, message: str) -> None:
@@ -726,7 +735,7 @@ class ChatPanel(QWidget):
         self.send_button.setEnabled(True)
         self.stop_button.hide()
         self.status_badge.setText(badge)
-        self.status_badge.set_tone("default" if badge == "ГОТОВО" else "gold")
+        self.status_badge.set_tone("default" if badge == t("chat.badge_done") else "gold")
         self.step_label.setText(message)
         self.step_label.setToolTip(message)
         state = read_state(self.project.root)
@@ -738,12 +747,12 @@ class ChatPanel(QWidget):
         if self.worker is not None and self.worker.isRunning():
             self.worker.stop()
             self.stop_button.setEnabled(False)
-            self.stop_button.setText("Останавливаю…")
-            self.step_label.setText("Останавливаю агента после текущего шага…")
+            self.stop_button.setText(t("chat.stopping"))
+            self.step_label.setText(t("chat.stopping_step"))
 
     def clear_chat(self) -> None:
         if self.running:
-            QMessageBox.information(self, "Агент работает", "Сначала остановите агента.")
+            QMessageBox.information(self, t("chat.agent_running_title"), t("chat.agent_running_text"))
             return
         while self.stream.count():
             item = self.stream.takeAt(0)

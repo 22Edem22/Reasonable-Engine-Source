@@ -1403,4 +1403,174 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "projset.save": _pair("Сохранить", "Save"),
     "projset.empty_name": _pair("Название проекта не может быть пустым.", "The project name cannot be empty."),
     "projset.save_error": _pair("Ошибка сохранения", "Save error"),
+    # --- Background workers (editor/workers.py) ---
+    "workers.scaffold_structure": _pair("Создаю структуру проекта…", "Creating the project structure…"),
+    "workers.scaffold_assets": _pair(
+        "Генерирую иконку, фон и стартовые спрайты…",
+        "Generating the icon, background and starter sprites…",
+    ),
+    "workers.sprite_image": _pair("Генерирую изображение…", "Generating the image…"),
+    "workers.convert_copy": _pair(
+        "Копирую проект без кэшей и старых экспортов…",
+        "Copying the project without caches and old exports…",
+    ),
+    "workers.convert_engine": _pair(
+        "Применяю настройки и встраиваю движок…",
+        "Applying settings and embedding the engine…",
+    ),
+    "workers.convert_progress": _pair(
+        "Обновляю инструкции агента и прогресс…",
+        "Updating agent instructions and progress…",
+    ),
+    "workers.provider_test_prompt": _pair(
+        "Ответь ровно одним словом: работает",
+        "Answer with exactly one word: works",
+    ),
+    "workers.provider_test_ok": _pair(
+        "Модель ответила пустым сообщением, но соединение работает.",
+        "The model returned an empty message, but the connection works.",
+    ),
+    # --- Chat panel (editor/chat.py) ---
+    "chat.role_user": _pair("Вы", "You"),
+    "chat.role_tool": _pair("Инструмент", "Tool"),
+    "chat.role_system": _pair("Система", "System"),
+    "chat.show_full": _pair("Показать полностью", "Show full text"),
+    "chat.collapse": _pair("Свернуть", "Collapse"),
+    "chat.action_create": _pair("создан", "created"),
+    "chat.action_edit": _pair("изменён", "edited"),
+    "chat.action_delete": _pair("удалён", "deleted"),
+    "chat.action_generate": _pair("сгенерирован", "generated"),
+    "chat.changes_heading": _pair("Что изменил агент", "What the agent changed"),
+    "chat.file_count": _pair("{count} файл(ов)", "{count} file(s)"),
+    "chat.no_changes": _pair(
+        "Агент не изменил файлы проекта. Проверьте план и формулировку задачи.",
+        "The agent did not change any project files. Check the plan and the task wording.",
+    ),
+    "chat.open_in_code": _pair("Клик — открыть в редакторе кода", "Click to open in the code editor"),
+    "chat.more_files": _pair(
+        "Ещё {count} файл(ов) — полный список в истории.",
+        "{count} more file(s) — the full list is in the history.",
+    ),
+    "chat.snapshot_note": _pair(
+        "Рабочая версия сохранена перед запуском: «{label}». "
+        "Если результат хуже — верните её одним кликом.",
+        "A working version was saved before the run: “{label}”. "
+        "If the result is worse, restore it with a single click.",
+    ),
+    "chat.undo_button": _pair("↶ Отменить эти изменения", "↶ Undo these changes"),
+    "chat.undo_tip": _pair(
+        "Восстановить файлы из снимка, созданного перед запуском агента",
+        "Restore files from the snapshot created before the agent run",
+    ),
+    "chat.history_button": _pair("История версий", "Version history"),
+    "chat.title": _pair("ИИ-агент", "AI agent"),
+    "chat.model_none": _pair("модель не выбрана", "no model selected"),
+    "chat.ai_fallback": _pair("ИИ", "AI"),
+    "chat.status_ready_badge": _pair("ГОТОВ", "READY"),
+    "chat.stop_button": _pair("■  Остановить", "■  Stop"),
+    "chat.clear_button": _pair("Очистить", "Clear"),
+    "chat.intro_heading": _pair("Опишите первую задачу", "Describe the first task"),
+    "chat.intro_text": _pair(
+        "Агент прочитает проект, составит план, изменит файлы и проверит запуск.",
+        "The agent will read the project, build a plan, change files and check that it runs.",
+    ),
+    "chat.suggest_vertical_slice": _pair("Собери вертикальный срез", "Build a vertical slice"),
+    "chat.suggest_vertical_slice_prompt": _pair(
+        "Собери рабочий вертикальный срез проекта и проверь запуск.",
+        "Build a working vertical slice of the project and check that it runs.",
+    ),
+    "chat.suggest_visual": _pair("Улучши визуал", "Improve the visuals"),
+    "chat.suggest_visual_prompt": _pair(
+        "Улучши визуал: фон, спрайты, частицы, анимации и переходы.",
+        "Improve the visuals: background, sprites, particles, animations and transitions.",
+    ),
+    "chat.suggest_menu": _pair("Добавь меню и сохранение", "Add a menu and saving"),
+    "chat.suggest_menu_prompt": _pair(
+        "Добавь главное меню, экран настроек и сохранение прогресса.",
+        "Add a main menu, a settings screen and progress saving.",
+    ),
+    "chat.suggest_fix": _pair("Проверь и исправь", "Check and fix"),
+    "chat.suggest_fix_prompt": _pair(
+        "Проверь проект, исправь ошибки и доведи его до стабильного запуска.",
+        "Check the project, fix the errors and bring it to a stable launch.",
+    ),
+    "chat.plan_heading": _pair("Текущий план", "Current plan"),
+    "chat.plan_hint": _pair(
+        "План появится после первой задачи: агент разобьёт работу на шаги и будет отмечать их здесь.",
+        "The plan appears after the first task: the agent will break the work into steps and mark them here.",
+    ),
+    "chat.plan_more_tasks": _pair(
+        "+{count} задач — во вкладке «Обзор».",
+        "+{count} tasks — on the \"Overview\" tab.",
+    ),
+    "chat.input_placeholder": _pair(
+        "Напишите задачу агенту…  Ctrl+Enter — отправить",
+        "Write a task for the agent…  Ctrl+Enter to send",
+    ),
+    "chat.input_hint": _pair(
+        "Агент меняет файлы в проекте и показывает прогресс.",
+        "The agent changes project files and shows progress.",
+    ),
+    "chat.send_button": _pair("Отправить", "Send"),
+    "chat.prefill_note": _pair(
+        "Задача подготовлена — проверьте текст и отправьте агенту.",
+        "Task prepared — check the text and send it to the agent.",
+    ),
+    "chat.step_progress_total": _pair(
+        "Шаг {step} из {total} · агент работает…",
+        "Step {step} of {total} · the agent is working…",
+    ),
+    "chat.step_progress": _pair("Шаг {step} · агент работает…", "Step {step} · the agent is working…"),
+    "chat.tool_label": _pair("Инструмент: {name}", "Tool: {name}"),
+    "chat.token_count": _pair("{count} токенов", "{count} tokens"),
+    "chat.snapshot_saved": _pair(
+        "Снимок рабочей версии сохранён — изменения можно отменить.",
+        "Working version snapshot saved — changes can be undone.",
+    ),
+    "chat.snapshot_failed": _pair(
+        "Не удалось сохранить снимок проекта.",
+        "Could not save the project snapshot.",
+    ),
+    "chat.done_short": _pair("Готово.", "Done."),
+    "chat.incomplete_prefix": _pair("Работа не завершена: ", "Work not finished: "),
+    "chat.incomplete_default": _pair(
+        "агент остановился раньше времени.",
+        "the agent stopped too early.",
+    ),
+    "chat.badge_done": _pair("ГОТОВО", "DONE"),
+    "chat.badge_error": _pair("ОШИБКА", "ERROR"),
+    "chat.badge_working": _pair("РАБОТАЕТ", "WORKING"),
+    "chat.badge_incomplete": _pair("НЕ ЗАВЕРШЕНО", "INCOMPLETE"),
+    "chat.badge_stopped": _pair("ОСТАНОВЛЕН", "STOPPED"),
+    "chat.finish_done": _pair(
+        "Агент завершил работу. Файлы проекта изменены, проверка и запуск пройдены.",
+        "The agent finished. Project files changed; checks and the test run passed.",
+    ),
+    "chat.finish_incomplete": _pair(
+        "Агент остановился, не доведя работу до проверки и запуска.",
+        "The agent stopped before finishing the checks and the test run.",
+    ),
+    "chat.finish_failed": _pair("Ошибка: {message}", "Error: {message}"),
+    "chat.finish_cancelled": _pair("Работа остановлена.", "Work stopped."),
+    "chat.stopping": _pair("Останавливаю…", "Stopping…"),
+    "chat.stopping_step": _pair(
+        "Останавливаю агента после текущего шага…",
+        "Stopping the agent after the current step…",
+    ),
+    "chat.studying": _pair("Агент изучает проект…", "The agent is studying the project…"),
+    "chat.not_configured_title": _pair("ИИ не настроен", "AI is not configured"),
+    "chat.not_configured_text": _pair(
+        "{reason}.\n\nОткройте настройки и выберите провайдера или добавьте ключ.",
+        "{reason}.\n\nOpen the settings and choose a provider or add a key.",
+    ),
+    "chat.agent_running_title": _pair("Агент работает", "The agent is running"),
+    "chat.agent_running_text": _pair(
+        "Сначала остановите агента.",
+        "Stop the agent first.",
+    ),
+    "chat.step_tasks": _pair("{stage}  ·  задачи {done}/{total}", "{stage}  ·  tasks {done}/{total}"),
+    # --- Reusable widgets (editor/widgets.py) ---
+    "widgets.kind_game": _pair("Игра", "Game"),
+    "widgets.kind_app": _pair("Приложение", "App"),
+    "widgets.delete_project": _pair("Удалить проект", "Delete project"),
 }

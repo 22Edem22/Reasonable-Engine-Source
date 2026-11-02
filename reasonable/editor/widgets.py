@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from reasonable.core.i18n import t
+
 from . import theme
 
 
@@ -207,14 +209,14 @@ class ProjectCard(QFrame):
         heading.setFont(theme.display_font(11, 600))
         top.addWidget(heading)
         top.addStretch(1)
-        kind_label = QLabel("Игра" if kind == "game" else "Приложение")
+        kind_label = QLabel(t("widgets.kind_game") if kind == "game" else t("widgets.kind_app"))
         kind_label.setObjectName("dim")
         kind_label.setFont(theme.ui_font(9))
         top.addWidget(kind_label)
         delete = QPushButton("×")
         delete.setObjectName("ghost")
         delete.setFixedSize(24, 24)
-        delete.setToolTip("Удалить проект")
+        delete.setToolTip(t("widgets.delete_project"))
         delete.setCursor(Qt.CursorShape.PointingHandCursor)
         delete.clicked.connect(self.delete_requested)
         top.addWidget(delete)
