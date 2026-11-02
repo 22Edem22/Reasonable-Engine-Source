@@ -319,26 +319,19 @@ class ConvertDialog(QDialog):
         self.result_card.hide()
         same = target == self.project.platform
         if target == "android":
-            self.platform_hint.setText(
-                "Android: проект получит android-ориентацию и пакет. "
-                "Проверьте касания и размеры элементов; APK собирается на Linux/WSL2."
-            )
+            self.platform_hint.setText(t("convdlg.hint_android"))
         else:
-            self.platform_hint.setText(
-                "Windows: проект будет ориентирован на окно Windows, папку и .exe. "
-                "Ориентация портрет тоже поддерживается, если она нужна приложению."
-            )
+            self.platform_hint.setText(t("convdlg.hint_windows"))
         if same:
             self.platform_hint.setText(
-                self.platform_hint.text()
-                + " Платформа не меняется — это будет новая версия проекта."
+                self.platform_hint.text() + t("convdlg.hint_same_platform")
             )
         self._refresh_preview()
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Куда сохранить новый проект",
+            t("convdlg.browse_title"),
             self.folder_edit.text() or str(self.project.root.parent),
         )
         if folder:
@@ -351,7 +344,7 @@ class ConvertDialog(QDialog):
             plan = conversion_plan(self.project, self.target, **self._target_options())
         except Exception as exc:
             self._plan = None
-            self.preview_badge.setText("Ошибка")
+            self.preview_badge.setText(t("convdlg.badge_error"))
             self.preview_badge.set_tone("gold")
             self.preview_text.setText(str(exc))
             self.preview_path.setText("")
@@ -359,17 +352,14 @@ class ConvertDialog(QDialog):
             return
         self._plan = plan
         if plan["has_changes"]:
-            self.preview_badge.setText("ГОТОВО")
+            self.preview_badge.setText(t("convdlg.badge_ready"))
             self.preview_badge.set_tone("default")
             self.preview_text.setText("\n".join(f"· {change}" for change in plan["changes"]))
         else:
-            self.preview_badge.setText("БЕЗ ИЗМЕНЕНИЙ")
+            self.preview_badge.setText(t("convdlg.badge_no_changes"))
             self.preview_badge.set_tone("gold")
-            self.preview_text.setText(
-                "Измените платформу, имя, ориентацию, уровни интерфейса, агент или прогресс — "
-                "точную копию можно создать только с хотя бы одним отличием."
-            )
-        self.preview_path.setText(f"Новый проект: {plan['target_root']}")
+            self.preview_text.setText(t("convdlg.no_changes_hint"))
+        self.preview_path.setText(t("convdlg.new_project_path", path=plan["target_root"]))
         self.convert_button.setEnabled(plan["has_changes"] and not self._running)
 
     # ------------------------------------------------------------------
@@ -383,9 +373,9 @@ class ConvertDialog(QDialog):
         self._running = True
         self.result_card.hide()
         self.progress.show()
-        self.status.setText("Копирую проект…")
+        self.status.setText(t("convdlg.copying_status"))
         self.convert_button.setEnabled(False)
-        self.convert_button.setText("Конвертирую…")
+        self.convert_button.setText(t("convdlg.running_button"))
         self.worker = ConvertWorker(self.project, self.target, options)
         self.worker.stage.connect(self.status.setText)
         self.worker.done.connect(self._done)
@@ -396,24 +386,24 @@ class ConvertDialog(QDialog):
         self._running = False
         self.result = result
         self.progress.hide()
-        self.status.setText(result.get("message", "Новый проект создан."))
-        self.convert_button.setText("Создать ещё одну копию")
+        self.status.setText(result.get("message", t("convdlg.created_message")))
+        self.convert_button.setText(t("convdlg.another_copy_button"))
         self.convert_button.setEnabled(True)
         self.result_card.show()
         lines = [str(result.get("path", ""))]
         for change in result.get("changes") or []:
             lines.append("· " + change)
-        lines.append("Исходный проект не изменён.")
+        lines.append(t("convdlg.source_unchanged"))
         self.result_text.setText("\n".join(lines))
 
     def _failed(self, message: str, trace: str) -> None:
         self._running = False
         self.progress.hide()
-        self.convert_button.setText("Создать новый проект")
+        self.convert_button.setText(t("convdlg.create_button"))
         self.convert_button.setEnabled(True)
-        self.status.setText("Ошибка: " + message)
+        self.status.setText(t("convdlg.error_prefix") + message)
         box = QMessageBox(self)
-        box.setWindowTitle("Конвертация не удалась")
+        box.setWindowTitle(t("convdlg.failed_title"))
         box.setIcon(QMessageBox.Icon.Critical)
         box.setText(message)
         box.setDetailedText(trace)
@@ -437,8 +427,8 @@ class ConvertDialog(QDialog):
         if self.worker is not None and self.worker.isRunning():
             answer = QMessageBox.question(
                 self,
-                "Конвертация",
-                "Конвертация ещё выполняется. Закрыть окно?",
+                t("convdlg.close_running_title"),
+                t("convdlg.close_running_text"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

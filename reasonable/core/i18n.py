@@ -193,14 +193,32 @@ def t(key: str, **values: Any) -> str:
         if key.startswith("tools.") and _CYRILLIC_RE.search(key):
             raise KeyError(f"Unknown translation key: {key}")
         return key
+    table = _resolve(table)
     template = table.get(current_language())
     if template is None:
         template = table[DEFAULT_LANGUAGE]
     if values:
         try:
             return template.format(**values)
-        except (KeyError, IndexError, ValueError):
+        except (KeyError, IndexError):
+            # A placeholder in the template is missing from ``values`` — e.g.
+            # a translated variant of an agent prompt uses different braces.
+            # Fall back to the Russian base template, which always matches the
+            # call-site arguments, so the text stays interpolable.
+            if isinstance(TRANSLATIONS.get(key), dict):
+                try:
+                    return TRANSLATIONS[key][DEFAULT_LANGUAGE].format(**values)
+                except (KeyError, IndexError, ValueError):
+                    return template
             return template
+        except ValueError:
+            return template
+    # No interpolation requested: strip single-brace placeholders so raw
+    # templates (e.g. extpanel.agent_prompt with {name}/{root}) never show
+    # braces to the user.  Keys listed in _RAW_TEMPLATE_KEYS are returned
+    # untouched because their callers interpolate them explicitly.
+    if key not in _RAW_TEMPLATE_KEYS and "{" in template and "}" in template and _CYRILLIC_RE.search(template):
+        return re.sub(r"\{[^{}]*\}", "", template)
     return template
 
 
@@ -226,7 +244,19 @@ def _pair(russian: str, english: str) -> dict[str, str]:
     return {"ru": russian, "en": english}
 
 
-TRANSLATIONS: dict[str, dict[str, str]] = {
+def _resolve(entry: dict[str, str] | tuple[str]) -> dict[str, str]:
+    if isinstance(entry, tuple):
+        return TRANSLATIONS[entry[0]]
+    return entry
+
+
+# Keys whose templates are interpolated by callers other than t() (e.g. the
+# external agent prompt is filled via ``agent_prompt()``); t() must return
+# them raw instead of stripping their placeholders.
+_RAW_TEMPLATE_KEYS = {"extpanel.agent_prompt"}
+
+
+TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     # -- brand ---------------------------------------------------------
     "app.tagline": _pair("Разумный движок для смелых идей", "A reasonable way to make games"),
     "app.title": _pair("Reasonable Engine — {tagline}", "Reasonable Engine — {tagline}"),
@@ -1921,4 +1951,118 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Конвертация ещё выполняется. Закрыть окно?",
         "The conversion is still running. Close the window?",
     ),
+
+    # ---- editor/external.py — external agent panel (prefix extpanel.) ----
+    "extpanel.agent_prompt": _pair(
+        """Ты работаешь над проектом «{name}» в папке:
+{root}
+
+1. Прочитай AGENT_GUIDE.md, skills/ и progress/state.json — там полные правила и API движка.
+2. Работай автономно: меняй файлы, генерируй ассеты, проверяй запуск (re.bat validate, re.bat run --headless).
+3. Обновляй план и прогресс через re.bat (plan/task/progress/event) — пользователь видит его в Reasonable Engine.
+4. Заверши через re.bat done "итог" только когда проект запускается и задача выполнена.
+
+Не трогай папку _engine — это встроенная копия движка. Шаги не ограничены:
+работай до результата, не повторяй одно и то же действие.""",
+        """You are working on the project "{name}" in the folder:
+{root}
+
+1. Read AGENT_GUIDE.md, skills/ and progress/state.json — they contain the full rules and engine API.
+2. Work autonomously: change files, generate assets, verify the run (re.bat validate, re.bat run --headless).
+3. Update the plan and progress via re.bat (plan/task/progress/event) — the user sees it in Reasonable Engine.
+4. Finish via re.bat done "summary" only when the project runs and the task is complete.
+
+Do not touch the _engine folder — it is a built-in copy of the engine. Steps are unlimited:
+work until there is a result, do not repeat the same action.""",
+    ),
+    "extpanel.title": ("section.agent",),  # reuse: "ИИ-агент" / "AI agent"
+    "extpanel.subtitle": _pair(
+        "Внешний режим · Claude Code / Codex / Cursor / Cline — прогресс виден здесь",
+        "External mode · Claude Code / Codex / Cursor / Cline — progress shows here",
+    ),
+    "extpanel.badge_waiting": _pair("ОЖИДАНИЕ", "WAITING"),
+    "extpanel.pack_button": _pair("Обновить пакет агента", "Refresh the agent pack"),
+    "extpanel.open_folder_button": _pair("Открыть папку проекта", "Open the project folder"),
+    "extpanel.howto_title": _pair("Как подключить агента", "How to connect an agent"),
+    "extpanel.step1_title": _pair("Откройте папку проекта", "Open the project folder"),
+    "extpanel.step1_text": _pair(
+        "В Claude Code, Codex CLI, Cursor, Cline или другом агенте откройте папку проекта.",
+        "Open the project folder in Claude Code, Codex CLI, Cursor, Cline or another agent.",
+    ),
+    "extpanel.step2_title": _pair("Вставьте промпт", "Paste the prompt"),
+    "extpanel.step2_text": _pair(
+        "Скопируйте промпт ниже и вставьте его агенту — при желании сначала допишите свою задачу.",
+        "Copy the prompt below and paste it to the agent — optionally add your own task first.",
+    ),
+    "extpanel.step3_title": _pair("Смотрите прогресс здесь", "Watch the progress here"),
+    "extpanel.step3_text": _pair(
+        "Агент обновляет план и процент сам — эта панель следит за папкой проекта.",
+        "The agent updates the plan and percentage itself — this panel watches the project folder.",
+    ),
+    "extpanel.prompt_card_title": _pair("Промпт для внешнего агента", "Prompt for the external agent"),
+    "extpanel.copy_prompt_button": _pair("Скопировать промпт", "Copy the prompt"),
+    "extpanel.prompt_note": _pair(
+        "Напишите задачу своими словами. Ниже показан полный текст, который "
+        "получит агент: путь к проекту, обязательный рабочий цикл и ваша задача. "
+        "Кнопка копирует именно его.",
+        "Write the task in your own words. Below is the full text the agent "
+        "will receive: the project path, the required work loop and your task. "
+        "The button copies exactly that.",
+    ),
+    "extpanel.task_label": _pair("Ваша задача", "Your task"),
+    "extpanel.task_placeholder": _pair(
+        "Например: собери меню, первый уровень и экран паузы, затем проверь запуск.",
+        "For example: build a menu, the first level and a pause screen, then verify the run.",
+    ),
+    "extpanel.full_prompt_label": _pair("Полный промпт", "Full prompt"),
+    "extpanel.copy_task_button": _pair("Скопировать только задачу", "Copy only the task"),
+    "extpanel.pack_ready": _pair(
+        "Пакет для агента готов ✓  (AGENT_GUIDE.md, skills/, AGENTS.md, re.bat)",
+        "The agent pack is ready ✓  (AGENT_GUIDE.md, skills/, AGENTS.md, re.bat)",
+    ),
+    "extpanel.live_title": _pair("Живой прогресс", "Live progress"),
+    "extpanel.mode_badge": _pair("ВНЕШНИЙ РЕЖИМ", "EXTERNAL MODE"),
+    "extpanel.waiting_stage": _pair("Ожидание внешнего агента", "Waiting for the external agent"),
+    "extpanel.events_title": _pair("Лента событий", "Event feed"),
+    "extpanel.files_title": _pair("Недавние файлы", "Recent files"),
+    "extpanel.open_guide_button": _pair("Открыть AGENT_GUIDE.md", "Open AGENT_GUIDE.md"),
+    "extpanel.first_task": _pair("ПЕРВАЯ ЗАДАЧА", "FIRST TASK"),
+    "extpanel.first_task_default": _pair(
+        "Изучи проект, предложи план и начни с самого важного шага.",
+        "Study the project, propose a plan and start with the most important step.",
+    ),
+    "extpanel.hint_task_added": _pair("Задача добавлена в промпт · {count} символов", "Task added to the prompt · {count} characters"),
+    "extpanel.hint_no_task": _pair(
+        "Пока задача не написана — в промпте будет просьба изучить проект и предложить план.",
+        "No task written yet — the prompt will ask the agent to study the project and propose a plan.",
+    ),
+    "extpanel.no_task_title": _pair("Задача не описана", "No task described"),
+    "extpanel.no_task_copy_text": _pair(
+        "Скопировать промпт без конкретной задачи? Агент просто изучит проект "
+        "и предложит план.\n\nЛучше сначала написать задачу.",
+        "Copy the prompt without a specific task? The agent will simply study the "
+        "project and propose a plan.\n\nIt is better to write the task first.",
+    ),
+    "extpanel.no_task_only_text": _pair(
+        "Напишите задачу в поле выше, чтобы скопировать только её.",
+        "Write the task in the field above to copy only it.",
+    ),
+    "extpanel.copied_status": _pair("Скопировано в буфер обмена.", "Copied to the clipboard."),
+    "extpanel.badge_copied": _pair("СКОПИРОВАНО", "COPIED"),
+    "extpanel.file_not_created": _pair("Файл ещё не создан: {name}", "The file does not exist yet: {name}"),
+    "extpanel.pack_failed_status": _pair("Не удалось обновить пакет: {error}", "Failed to refresh the pack: {error}"),
+    "extpanel.pack_failed_text": _pair(
+        "Не удалось обновить пакет — попробуйте ещё раз.",
+        "Failed to refresh the pack — please try again.",
+    ),
+    "extpanel.pack_updated_status": _pair("Пакет агента обновлён.", "The agent pack was refreshed."),
+    "extpanel.badge_pack_updated": _pair("ПАКЕТ ОБНОВЛЁН", "PACK REFRESHED"),
+    "extpanel.badge_running": _pair("АГЕНТ РАБОТАЕТ", "AGENT RUNNING"),
+    "extpanel.badge_done": _pair("ЗАВЕРШЕНО", "DONE"),
+    "extpanel.badge_error": _pair("ОШИБКА", "ERROR"),
+    "extpanel.activity_prefix": _pair("активность: ", "activity: "),
+    "extpanel.stage_idle": ("progress.idle_stage",),
+    "extpanel.last_activity": _pair("Последняя активность: {time}", "Last activity: {time}"),
+    "extpanel.no_plan": _pair("Агент ещё не создал план.", "The agent has not created a plan yet."),
+    "extpanel.no_files": _pair("Пока нет изменённых файлов.", "No changed files yet."),
 }
