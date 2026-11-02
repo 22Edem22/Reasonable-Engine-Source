@@ -217,9 +217,110 @@ QUALITY
 """
 
 
-def build_agent_system_prompt_body(version: str) -> str:
-    return AGENT_SYSTEM_PROMPT_BODY.format(
-        version=version, language_rule=AGENT_LANGUAGE_RULE, api_guide=ENGINE_API_GUIDE
+def build_agent_system_prompt_body(project=None, version: str | None = None) -> str:
+    """Full English system prompt body.
+
+    When a *project* is given, the PROJECT/WINDOW/CURRENT PLAN block and the
+    user's notes are appended so the agent sees the task context. The reply
+    language itself is decided by the language rule inside the prompt plus the
+    per-message language note injected by the agent runtime.
+    """
+    from reasonable.version import VERSION_LABEL
+
+    text = AGENT_SYSTEM_PROMPT_BODY.format(
+        version=version or VERSION_LABEL,
+        language_rule=AGENT_LANGUAGE_RULE,
+        api_guide=ENGINE_API_GUIDE,
+    )
+    if project is None:
+        return text
+    return text + "\n\n" + _project_block(project)
+
+
+def _progress_lines(project) -> str:
+    from reasonable.core.progress import read_state
+
+    state = read_state(project.root)
+    lines = [f"- Status: {state.get('status', 'idle')}; progress: {state.get('percent', 0)}%"]
+    stage = state.get("stage")
+    if stage:
+        lines.append(f"- Current stage: {stage}")
+    for task in state.get("tasks", [])[:40]:
+        mark = {"done": "[x]", "in_progress": "[>]", "skipped": "[-]"}.get(task.get("status"), "[ ]")
+        lines.append(f"  {mark} {task.get('id')}: {task.get('title')} ({task.get('status')})")
+    if len(lines) == 1:
+        lines.append("- Plan is empty yet — create it with set_plan.")
+    return "\n".join(lines)
+
+
+def _conversion_note(project) -> str:
+    converted = project.manifest.get("converted_from")
+    if not isinstance(converted, dict) or not converted.get("name"):
+        return ""
+    source_platform = "Android" if converted.get("platform") == "android" else "Windows"
+    return (
+        f"- Converted from \"{converted.get('name')}\" "
+        f"({source_platform}) {converted.get('at', '')}".rstrip()
+    )
+
+
+def _platform_lines(project) -> str:
+    platform = "Android" if getattr(project, "platform", "windows") == "android" else "Windows"
+    lines = [f"- Project platform: {platform}"]
+    note = _conversion_note(project)
+    if note:
+        lines.append(note)
+    return "\n".join(lines)
+
+
+def _project_block(project) -> str:
+    kind = "game" if project.project_type == "game" else "application"
+    levels = ", ".join(project.ui_levels) if project.ui_levels else "standard"
+    return f"""PROJECT
+- Name: {project.name}
+- Type: {kind}
+{_platform_lines(project)}
+- Folder: {project.root}
+- Interface level: {levels} — the matching skills are already placed in skills/
+- Main goal: {project.goal or 'not specified — ask the user'}
+- User notes: {project.notes or 'none'}
+- Entry point: {project.manifest.get('entry', 'main.py')}
+
+WINDOW
+You pick the window size and mode for the task — the user never sees these
+settings. Feel free to edit the template code (default: resizable 1280x720,
+F11 fullscreen).
+
+CURRENT PLAN
+{_progress_lines(project)}"""
+
+
+def build_agent_system_prompt(project) -> str:
+    """System prompt for the built-in agent (English; replies follow the user's task language)."""
+    return build_agent_system_prompt_body(project)
+
+
+def build_initial_user_message(project) -> str:
+    """Fallback first message when an API caller needs one.
+
+    Written in the UI language of the editor installation, which is also the
+    language the agent will answer in (the task-language rule keeps them
+    aligned).
+    """
+    from reasonable.core import i18n
+
+    if i18n.current_language() == "en":
+        return (
+            f"Continue working on the project \"{project.name}\".\n\n"
+            f"Main goal: {project.goal or 'clarify with the user.'}\n"
+            f"Notes: {project.notes or 'none'}\n\n"
+            "Study the project, propose the next concrete step and complete it."
+        )
+    return (
+        f"Продолжи работу над проектом «{project.name}».\n\n"
+        f"Главная цель: {project.goal or 'уточни у пользователя.'}\n"
+        f"Заметки: {project.notes or 'нет'}\n\n"
+        "Изучи проект, предложи следующий конкретный шаг и выполни его."
     )
 
 
@@ -447,4 +548,224 @@ EXTERNAL_CONNECTION_GUIDE = """# Connecting an external AI agent
 
 Everything else (instructions, skills, engine API) the agent reads from the
 project files: `AGENT_GUIDE.md`, `skills/`, `AGENTS.md`, `CLAUDE.md`.
+"""
+
+
+# ---------------------------------------------------------------------------
+# External-agent documents (English-only, like every other agent material).
+# ---------------------------------------------------------------------------
+
+UI_LEVEL_LABELS_EN = {
+    "simple": "simple (tkinter)",
+    "standard": "standard (engine widgets)",
+    "advanced": "advanced (scenes and graphics)",
+}
+
+
+EXTERNAL_GUIDE_TEMPLATE = r"""# AGENT_GUIDE — {name}
+
+> Full instructions for an external AI agent. Read it completely before your
+> first edit. The project was created in **Reasonable Engine {version}**;
+> mode: {mode} agent.
+
+## 1. What this project is
+
+- **Name:** {name}
+- **Type:** {kind}
+- **Platform:** {platform}
+- **Interface level:** {levels} — the matching skills are already in `skills/`
+{conversion_note}
+- **Main goal:** {goal}
+- **Window:** size and mode are the agent's choice per task; the user never
+  sees these settings. Baseline: a resizable 1280x720 window, F11 for
+  fullscreen.
+- **Entry point:** `{entry}`
+- **Folder:** `{root}`
+
+User notes:
+
+```
+{notes}
+```
+
+## 2. Your role
+
+You are an autonomous developer. Bring the project to a state where it runs,
+looks coherent and fully fulfils the goal. Do not limit yourself to advice and
+code fragments: change files, create assets, verify the result.
+
+Without this engine the project cannot be made as good: widgets, splash,
+camera, particles, saves, asset generation and launch validation are built in.
+Use them (`reasonable.runtime`, `skills/`) instead of hand-rolled analogues.
+
+## 3. Mandatory work cycle
+
+1. **Study:** `project.json`, this file, `progress/state.json`, `main.py`,
+   `assets/`, `skills/`. Do not start writing code until you understand the
+   current state.
+2. **Plan:** `re.bat plan "..." "..."` (or `re.sh`). Tasks must be concrete and
+   verifiable.
+3. **Track statuses:** `re.bat task t1 in_progress`, then `done` after checking.
+4. **Write code in small stages.** After each stage run the project:
+   `python main.py` (or the headless check below).
+5. **Verify:** `re.bat validate`; fix errors until there are none.
+6. **Report progress:** `re.bat progress 45 "Game loop ready"` and
+   `re.bat event "Pause screen added"`. The editor shows this to the user.
+7. **Finish:** `re.bat done "What was done, how to run"` only after a
+   successful check.
+
+Headless check (Windows PowerShell / cmd):
+
+```bat
+set SDL_VIDEODRIVER=dummy
+set SDL_AUDIODRIVER=dummy
+set RE_FRAMES=5
+python main.py
+```
+
+(The splash ends instantly by itself during headless runs.)
+
+## 4. Rules
+
+- Work only inside the project folder. Do not modify `_engine/`,
+  `progress/*.json` by hand or system files.
+- Do not delete `project.json`, `assets/` or the entry point without need.
+- No PySide6/PyQt; the project must run on pygame.
+- Never commit or hardcode secrets and API keys. The user key lives outside the
+  project; local models work without a key.
+- Leave no `TODO`, stubs, dead buttons or broken imports.
+- Keep the existing code style; comments only where they earn their place, in
+  Russian or English.
+- For large files make targeted edits; do not overwrite someone else's work.
+
+## 5. Tools
+
+### Project CLI
+
+```bat
+re.bat status
+re.bat events
+re.bat plan "Task 1" "Task 2"
+re.bat task t1 in_progress
+re.bat task t1 done
+re.bat progress 40 "Stage"
+re.bat event "Message"
+re.bat validate
+re.bat run
+re.bat sprite "green slime, cute" assets/sprites/slime.png --style flat --size 256
+re.bat bg "neon city" assets/background.png --width 1280 --height 720
+re.bat export windows
+re.bat export android
+re.bat sync-engine
+re.bat done "Summary"
+```
+
+### Built-in agent (when the user works in the editor)
+
+It can read/write files, run commands, generate sprites and backgrounds, and
+change the plan and progress. It will see your file changes; do not run
+destructive operations at the same time as it does.
+
+### Sprite generation
+
+Always generate assets into `assets/`. Styles: `flat`, `pixel`, `painterly`,
+`icon`. One object per image, transparent background, strong silhouette.
+Verify PNGs visually or by size/alpha. Never embed base64 images in code.
+
+## 6. Skills
+
+Read the relevant files before working:
+
+{skills}
+
+## 7. Architecture and quality
+
+- Game: `Game` + `Scene`, input, HUD, pause, lose/win, restart, saving,
+  particles/animations, touch support.
+- App: `UIApp` + widgets, navigation, empty states, data persistence, adaptive
+  layout, genuinely useful AI assistant.
+- The Reasonable Engine splash is already built in — do not replace it.
+- All asset paths resolve from `Path(__file__).resolve().parent`, not cwd.
+- Target platforms: Windows and Android. Check narrow screens and touches.
+- Performance: 60 FPS at 1280x720; avoid creating a Surface every frame without
+  a cache; cap particle counts.
+
+## 8. Engine API
+
+{api_guide}
+
+## 9. Handing off work
+
+Before finishing, update `AGENT_TASKS.md`: what is done, what remains, which
+files matter. Then:
+
+```bat
+re.bat validate
+re.bat done "Short summary for the user"
+```
+
+If another agent continues, it will read `AGENT_GUIDE.md`,
+`progress/state.json` and `AGENT_TASKS.md`.
+"""
+
+
+AGENT_TASKS_TEMPLATE = """# AGENT_TASKS — {name}
+
+Updated manually or by the agent. Machine progress: `progress/state.json`.
+Commands: `re.bat status`, `re.bat plan ...`, `re.bat task ...`.
+
+## Current plan
+
+{plan_rows}
+
+## Log
+
+- {created_at}: project created in Reasonable Engine.
+
+## Notes for the next agent
+
+- What is done:
+- What is next:
+- Files that must not break: `main.py`, `project.json`, `assets/`.
+"""
+
+
+SHORT_AGENT_TEMPLATE = """# {name} — instructions for AI agents
+
+This project was created in **Reasonable Engine**. Before your first edit,
+read `AGENT_GUIDE.md` completely, then `progress/state.json` and the files in
+`skills/`.
+
+In short:
+
+- Runtime: `reasonable.runtime` (pygame), not PySide6.
+- Entry point: `main.py`; assets: `assets/`.
+- Plan and progress: `re.bat plan/task/progress/event`; checks: `re.bat validate`.
+- Write complete working code, generate sprites into `assets/`, never touch
+  `_engine/`.
+- Reply to the user in the language of their task (Russian task -> Russian
+  reply, English task -> English reply); all engine docs here are English-only.
+- Finish only after a successful run and `re.bat done "..."`.
+
+Full rules, engine API and skills: [AGENT_GUIDE.md](AGENT_GUIDE.md).
+"""
+
+
+EXTERNAL_README_TEMPLATE = """# External agent . {name}
+
+1. Open the project folder in Claude Code / Codex / Cursor / Cline / Windsurf.
+2. Write the first task in the "AI agent" section and copy the ready prompt:
+
+   > Read AGENT_GUIDE.md and skills/. Study project.json and
+   > progress/state.json. Complete the first task, updating progress via
+   > re.bat. Bring the project to a runnable state and pass re.bat validate.
+   > Always answer the user in the language of their task.
+
+3. Watch the "AI agent" section in Reasonable Engine - it updates
+   automatically. The "Check", "Run" and "Export" buttons always work.
+
+CLI: `re.bat status`, `re.bat plan ...`, `re.bat progress 30 "..."`,
+`re.bat validate`, `re.bat sprite ...`, `re.bat export ...`.
+
+Full instructions: `AGENT_GUIDE.md` and `EXTERNAL_AGENT.md`.
 """
