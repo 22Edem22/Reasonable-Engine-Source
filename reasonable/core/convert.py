@@ -23,6 +23,7 @@ from typing import Any
 
 from reasonable.version import VERSION_LABEL
 
+from . import i18n
 from .paths import atomic_write_text, is_relative_to, now_iso, slugify, unique_directory
 from .progress import ensure_state, record_event, set_plan, set_status
 from .project import ENGINE_DIR_NAME, UI_LEVEL_LABELS, Project, normalise_ui_levels
@@ -31,6 +32,26 @@ PLATFORM_NAMES = {"windows": "Windows", "android": "Android"}
 ORIENTATION_NAMES = {"landscape": "альбомная", "portrait": "портретная"}
 AGENT_MODE_NAMES = {"builtin": "встроенный ИИ", "external": "внешний агент"}
 WINDOW_MODE_NAMES = {"windowed": "окно", "fullscreen": "полный экран"}
+
+
+def _orientation_name(orientation: str) -> str:
+    text = i18n.t(f"convert.orientation.{orientation}")
+    return ORIENTATION_NAMES.get(orientation, orientation) if text.startswith("convert.") else text
+
+
+def _agent_mode_name(mode: str) -> str:
+    text = i18n.t(f"convert.mode.{mode}")
+    return AGENT_MODE_NAMES.get(mode, mode) if text.startswith("convert.") else text
+
+
+def _window_mode_name(mode: str) -> str:
+    text = i18n.t(f"convert.window_mode.{mode}")
+    return WINDOW_MODE_NAMES.get(mode, mode) if text.startswith("convert.") else text
+
+
+def _ui_level_label(level: str) -> str:
+    text = i18n.t(f"project.ui_{level}")
+    return UI_LEVEL_LABELS.get(level, level) if text.startswith("project.ui_") else text
 
 # Runtime data, dependency caches and previous exports are not source code.
 # ``ai_config.json`` and ``.env`` may contain API keys and are intentionally not
@@ -186,33 +207,58 @@ def conversion_plan(
     changes: list[str] = []
     if old_platform != target_platform:
         changes.append(
-            f"Платформа: {PLATFORM_NAMES[old_platform]} → {PLATFORM_NAMES[target_platform]}"
+            i18n.t(
+                "convert.change.platform",
+                old=PLATFORM_NAMES[old_platform],
+                new=PLATFORM_NAMES[target_platform],
+            )
         )
     if new_name != project.name:
-        changes.append(f"Название: {project.name} → {new_name}")
+        changes.append(i18n.t("convert.change.name", old=project.name, new=new_name))
     if new_orientation != current_orientation:
         changes.append(
-            f"Ориентация: {ORIENTATION_NAMES[current_orientation]} → {ORIENTATION_NAMES[new_orientation]}"
+            i18n.t(
+                "convert.change.orientation",
+                old=_orientation_name(current_orientation),
+                new=_orientation_name(new_orientation),
+            )
         )
     if new_mode != project.mode:
-        changes.append(f"Агент: {AGENT_MODE_NAMES[project.mode]} → {AGENT_MODE_NAMES[new_mode]}")
+        changes.append(
+            i18n.t(
+                "convert.change.mode",
+                old=_agent_mode_name(project.mode),
+                new=_agent_mode_name(new_mode),
+            )
+        )
     if new_window_mode != project.window_mode:
         changes.append(
-            f"Режим окна: {WINDOW_MODE_NAMES[project.window_mode]} → {WINDOW_MODE_NAMES[new_window_mode]}"
+            i18n.t(
+                "convert.change.window_mode",
+                old=_window_mode_name(project.window_mode),
+                new=_window_mode_name(new_window_mode),
+            )
         )
     if (new_width, new_height) != (current_width, current_height):
-        changes.append(f"Базовый размер: {current_width}×{current_height} → {new_width}×{new_height}")
+        changes.append(
+            i18n.t(
+                "convert.change.size",
+                old=f"{current_width}×{current_height}",
+                new=f"{new_width}×{new_height}",
+            )
+        )
     if new_resizable != project.resizable:
         changes.append(
-            "Изменение размера окна: "
-            + ("выключено → включено" if new_resizable else "включено → выключено")
+            i18n.t(
+                "convert.change.resizable_on" if new_resizable else "convert.change.resizable_off"
+            )
         )
     if new_ui_levels != old_ui_levels:
-        old_labels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in old_ui_levels)
-        new_labels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in new_ui_levels)
-        changes.append(f"Интерфейс: {old_labels} → {new_labels}")
+        old_labels = ", ".join(_ui_level_label(level) for level in old_ui_levels)
+        new_labels = ", ".join(_ui_level_label(level) for level in new_ui_levels)
+        changes.append(i18n.t("convert.change.ui_levels", old=old_labels, new=new_labels))
     if reset_progress:
-        changes.append("Прогресс, план и лента событий: сбросить")
+        changes.append(i18n.t("convert.change.reset"))
 
     return {
         "source": str(project.root),

@@ -48,6 +48,47 @@ def settings_file_path() -> Path:
     return settings_path()
 
 
+# The Windows installer writes the language chosen on its first page into this
+# ASCII marker file; the application merges it into settings.json on first run
+# and deletes the marker (the installer itself must not rewrite UTF-8 JSON).
+INSTALLER_LANGUAGE_MARKER = "installer-language.txt"
+
+
+def installer_language_paths() -> list[Path]:
+    """Locations where the installer language marker may live."""
+    from .paths import app_data_dir, install_root
+
+    paths = [app_data_dir() / INSTALLER_LANGUAGE_MARKER]
+    # The marker next to the editor binary exists only in installed builds;
+    # a source checkout must not pick up stray files from the repository root.
+    from .paths import is_frozen
+
+    if is_frozen():
+        paths.append(install_root() / INSTALLER_LANGUAGE_MARKER)
+    return paths
+
+
+def read_installer_language() -> str:
+    """Language chosen in the installer ('ru'/'en') or '' when no marker exists."""
+    for path in installer_language_paths():
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace").strip().lower()
+        except OSError:
+            continue
+        if text:
+            return normalize_language(text)
+    return ""
+
+
+def remove_installer_language_marker() -> None:
+    """Delete the installer marker(s); called after the choice is persisted."""
+    for path in installer_language_paths():
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
 def read_settings_language() -> str:
     """Language stored in settings.json without importing the Settings class."""
     global _CACHED_SETTINGS_LANGUAGE, _CACHED_SETTINGS_PATH
@@ -56,6 +97,7 @@ def read_settings_language() -> str:
     if _CACHED_SETTINGS_PATH == key and _CACHED_SETTINGS_LANGUAGE is not None:
         return _CACHED_SETTINGS_LANGUAGE
     language = DEFAULT_LANGUAGE
+    stored_language = False
     try:
         from .paths import read_json
 
@@ -63,9 +105,17 @@ def read_settings_language() -> str:
         if isinstance(data, dict):
             ui = data.get("ui")
             if isinstance(ui, dict):
-                language = normalize_language(ui.get("language"))
+                raw = str(ui.get("language") or "").strip()
+                if raw:
+                    language = normalize_language(raw)
+                    stored_language = True
     except Exception:
         language = DEFAULT_LANGUAGE
+    if not stored_language:
+        # Fresh install: fall back to the language picked in the installer.
+        marker = read_installer_language()
+        if marker:
+            language = marker
     _CACHED_SETTINGS_PATH = key
     _CACHED_SETTINGS_LANGUAGE = language
     return language
@@ -94,7 +144,9 @@ def set_override(language: str | None) -> None:
 
 def detect_user_language(text: str) -> str:
     """Language of the user's own task — what the AI agent must reply in."""
-    return "ru" if _CYRILLIC_RE.search(text or "") else "en"
+    if not (text or "").strip():
+        return DEFAULT_LANGUAGE
+    return "ru" if _CYRILLIC_RE.search(text) else "en"
 
 
 _TASK_LANGUAGE_NOTES = {
@@ -545,6 +597,766 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "tools.Это не текстовый файл. Используйте inspect_image для изображений.": _pair("Это не текстовый файл. Используйте inspect_image для изображений.", "This is not a text file. Use inspect_image for images."),
     "tools.ни один файл проекта не изменён": _pair("ни один файл проекта не изменён", "no project file was changed"),
     "tools.… (обрезано)": _pair("… (обрезано)", "… (truncated)"),
+    # --- Settings dialog (editor/settings_dialog.py) --------------------
+    "settings.title": _pair("Настройки — Reasonable Engine", "Settings — Reasonable Engine"),
+    "settings.heading": _pair("Настройки", "Settings"),
+    "settings.subtitle": _pair(
+        "Основные настройки · расширенные — по переключателю",
+        "Essentials · advanced behind a toggle",
+    ),
+    "settings.advanced_toggle": _pair("Расширенные настройки", "Advanced settings"),
+    "settings.advanced_tooltip": _pair(
+        "Провайдеры, модели, Base URL, картинки, параметры агента, Android и внешние агенты.",
+        "Providers, models, Base URL, images, agent parameters, Android and external agents.",
+    ),
+    "settings.badge_local": _pair("ДАННЫЕ ХРАНЯТСЯ ЛОКАЛЬНО", "DATA STAYS LOCAL"),
+    "settings.nav_providers": _pair("Провайдеры ИИ", "AI providers"),
+    "settings.nav_free": _pair("Бесплатные API", "Free APIs"),
+    "settings.nav_images": _pair("Картинки и спрайты", "Images and sprites"),
+    "settings.nav_agent": _pair("Агент и предпросмотр", "Agent and preview"),
+    "settings.no_key_title": _pair("Без ключа", "Without a key"),
+    "settings.no_key_text": _pair(
+        "OpenRouter, Groq, Gemini и другие бесплатные тарифы требуют ключ. "
+        "Ollama и LM Studio работают полностью локально, если запущены на этом ПК.",
+        "OpenRouter, Groq, Gemini and other free tiers need a key. Ollama and LM Studio "
+        "run fully locally when started on this PC.",
+    ),
+    "settings.custom_server": _pair("Свой сервер", "Custom server"),
+    "settings.simple_title": _pair("Основные настройки", "Essential settings"),
+    "settings.simple_intro": _pair(
+        "Только необходимое для работы. Провайдеры, модели, Base URL, картинки, "
+        "параметры Android и внешних агентов находятся в расширенных настройках.",
+        "Only what you need to get going. Providers, models, Base URL, images, Android "
+        "and external agent parameters live in the advanced settings.",
+    ),
+    "settings.setup_provider": _pair("Настроить провайдера и модель…", "Set up provider and model…"),
+    "settings.projects_title": _pair("Папка проектов", "Projects folder"),
+    "settings.projects_hint": _pair(
+        "Где создаются новые проекты. Существующие папки не перемещаются.",
+        "Where new projects are created. Existing folders are not moved.",
+    ),
+    "settings.projects_placeholder": _pair(
+        "По умолчанию: папка Projects рядом с движком",
+        "Default: the Projects folder next to the engine",
+    ),
+    "settings.reset_default": _pair("По умолчанию", "Default"),
+    "settings.preview_title": _pair("Предпросмотр", "Preview"),
+    "settings.preview_hint": _pair(
+        "Заставка Reasonable Engine всегда играет перед запуском проекта — "
+        "и в редакторе, и в готовой игре. Отключить её может только разработчик движка.",
+        "The Reasonable Engine splash always plays before a project starts — in the editor "
+        "and in the finished game. Only the engine developer can disable it.",
+    ),
+    "settings.language_title": _pair("Язык интерфейса", "Interface language"),
+    "settings.language_hint": _pair(
+        "Язык установщика, редактора и всех окон программы. Применяется после перезапуска.",
+        "The language of the installer, the editor and every window. Applied after a restart.",
+    ),
+    "settings.restart_hint": _pair(
+        "Язык интерфейса применится после перезапуска Reasonable Engine.",
+        "The interface language will be applied after restarting Reasonable Engine.",
+    ),
+    "settings.simple_need_key": _pair(
+        "{name} · {model}\nКлюч понадобится только для встроенного агента. Ручная работа "
+        "и запуск проекта доступны без него.",
+        "{name} · {model}\nThe key is only needed for the built-in agent. Manual work and "
+        "running the project work without it.",
+    ),
+    "settings.simple_ready_line": _pair("{name} · {model}\n{key_state}.", "{name} · {model}\n{key_state}."),
+    "settings.folder_dialog": _pair("Папка для новых проектов", "Folder for new projects"),
+    "settings.model_for_agent": _pair("Модель для агента", "Model for the agent"),
+    "settings.pick_provider": _pair(
+        "Выберите провайдера. Ключ нужен не всем.", "Pick a provider. Not everyone needs a key."
+    ),
+    "settings.active_badge": _pair("АКТИВНЫЙ", "ACTIVE"),
+    "settings.key_required_badge": _pair("НУЖЕН КЛЮЧ", "KEY REQUIRED"),
+    "settings.no_key_badge": _pair("БЕЗ КЛЮЧА", "NO KEY"),
+    "settings.label_model": _pair("Модель", "Model"),
+    "settings.key_placeholder": _pair("API-ключ (если требуется)", "API key (if required)"),
+    "settings.show": _pair("Показать", "Show"),
+    "settings.hide": _pair("Скрыть", "Hide"),
+    "settings.get_key": _pair("Получить ключ", "Get a key"),
+    "settings.label_api_key": _pair("API-ключ", "API key"),
+    "settings.load_models": _pair("Загрузить модели", "Load models"),
+    "settings.test_connection": _pair("Проверить подключение", "Test connection"),
+    "settings.how_it_works": _pair("Как это работает", "How it works"),
+    "settings.how_it_works_text": _pair(
+        "Reasonable Engine общается с моделями через OpenAI-совместимый /chat/completions "
+        "или нативный Anthropic API. Для агента важна поддержка tool calling: Claude, "
+        "GPT-4.1, Gemini 2.5, Qwen и Llama 3.3 подходят. Если провайдер отклонит инструменты, "
+        "агент переключится на текстовый JSON-протокол.",
+        "Reasonable Engine talks to models through the OpenAI-compatible /chat/completions or "
+        "the native Anthropic API. The agent needs tool calling: Claude, GPT-4.1, Gemini 2.5, "
+        "Qwen and Llama 3.3 all work. If a provider rejects tools, the agent falls back to the "
+        "text JSON protocol.",
+    ),
+    "settings.get_api_key_link": _pair("Получить API-ключ", "Get an API key"),
+    "settings.docs_link": _pair("Документация", "Documentation"),
+    "settings.specify_base_url": _pair("Укажите Base URL.", "Specify the Base URL."),
+    "settings.enter_api_key": _pair("Введите API-ключ.", "Enter the API key."),
+    "settings.enter_key_models": _pair(
+        "Введите API-ключ, чтобы загрузить список моделей.",
+        "Enter the API key to load the model list.",
+    ),
+    "settings.testing": _pair("Проверяю соединение…", "Testing the connection…"),
+    "settings.success_prefix": _pair("Успешно: ", "Success: "),
+    "settings.connection_ok": _pair("Подключение работает.", "The connection works."),
+    "settings.error_prefix": _pair("Ошибка: ", "Error: "),
+    "settings.connection_failed": _pair(
+        "Не удалось подключиться к модели.", "Could not connect to the model."
+    ),
+    "settings.loading_models": _pair("Загружаю список моделей…", "Loading the model list…"),
+    "settings.empty_model_list": _pair(
+        "Провайдер не вернул список. Введите модель вручную.",
+        "The provider returned no list. Enter the model manually.",
+    ),
+    "settings.models_loaded": _pair("Загружено моделей: {count}", "Models loaded: {count}"),
+    "settings.shown_first_500": _pair(" (показаны первые 500)", " (first 500 shown)"),
+    "settings.load_failed_prefix": _pair(
+        "Не удалось загрузить список: ", "Could not load the list: "
+    ),
+    "settings.load_failed_suffix": _pair(
+        " Можно ввести модель вручную.", " You can enter the model manually."
+    ),
+    "settings.free_title": _pair("Бесплатные API-ключи", "Free API keys"),
+    "settings.free_intro": _pair(
+        "Эти сервисы дают бесплатный уровень или пробные кредиты. Лимиты меняются — "
+        "проверяйте условия на сайте. Локальные модели вообще не требуют ключа.",
+        "These services offer a free tier or trial credits. Limits change — check the terms "
+        "on their site. Local models need no key at all.",
+    ),
+    "settings.local_no_key_text": _pair(
+        "Ollama / LM Studio — запустите локальный сервер и укажите модель.\n"
+        "Для остальных провайдеров добавьте бесплатный API-ключ.",
+        "Ollama / LM Studio — start a local server and enter a model.\n"
+        "For other providers, add a free API key.",
+    ),
+    "settings.setup_provider_btn": _pair("Настроить провайдера", "Set up provider"),
+    "settings.open_site": _pair("Открыть сайт", "Open site"),
+    "settings.images_intro": _pair(
+        "Встроенный агент и кнопка «Сгенерировать спрайт» используют этот провайдер. "
+        "Если сеть недоступна, процедурный генератор создаст аккуратный спрайт локально.",
+        "The built-in agent and the “Generate sprite” button use this provider. When the "
+        "network is unavailable, the procedural generator creates a tidy sprite locally.",
+    ),
+    "settings.label_provider": _pair("Провайдер", "Provider"),
+    "settings.label_description": _pair("Описание", "Description"),
+    "settings.label_base_url": _pair("Base URL", "Base URL"),
+    "settings.fallback_checkbox": _pair(
+        "Если сеть недоступна — рисовать процедурно",
+        "If the network is unavailable — draw procedurally",
+    ),
+    "settings.tip_title": _pair("Совет", "Tip"),
+    "settings.tip_text": _pair(
+        "Для спрайтов лучше всего работают короткие предметные промпты: "
+        "«золотая звезда, флэт, прозрачный фон». Фон можно сгенерировать отдельно "
+        "кнопкой в разделе «Ассеты».",
+        "Short, concrete prompts work best for sprites: “golden star, flat, transparent "
+        "background”. Backgrounds can be generated separately with the button in the "
+        "“Assets” section.",
+    ),
+    "settings.label_temperature": _pair("Температура", "Temperature"),
+    "settings.label_context": _pair("Помнить сообщений", "Messages to remember"),
+    "settings.projects_hint2": _pair(
+        "По умолчанию новые проекты создаются в папке Projects рядом с движком. "
+        "Можно выбрать любую другую папку — путь сохранится.",
+        "By default, new projects are created in the Projects folder next to the engine. "
+        "You can pick any other folder — the path is remembered.",
+    ),
+    "settings.preview_splash_title": _pair("Предпросмотр и заставка", "Preview and splash"),
+    "settings.external_title": _pair("Внешний агент", "External agent"),
+    "settings.external_text": _pair(
+        "Для внешнего режима в каждом проекте создаются AGENT_GUIDE.md, AGENTS.md, "
+        "CLAUDE.md, правила для Cursor/Copilot, skills/, AGENT_TASKS.md и re.bat. "
+        "Агент обновляет прогресс командами `re.bat progress`, `re.bat task` и `re.bat event` — "
+        "редактор показывает их в реальном времени.",
+        "External mode adds AGENT_GUIDE.md, AGENTS.md, CLAUDE.md, Cursor/Copilot rules, "
+        "skills/, AGENT_TASKS.md and re.bat to every project. The agent updates progress "
+        "with `re.bat progress`, `re.bat task` and `re.bat event` — the editor shows them "
+        "in real time.",
+    ),
+    "settings.save": _pair("Сохранить настройки", "Save settings"),
+    # --- Project page (editor/project_page.py) --------------------------
+    "projectpage.status_running": _pair("РАБОТАЕТ", "RUNNING"),
+    "projectpage.status_done": _pair("ГОТОВО", "DONE"),
+    "projectpage.status_error": _pair("ОШИБКА", "ERROR"),
+    "projectpage.status_idle": _pair("ОЖИДАНИЕ", "IDLE"),
+    "projectpage.badge_success": _pair("УСПЕШНО", "SUCCESS"),
+    "projectpage.badge_failure": _pair("ОШИБКА", "ERROR"),
+    "projectpage.badge_running": _pair("ЗАПУЩЕН", "RUNNING"),
+    "projectpage.badge_not_run": _pair("НЕ ЗАПУСКАЛСЯ", "NOT RUN"),
+    "projectpage.back_tooltip": _pair("Ко всем проектам", "Back to all projects"),
+    "projectpage.badge_game": _pair("ИГРА", "GAME"),
+    "projectpage.badge_app": _pair("ПРИЛОЖЕНИЕ", "APP"),
+    "projectpage.badge_mode_builtin": _pair("ВСТРОЕННЫЙ ИИ", "BUILT-IN AI"),
+    "projectpage.badge_mode_external": _pair("ВНЕШНИЙ АГЕНТ", "EXTERNAL AGENT"),
+    "projectpage.goal_missing": _pair("Цель пока не описана", "No goal described yet"),
+    "projectpage.goal_missing_long": _pair(
+        "Цель не описана. Добавьте её в настройках проекта.",
+        "The goal is not described. Add it in the project settings.",
+    ),
+    "projectpage.export_btn": _pair("Экспорт", "Export"),
+    "projectpage.export_tooltip": _pair(
+        "Собрать проект в exe / APK / портативную папку (по умолчанию на Рабочий стол)",
+        "Build the project into an exe / APK / portable folder (to the Desktop by default)",
+    ),
+    "projectpage.run_btn": _pair("Запустить", "Run"),
+    "projectpage.stop_btn": _pair("Остановить", "Stop"),
+    "projectpage.sections_label": _pair("РАЗДЕЛЫ", "SECTIONS"),
+    "projectpage.nav_overview": _pair("Обзор", "Overview"),
+    "projectpage.nav_agent": _pair("ИИ-агент", "AI agent"),
+    "projectpage.nav_code": _pair("Код", "Code"),
+    "projectpage.nav_assets": _pair("Ассеты", "Assets"),
+    "projectpage.project_label": _pair("ПРОЕКТ", "PROJECT"),
+    "projectpage.project_settings_btn": _pair("Настройки проекта", "Project settings"),
+    "projectpage.history_btn": _pair("История версий", "Version history"),
+    "projectpage.history_tooltip": _pair(
+        "Снимки проекта и возврат к рабочей версии",
+        "Project snapshots and returning to a working version",
+    ),
+    "projectpage.open_folder_btn": _pair("Открыть папку", "Open folder"),
+    "projectpage.convert_btn": _pair("Конвертировать…", "Convert…"),
+    "projectpage.convert_tooltip": _pair(
+        "Создать новый проект для другой платформы или с другими настройками",
+        "Create a new project for another platform or with different settings",
+    ),
+    "projectpage.delete_btn": _pair("Удалить проект", "Delete project"),
+    "projectpage.delete_tooltip": _pair(
+        "Убрать проект из списка или удалить его папку с диска",
+        "Remove the project from the list or delete its folder from disk",
+    ),
+    "projectpage.ai_project_title": _pair("ИИ проекта", "Project AI"),
+    "projectpage.guide_btn": _pair("Инструкции агента", "Agent instructions"),
+    "projectpage.run_result_label": _pair("Результат запуска", "Run result"),
+    "projectpage.run_result_idle_title": _pair(
+        "Проверьте проект в предпросмотре", "Check the project in the preview"
+    ),
+    "projectpage.run_result_idle_detail": _pair(
+        "Быстрый цикл: запустите проект, посмотрите результат, исправьте код или "
+        "попросите ИИ — и запустите снова.",
+        "Fast loop: run the project, look at the result, fix the code or ask the AI — "
+        "and run again.",
+    ),
+    "projectpage.run_again_btn": _pair("Запустить снова", "Run again"),
+    "projectpage.fix_ai_btn": _pair("Исправить с ИИ", "Fix with AI"),
+    "projectpage.fix_ai_tooltip": _pair(
+        "Подготовить задачу агенту с текстом ошибки и открыть ИИ-агента",
+        "Prepare an agent task with the error text and open the AI agent",
+    ),
+    "projectpage.rollback_btn": _pair("Вернуть рабочую версию", "Restore working version"),
+    "projectpage.rollback_tooltip": _pair(
+        "Восстановить последний снимок проекта", "Restore the latest project snapshot"
+    ),
+    "projectpage.run_history_btn": _pair("История", "History"),
+    "projectpage.progress_title": _pair("Прогресс разработки", "Development progress"),
+    "projectpage.stat_tasks": _pair("Задачи", "Tasks"),
+    "projectpage.stat_tasks_hint": _pair("план работ", "work plan"),
+    "projectpage.stat_files": _pair("Файлы", "Files"),
+    "projectpage.stat_files_hint": _pair("в проекте", "in project"),
+    "projectpage.open_agent_btn": _pair("Открыть агента", "Open agent"),
+    "projectpage.open_agent_btn_full": _pair("Открыть ИИ-агента", "Open AI agent"),
+    "projectpage.edit_code_btn": _pair("Редактировать код", "Edit code"),
+    "projectpage.sprites_btn": _pair("Спрайты", "Sprites"),
+    "projectpage.plan_title": _pair("План работ", "Work plan"),
+    "projectpage.plan_hint": _pair(
+        "План ведёт ИИ-агент. Здесь он показывается для чтения.",
+        "The AI agent maintains the plan. It is shown here read-only.",
+    ),
+    "projectpage.events_title": _pair("События", "Events"),
+    "projectpage.goal_notes_title": _pair("Цель и заметки", "Goal and notes"),
+    "projectpage.edit_btn": _pair("Изменить", "Edit"),
+    "projectpage.recent_files_title": _pair("Недавние файлы", "Recent files"),
+    "projectpage.refresh_btn": _pair("Обновить", "Refresh"),
+    "projectpage.history_title": _pair("История версий", "Version history"),
+    "projectpage.history_empty_initial": _pair(
+        "Снимки появятся перед первым запуском агента.",
+        "Snapshots will appear before the first agent run.",
+    ),
+    "projectpage.open_history_btn": _pair("Открыть историю", "Open history"),
+    "projectpage.snapshot_now_btn": _pair("Снимок сейчас", "Snapshot now"),
+    "projectpage.snapshot_now_tooltip": _pair(
+        "Сохранить текущее состояние как версию, к которой можно вернуться",
+        "Save the current state as a version you can return to",
+    ),
+    "projectpage.history_empty": _pair(
+        "Снимков пока нет. Перед каждым запуском ИИ-агента рабочая версия "
+        "сохраняется автоматически.",
+        "No snapshots yet. Before every AI agent run the working version is saved "
+        "automatically.",
+    ),
+    "projectpage.history_files_line": _pair("{time} · файлов {count}", "{time} · {count} files"),
+    "projectpage.console_title": _pair("Запуск проекта", "Project run"),
+    "projectpage.console_title_splash": _pair(
+        "Запуск проекта · заставка Reasonable Engine", "Project run · Reasonable Engine splash"
+    ),
+    "projectpage.hide_console_tooltip": _pair("Скрыть консоль", "Hide console"),
+    "projectpage.back_running_text": _pair(
+        "Проект ещё запущен. Остановить его и вернуться к списку?",
+        "The project is still running. Stop it and return to the list?",
+    ),
+    "projectpage.guide_missing_title": _pair("Инструкция", "Instructions"),
+    "projectpage.guide_missing_text": _pair(
+        "AGENT_GUIDE.md ещё не создан.", "AGENT_GUIDE.md has not been created yet."
+    ),
+    "projectpage.restored_title": _pair("Версия восстановлена", "Version restored"),
+    "projectpage.restored_detail": _pair(
+        "Файлы проекта возвращены к выбранному снимку. Запустите проект, чтобы проверить результат.",
+        "Project files are back at the chosen snapshot. Run the project to check the result.",
+    ),
+    "projectpage.restored_status": _pair(
+        "Версия проекта восстановлена. Предыдущее состояние сохранено в истории.",
+        "The project version was restored. The previous state is kept in history.",
+    ),
+    "projectpage.snapshot_dialog_title": _pair("Снимок версии", "Version snapshot"),
+    "projectpage.snapshot_dialog_label": _pair(
+        "Название версии (необязательно):", "Version name (optional):"
+    ),
+    "projectpage.manual_snapshot_label": _pair(
+        "Ручной снимок рабочей версии", "Manual snapshot of the working version"
+    ),
+    "projectpage.snapshot_failed_title": _pair(
+        "Не удалось создать снимок", "Could not create the snapshot"
+    ),
+    "projectpage.snapshot_created_status": _pair(
+        "Снимок «{label}» создан. Его можно вернуть из истории.",
+        "Snapshot “{label}” created. You can restore it from history.",
+    ),
+    "projectpage.restore_confirm_title": _pair("Отменить изменения", "Undo changes"),
+    "projectpage.restore_confirm_text": _pair(
+        "Вернуть версию «{label}»?\n\n"
+        "Текущее состояние сначала сохранится отдельным снимком, поэтому "
+        "восстановление тоже можно отменить.",
+        "Restore version “{label}”?\n\n"
+        "The current state will first be saved as a separate snapshot, so the restore "
+        "itself can be undone.",
+    ),
+    "projectpage.restore_failed_title": _pair(
+        "Не удалось вернуть версию", "Could not restore the version"
+    ),
+    "projectpage.restored_files_status": _pair(
+        "Версия «{label}» восстановлена: файлов {restored}, удалено {removed}.",
+        "Version “{label}” restored: {restored} files restored, {removed} removed.",
+    ),
+    "projectpage.no_snapshots_title": _pair("Нет снимков", "No snapshots"),
+    "projectpage.no_snapshots_text": _pair(
+        "Пока нет сохранённых версий. Они создаются автоматически перед запуском агента.",
+        "No saved versions yet. They are created automatically before agent runs.",
+    ),
+    "projectpage.agent_running_text": _pair(
+        "Дождитесь завершения агента или остановите его — затем можно "
+        "создавать снимки и возвращать версии.",
+        "Wait for the agent to finish or stop it — then you can create snapshots "
+        "and restore versions.",
+    ),
+    "projectpage.project_settings_saved": _pair(
+        "Настройки проекта сохранены.", "Project settings saved."
+    ),
+    "projectpage.ai_settings_saved": _pair("Настройки ИИ сохранены.", "AI settings saved."),
+    "projectpage.export_done_default": _pair("Экспорт завершён.", "Export finished."),
+    "projectpage.converted_status": _pair(
+        "Новый проект создан: {path}", "New project created: {path}"
+    ),
+    "projectpage.orientation_portrait": _pair("портрет", "portrait"),
+    "projectpage.orientation_landscape": _pair("альбом", "landscape"),
+    "projectpage.meta_ui_line": _pair("Интерфейс: {levels}", "UI: {levels}"),
+    "projectpage.meta_window_note": _pair("окно настроит агент", "the agent sets up the window"),
+    "projectpage.model_not_selected": _pair("модель не выбрана", "no model selected"),
+    "projectpage.fallback_ai": _pair("ИИ", "AI"),
+    "projectpage.active_model_tooltip": _pair(
+        "Активная модель: {full} · {model}", "Active model: {full} · {model}"
+    ),
+    "projectpage.access_external": _pair(
+        "внешний агент · API не требуется", "external agent · no API needed"
+    ),
+    "projectpage.access_need_key": _pair("нужен API-ключ", "API key needed"),
+    "projectpage.access_key_saved": _pair("ключ сохранён", "key saved"),
+    "projectpage.access_no_key": _pair("работает без ключа", "works without a key"),
+    "projectpage.hint_module_missing": _pair(
+        "Не установлена нужная библиотека. Установите её или попросите агента убрать зависимость.",
+        "A required library is not installed. Install it or ask the agent to drop the dependency.",
+    ),
+    "projectpage.hint_import": _pair(
+        "Ошибка импорта: модуль есть, но импортируется неверное имя или не хватает зависимости.",
+        "Import error: the module exists but is imported by the wrong name or a dependency is missing.",
+    ),
+    "projectpage.hint_syntax": _pair(
+        "В коде синтаксическая ошибка — файл нужно исправить и сохранить.",
+        "There is a syntax error in the code — fix the file and save it.",
+    ),
+    "projectpage.hint_filenotfound": _pair(
+        "Код обращается к файлу, которого нет в проекте. Проверьте путь к ассету.",
+        "The code opens a file that is not in the project. Check the asset path.",
+    ),
+    "projectpage.hint_permission": _pair(
+        "Не хватает прав на файл или папку. Закройте занявший файл и попробуйте снова.",
+        "Missing permissions for a file or folder. Close whatever holds the file and try again.",
+    ),
+    "projectpage.hint_pygame": _pair(
+        "Ошибка pygame: окно, звук или поверхность созданы неправильно для этого окружения.",
+        "pygame error: a window, sound or surface was created incorrectly for this environment.",
+    ),
+    "projectpage.hint_type": _pair(
+        "Ошибка в данных или вызове функции. Агент может найти точное место по трассировке.",
+        "An error in data or a function call. The agent can find the exact place from the traceback.",
+    ),
+    "projectpage.hint_timeout": _pair(
+        "Проект не завершился вовремя — проверьте бесконечные циклы или ожидание ввода.",
+        "The project did not finish in time — check for infinite loops or waiting for input.",
+    ),
+    "projectpage.hint_generic": _pair(
+        "Проект завершился с ошибкой. Полный вывод и трассировка остаются в консоли ниже.",
+        "The project exited with an error. The full output and traceback stay in the console below.",
+    ),
+    "projectpage.success_title": _pair(
+        "Проект запустился и завершился без ошибок",
+        "The project ran and exited without errors",
+    ),
+    "projectpage.success_detail": _pair(
+        "Предпросмотр работает. Можно менять код или попросить ИИ о следующем шаге.",
+        "The preview works. You can edit the code or ask the AI for the next step.",
+    ),
+    "projectpage.no_start_title": _pair("Проект не запустился", "The project did not start"),
+    "projectpage.exit_code_title": _pair(
+        "Проект завершился с кодом {code}", "The project exited with code {code}"
+    ),
+    "projectpage.running_title": _pair(
+        "Проект запущен в предпросмотре", "The project is running in the preview"
+    ),
+    "projectpage.running_detail": _pair(
+        "Посмотрите окно проекта. Ошибки появятся здесь сразу после завершения процесса.",
+        "Look at the project window. Errors will appear here as soon as the process exits.",
+    ),
+    "projectpage.external_agent_text": _pair(
+        "Этот проект работает с внешним агентом. Скопируйте ошибку из консоли "
+        "в задачу для Claude Code, Codex, Cursor или другого агента.",
+        "This project works with an external agent. Copy the error from the console into "
+        "a task for Claude Code, Codex, Cursor or another agent.",
+    ),
+    "projectpage.default_error": _pair("Проект завершился с ошибкой.", "The project exited with an error."),
+    "projectpage.fix_prompt": _pair(
+        "Проект не запускается. Найди причину, исправь файлы и проверь запуск.\n\n"
+        "Ошибка запуска:\n{error}\n\n"
+        "Сначала прочитай нужные файлы, затем измени только необходимое. "
+        "В конце вызови validate_project и run_project.",
+        "The project does not start. Find the cause, fix the files and verify it runs.\n\n"
+        "Run error:\n{error}\n\n"
+        "First read the relevant files, then change only what is necessary. "
+        "Call validate_project and run_project at the end.",
+    ),
+    "projectpage.fix_prepared_status": _pair(
+        "Задача с текстом ошибки подготовлена в ИИ-агенте.",
+        "A task with the error text is prepared in the AI agent.",
+    ),
+    "projectpage.already_running": _pair("Проект уже запущен.", "The project is already running."),
+    "projectpage.no_entry_title": _pair("Нет точки входа", "No entry point"),
+    "projectpage.no_entry_text": _pair("Файл {name} не найден.", "The file {name} was not found."),
+    "projectpage.console_project": _pair(
+        "Проект: {name}\nПапка: {folder}\n", "Project: {name}\nFolder: {folder}\n"
+    ),
+    "projectpage.start_failed_console": _pair(
+        "Не удалось запустить процесс.\n", "Could not start the process.\n"
+    ),
+    "projectpage.start_failed_title": _pair(
+        "Не удалось запустить процесс", "Could not start the process"
+    ),
+    "projectpage.start_failed_detail": _pair(
+        "Python или папка проекта недоступны. Проверьте установку Python в настройках.",
+        "Python or the project folder is unavailable. Check the Python installation in the settings.",
+    ),
+    "projectpage.start_failed_error": _pair(
+        "Процесс не стартовал за 5 секунд.", "The process did not start within 5 seconds."
+    ),
+    "projectpage.run_started_status": _pair(
+        "Проект запущен. Заставка ~3 секунды, затем игра/приложение.",
+        "The project is running. The splash takes ~3 seconds, then the game/app.",
+    ),
+    "projectpage.exit_console": _pair(
+        "\nПроцесс завершён с кодом {code}.\n", "\nThe process exited with code {code}.\n"
+    ),
+    "projectpage.console_finished": _pair("Проект завершён", "Project finished"),
+    "projectpage.console_finished_error": _pair(
+        "Проект завершён с ошибкой ({code})", "Project exited with an error ({code})"
+    ),
+    "projectpage.event_success": _pair(
+        "Проект запустился без ошибок", "The project ran without errors"
+    ),
+    "projectpage.event_failed": _pair(
+        "Проект завершился с ошибкой (код {code})", "The project exited with an error (code {code})"
+    ),
+    "projectpage.finished_status": _pair("Проект завершён.", "The project finished."),
+    "projectpage.finished_status_code": _pair(
+        "Проект завершился с кодом {code}.", "The project exited with code {code}."
+    ),
+    "projectpage.process_error_console": _pair(
+        "\nОшибка процесса: {error}\n", "\nProcess error: {error}\n"
+    ),
+    "projectpage.process_error_title": _pair("Ошибка запуска процесса", "Process start error"),
+    "projectpage.process_error_detail": _pair(
+        "Процесс не смог стартовать. Проверьте путь к Python и папку проекта.",
+        "The process could not start. Check the Python path and the project folder.",
+    ),
+    "projectpage.stopping_console": _pair("\nОстанавливаю проект…\n", "\nStopping the project…\n"),
+    "projectpage.stopped_title": _pair("Запуск остановлен", "Run stopped"),
+    "projectpage.stopped_detail": _pair(
+        "Проект остановлен до завершения. Запустите снова, когда будете готовы.",
+        "The project was stopped before finishing. Run again when you are ready.",
+    ),
+    "projectpage.stat_tasks_value": _pair("задач выполнено", "tasks done"),
+    "projectpage.activity": _pair("Активность: {time}", "Activity: {time}"),
+    "projectpage.stat_files_value": _pair("файлов в проекте", "files in project"),
+    "projectpage.notes_empty": _pair(
+        "Заметок пока нет. Их можно добавить в настройках проекта или попросить агента.",
+        "No notes yet. Add them in the project settings or ask the agent.",
+    ),
+    "projectpage.plan_empty": _pair(
+        "План пока пуст. Агент создаст его при запуске.",
+        "The plan is empty for now. The agent will create it when it runs.",
+    ),
+    "projectpage.files_tooltip": _pair(
+        "Двойной клик — открыть в редакторе", "Double-click to open in the editor"
+    ),
+    "projectpage.files_empty": _pair("Пока нет изменённых файлов.", "No changed files yet."),
+    "projectpage.agent_error_title": _pair(
+        "Агент не смог завершить работу", "The agent could not finish"
+    ),
+    "projectpage.agent_error_detail": _pair(
+        "Подробности — в чате агента. Проверьте ключ, модель и сеть, "
+        "затем запустите задачу снова.",
+        "Details are in the agent chat. Check the key, the model and the network, "
+        "then run the task again.",
+    ),
+    "projectpage.agent_error_fallback": _pair("Ошибка ИИ-агента.", "AI agent error."),
+    "projectpage.agent_incomplete_title": _pair(
+        "Агент не завершил работу", "The agent did not finish"
+    ),
+    "projectpage.agent_incomplete_detail": _pair(
+        "Агент остановился до проверки и запуска. Запустите проект, "
+        "чтобы увидеть результат, или продолжите задачу в чате.",
+        "The agent stopped before validating and running. Run the project to see the "
+        "result, or continue the task in the chat.",
+    ),
+    "projectpage.agent_done_title": _pair(
+        "Агент изменил проект — проверьте предпросмотр",
+        "The agent changed the project — check the preview",
+    ),
+    "projectpage.agent_done_detail": _pair(
+        "Запустите проект, чтобы увидеть результат. Если стало хуже, верните версию из истории.",
+        "Run the project to see the result. If it got worse, restore a version from history.",
+    ),
+    "projectpage.agent_finished_status": _pair(
+        "Агент завершил работу. Прогресс обновлён.", "The agent finished. Progress updated."
+    ),
+    # --- New-project wizard (editor/new_project.py) ---------------------
+    "newproj.title": _pair("Новый проект — Reasonable Engine", "New project — Reasonable Engine"),
+    "newproj.heading": _pair("Новый проект", "New project"),
+    "newproj.pill_idea": _pair("Идея", "Idea"),
+    "newproj.pill_name": _pair("Название", "Name"),
+    "newproj.pill_blank": _pair("Пустой проект", "Blank project"),
+    "newproj.goal_page_title": _pair("С чего начинается проект?", "Where does a project start?"),
+    "newproj.goal_page_sub": _pair(
+        "Одно короткое предложение — главная идея. Детали, окно и первую задачу "
+        "агенту добавим после создания, когда проект уже будет перед глазами.",
+        "One short sentence — the main idea. Details, the window and the first agent "
+        "task come after creation, once the project is in front of you.",
+    ),
+    "newproj.goal_label": _pair("Главная цель", "Main goal"),
+    "newproj.goal_placeholder": _pair(
+        "Например: 2D-платформер, где кот собирает звёзды и убегает от слизней",
+        "For example: a 2D platformer where a cat collects stars and runs from slugs",
+    ),
+    "newproj.goal_hint": _pair(
+        "Коротко и по делу: жанр + герой + главное действие.",
+        "Short and to the point: genre + hero + main action.",
+    ),
+    "newproj.type_section": _pair("Что создаём", "What are we building"),
+    "newproj.type_game": _pair("ИГРА", "GAME"),
+    "newproj.type_game_hint": _pair("Уровни, персонажи, очки, геймплей", "Levels, characters, scores, gameplay"),
+    "newproj.type_app": _pair("ПРИЛОЖЕНИЕ", "APP"),
+    "newproj.type_app_hint": _pair("Экраны, списки, формы, ИИ-панели", "Screens, lists, forms, AI panels"),
+    "newproj.levels_section": _pair("Уровень интерфейса", "Interface level"),
+    "newproj.level_hint_simple": _pair(
+        "Обычные окна, кнопки и списки. Для утилит и программ Windows",
+        "Plain windows, buttons and lists. For utilities and Windows programs",
+    ),
+    "newproj.level_hint_standard": _pair(
+        "Готовые виджеты движка: тёмная тема, панели, списки, прокрутка",
+        "Ready-made engine widgets: dark theme, panels, lists, scrolling",
+    ),
+    "newproj.level_hint_advanced": _pair(
+        "Своя графика, частицы, анимации. Для игр",
+        "Your own graphics, particles, animations. For games",
+    ),
+    "newproj.levels_hint": _pair(
+        "Можно выбрать несколько: в проект лягут только нужные инструменты и навыки.",
+        "You can pick several: only the tools and skills you need go into the project.",
+    ),
+    "newproj.mode_section": _pair("Кто будет собирать проект", "Who will build the project"),
+    "newproj.mode_builtin": _pair("ВСТРОЕННЫЙ ИИ", "BUILT-IN AI"),
+    "newproj.mode_builtin_hint": _pair("Агент работает прямо в редакторе", "The agent works right in the editor"),
+    "newproj.mode_external": _pair("ВНЕШНИЙ АГЕНТ", "EXTERNAL AGENT"),
+    "newproj.mode_external_hint": _pair("Claude Code, Codex, Cursor, Cline…", "Claude Code, Codex, Cursor, Cline…"),
+    "newproj.mode_hint_initial": _pair(
+        "Встроенный агент сразу читает проект, меняет файлы, рисует спрайты и показывает прогресс.",
+        "The built-in agent reads the project right away, edits files, draws sprites and shows progress.",
+    ),
+    "newproj.mode_hint_external": _pair(
+        "Внешний агент: редактор подготовит AGENT_GUIDE.md, навыки, re.bat и будет "
+        "показывать его прогресс в реальном времени. Работает с Claude Code, Codex, Cursor, Cline и другими.",
+        "External agent: the editor prepares AGENT_GUIDE.md, skills, re.bat and shows its "
+        "progress in real time. Works with Claude Code, Codex, Cursor, Cline and others.",
+    ),
+    "newproj.mode_hint_builtin": _pair(
+        "Встроенный агент: работает сразу в редакторе, меняет файлы, рисует спрайты и "
+        "показывает план и прогресс. Нужен настроенный провайдер ИИ.",
+        "Built-in agent: works right in the editor, edits files, draws sprites and shows "
+        "the plan and progress. Needs a configured AI provider.",
+    ),
+    "newproj.after_title": _pair("Что будет дальше", "What happens next"),
+    "newproj.after_text": _pair(
+        "После создания откроется проект и раздел «ИИ-агент». Там вы напишете "
+        "первую задачу и сможете менять окно, заметки, код и ассеты.",
+        "After creation the project opens with the “AI agent” section. There you write "
+        "the first task and can change the window, notes, code and assets.",
+    ),
+    "newproj.blank_title": _pair("Минимальный шаблон", "Minimal template"),
+    "newproj.blank_text": _pair(
+        "Будет создан короткий main.py с пустым окном, project.json, папка assets "
+        "и инструкции для агента. Никакая игра и никакие вопросы про ИИ не создаются: "
+        "вы сразу попадёте в редактор кода и сможете писать сами или позвать агента.",
+        "A short main.py with an empty window, project.json, an assets folder and agent "
+        "instructions will be created. No game and no AI questions: you land straight in "
+        "the code editor and can write yourself or call the agent.",
+    ),
+    "newproj.blank_header": _pair("Пустой проект", "Blank project"),
+    "newproj.blank_sub": _pair(
+        "Сразу к результату: создаём минимальный проект без игры и без вопросов "
+        "про ИИ. Вы начнёте с пустого main.py, который уже запускается.",
+        "Straight to the result: we create a minimal project with no game and no AI "
+        "questions. You start with an empty main.py that already runs.",
+    ),
+    "newproj.blank_name_placeholder": _pair("Мой проект", "My project"),
+    "newproj.finish_header": _pair("Название и место", "Name and location"),
+    "newproj.finish_sub": _pair(
+        "Последний штрих. Укажите имя проекта и папку — остальное Reasonable Engine сделает сам.",
+        "The last touch. Give the project a name and a folder — Reasonable Engine does the rest.",
+    ),
+    "newproj.name_label": _pair("Название проекта (на английском)", "Project name (in English)"),
+    "newproj.name_hint": _pair(
+        "Латиницей, например «Task Manager». Используется для папки и файлов проекта.",
+        "Latin letters, e.g. “Task Manager”. Used for the project folder and files.",
+    ),
+    "newproj.ai_title": _pair("ИИ для проекта", "AI for the project"),
+    "newproj.configure_ai": _pair("Настроить ИИ", "Configure AI"),
+    "newproj.summary_label": _pair("Сводка", "Summary"),
+    "newproj.task_after_title": _pair("Первая задача — после создания", "First task — after creation"),
+    "newproj.task_after_text": _pair(
+        "Мастер не просит писать техническое задание заранее. После создания "
+        "откроется раздел «ИИ-агент», где вы опишете первую задачу обычными словами.",
+        "The wizard does not ask for a spec in advance. After creation the “AI agent” "
+        "section opens, where you describe the first task in plain words.",
+    ),
+    "newproj.progress_title": _pair("Собираю проект", "Building the project"),
+    "newproj.progress_stage": _pair("Готовлю папки и файлы…", "Preparing folders and files…"),
+    "newproj.open_project_btn": _pair("Открыть проект", "Open project"),
+    "newproj.goal_required_title": _pair("Нужна цель", "Goal needed"),
+    "newproj.goal_required_text": _pair(
+        "Опишите главную цель проекта хотя бы тремя символами.",
+        "Describe the main goal of the project with at least three characters.",
+    ),
+    "newproj.create_btn": _pair("Создать проект", "Create project"),
+    "newproj.folder_dialog": _pair("Куда сохранить проект", "Where to save the project"),
+    "newproj.folder_hint": _pair("Проект появится здесь: {target}", "The project will appear here: {target}"),
+    "newproj.model_unspecified": _pair("не указана", "unspecified"),
+    "newproj.badge_not_required": _pair("Не требуется", "Not required"),
+    "newproj.external_api_text": _pair(
+        "{name} · {model}\nВнешний режим не использует API редактора. Если захотите "
+        "включить встроенного агента позже, ключ можно добавить в настройках.",
+        "{name} · {model}\nExternal mode does not use the editor API. If you enable the "
+        "built-in agent later, the key can be added in the settings.",
+    ),
+    "newproj.need_key_text": _pair(
+        "{name} · {model}\nДля этой модели нужен API-ключ. Проект можно создать сейчас, "
+        "но агент запустится только после настройки.",
+        "{name} · {model}\nThis model needs an API key. The project can be created now, "
+        "but the agent will only run after setup.",
+    ),
+    "newproj.local_provider": _pair("Локальный провайдер", "Local provider"),
+    "newproj.ready_text": _pair(
+        "{name} · {model}\n{base_url}", "{name} · {model}\n{base_url}"
+    ),
+    "newproj.kind_game": _pair("Игра", "Game"),
+    "newproj.kind_app": _pair("Приложение", "App"),
+    "newproj.summary_blank": _pair(
+        "Пустой проект · минимальный main.py\n"
+        "Без игры и без вопросов про ИИ\n"
+        "После создания откроется раздел «Код»\n"
+        "Папка: {folder}",
+        "Blank project · minimal main.py\n"
+        "No game and no AI questions\n"
+        "The “Code” section opens after creation\n"
+        "Folder: {folder}",
+    ),
+    "newproj.summary_line": _pair(
+        "{kind} · {mode}\nИнтерфейс: {levels}\nПапка: {folder}",
+        "{kind} · {mode}\nUI: {levels}\nFolder: {folder}",
+    ),
+    "newproj.fallback_name": _pair("Новый проект", "New project"),
+    "newproj.name_dialog_title": _pair("Название проекта", "Project name"),
+    "newproj.name_invalid_text": _pair(
+        "Название должно быть на английском: начинаться с буквы, содержать только "
+        "латинские буквы, цифры, пробелы, дефис или подчёркивание (2–60 символов).\n"
+        "Например: Task Manager или my-great-game",
+        "The name must be in English: start with a letter, contain only Latin letters, "
+        "digits, spaces, a hyphen or underscore (2–60 characters).\n"
+        "For example: Task Manager or my-great-game",
+    ),
+    "newproj.mkdir_failed_title": _pair("Не удалось создать папку", "Could not create the folder"),
+    "newproj.done_title": _pair("Проект готов!", "Project ready!"),
+    "newproj.done_stage_blank": _pair("{name} · пустой проект", "{name} · blank project"),
+    "newproj.done_detail_blank": _pair(
+        "Созданы минимальный main.py, project.json, папка assets и инструкции для агента.\n"
+        "Сейчас откроется раздел «Код» — можно писать самому или позвать ИИ-агента.",
+        "A minimal main.py, project.json, an assets folder and agent instructions were "
+        "created.\nThe “Code” section opens next — write yourself or call the AI agent.",
+    ),
+    "newproj.done_stage": _pair("{name} · {mode}", "{name} · {mode}"),
+    "newproj.done_detail": _pair(
+        "Созданы main.py, project.json, иконка, фон, стартовые спрайты, "
+        "progress/ и инструкции для агента.\n"
+        "Первая задача пишется в разделе «ИИ-агент» — уже после создания.",
+        "main.py, project.json, an icon, a background, starter sprites, progress/ and "
+        "agent instructions were created.\n"
+        "The first task is written in the “AI agent” section — after creation.",
+    ),
+    "newproj.failed_title": _pair("Не удалось создать проект", "Could not create the project"),
+    "newproj.close_confirm_title": _pair("Создание проекта", "Creating the project"),
+    "newproj.close_confirm_text": _pair(
+        "Проект ещё создаётся. Закрыть окно? Это может оставить неполные файлы.",
+        "The project is still being created. Close the window? This may leave incomplete files.",
+    ),
+    # --- Conversion preview (core/convert.py) ---------------------------
+    "convert.orientation.landscape": _pair("альбомная", "landscape"),
+    "convert.orientation.portrait": _pair("портретная", "portrait"),
+    "convert.mode.builtin": _pair("встроенный ИИ", "built-in AI"),
+    "convert.mode.external": _pair("внешний агент", "external agent"),
+    "convert.window_mode.windowed": _pair("окно", "windowed"),
+    "convert.window_mode.fullscreen": _pair("полный экран", "fullscreen"),
+    "convert.change.platform": _pair("Платформа: {old} → {new}", "Platform: {old} → {new}"),
+    "convert.change.name": _pair("Название: {old} → {new}", "Name: {old} → {new}"),
+    "convert.change.orientation": _pair("Ориентация: {old} → {new}", "Orientation: {old} → {new}"),
+    "convert.change.mode": _pair("Агент: {old} → {new}", "Agent: {old} → {new}"),
+    "convert.change.window_mode": _pair("Режим окна: {old} → {new}", "Window mode: {old} → {new}"),
+    "convert.change.size": _pair("Базовый размер: {old} → {new}", "Base size: {old} → {new}"),
+    "convert.change.resizable_on": _pair(
+        "Изменение размера окна: выключено → включено", "Window resizing: off → on"
+    ),
+    "convert.change.resizable_off": _pair(
+        "Изменение размера окна: включено → выключено", "Window resizing: on → off"
+    ),
+    "convert.change.ui_levels": _pair("Интерфейс: {old} → {new}", "UI: {old} → {new}"),
+    "convert.change.reset": _pair(
+        "Прогресс, план и лента событий: сбросить", "Progress, plan and event feed: reset"
+    ),
     # --- External-agent UI (checklist labels; the agent pack itself is English-only) ---
     "external.check_guide": _pair("AGENT_GUIDE.md создан", "AGENT_GUIDE.md created"),
     "external.check_guide_hint": _pair("Полная инструкция для агента", "Full instructions for the agent"),

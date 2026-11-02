@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from reasonable.ai.providers import short_provider_name
+from reasonable.core.i18n import t
 from reasonable.core.history import (
     create_snapshot,
     describe_snapshot,
@@ -60,12 +61,24 @@ from .project_settings import ProjectSettingsDialog
 from .settings_dialog import SettingsDialog
 from .widgets import Badge, Card, ElidedLabel, Separator, StatBox, muted, title_label
 
-STATUS_MAP = {
-    "running": ("РАБОТАЕТ", "gold"),
-    "done": ("ГОТОВО", "teal"),
-    "error": ("ОШИБКА", "gold"),
-    "idle": ("ОЖИДАНИЕ", "default"),
+STATUS_TONES = {
+    "running": "gold",
+    "done": "teal",
+    "error": "gold",
+    "idle": "default",
 }
+
+
+def _status_label(status: str) -> str:
+    """Localized status badge text ('running' → РАБОТАЕТ/RUNNING)."""
+    text = t(f"projectpage.status_{status}")
+    return text if not text.startswith("projectpage.") else status.upper()
+
+
+def _tl(key: str, fallback: str, **values) -> str:
+    """t() with a Russian-era fallback for dynamically built keys."""
+    text = t(key, **values) if values else t(key)
+    return fallback if text == key or not text else text
 
 
 def project_icon_pixmap(path: Path | None, size: int = 52) -> QPixmap:
@@ -173,9 +186,8 @@ class ProjectPage(QWidget):
         self._show_page(0, initial=True)
         self._set_run_result(
             "idle",
-            "Проверьте проект в предпросмотре",
-            "Быстрый цикл: запустите проект, посмотрите результат, исправьте код или "
-            "попросите ИИ — и запустите снова.",
+            t("projectpage.run_result_idle_title"),
+            t("projectpage.run_result_idle_detail"),
         )
         self._refresh_history_card(force=True)
 
@@ -193,7 +205,7 @@ class ProjectPage(QWidget):
         back = QPushButton("←")
         back.setObjectName("ghost")
         back.setFixedSize(34, 34)
-        back.setToolTip("Ко всем проектам")
+        back.setToolTip(t("projectpage.back_tooltip"))
         back.clicked.connect(self._back)
         layout.addWidget(back)
 
@@ -212,15 +224,15 @@ class ProjectPage(QWidget):
         self.name_label.setMinimumWidth(100)
         self.name_label.setMaximumWidth(360)
         top.addWidget(self.name_label)
-        self.type_badge = Badge("ИГРА" if self.project.project_type == "game" else "ПРИЛОЖЕНИЕ", "default")
+        self.type_badge = Badge(t("projectpage.badge_game") if self.project.project_type == "game" else t("projectpage.badge_app"), "default")
         top.addWidget(self.type_badge)
         self.platform_badge = Badge("WINDOWS" if self.project.platform == "windows" else "ANDROID", "default")
         top.addWidget(self.platform_badge)
-        self.mode_badge = Badge("ВСТРОЕННЫЙ ИИ" if self.project.mode == "builtin" else "ВНЕШНИЙ АГЕНТ", "default")
+        self.mode_badge = Badge(t("projectpage.badge_mode_builtin") if self.project.mode == "builtin" else t("projectpage.badge_mode_external"), "default")
         top.addWidget(self.mode_badge)
         top.addStretch(1)
         titles.addLayout(top)
-        self.goal_label_header = ElidedLabel(self.project.goal or "Цель пока не описана")
+        self.goal_label_header = ElidedLabel(self.project.goal or t("projectpage.goal_missing"))
         self.goal_label_header.setObjectName("muted")
         self.goal_label_header.setFont(theme.ui_font(9))
         self.goal_label_header.setFixedHeight(self.goal_label_header.fontMetrics().height() + 8)
@@ -234,18 +246,18 @@ class ProjectPage(QWidget):
         self.header_model.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.header_model)
 
-        self.header_status = Badge("ОЖИДАНИЕ", "default")
+        self.header_status = Badge(t("projectpage.status_idle"), "default")
         layout.addWidget(self.header_status)
 
-        export = QPushButton("⤴  Экспорт")
+        export = QPushButton("⤴  " + t("projectpage.export_btn"))
         export.setObjectName("teal")
         export.setMinimumWidth(120)
         export.setStyleSheet("font-size: 13px; font-weight: 700; padding: 8px 14px;")
-        export.setToolTip("Собрать проект в exe / APK / портативную папку (по умолчанию на Рабочий стол)")
+        export.setToolTip(t("projectpage.export_tooltip"))
         export.clicked.connect(self._open_export)
         layout.insertWidget(1, export)
 
-        self.run_button = QPushButton("▶  Запустить")
+        self.run_button = QPushButton("▶  " + t("projectpage.run_btn"))
         self.run_button.setObjectName("primary")
         self.run_button.setMinimumWidth(132)
         self.run_button.clicked.connect(self._run_clicked)
@@ -263,7 +275,7 @@ class ProjectPage(QWidget):
         layout.setContentsMargins(14, 16, 14, 16)
         layout.setSpacing(5)
 
-        label = QLabel("РАЗДЕЛЫ")
+        label = QLabel(t("projectpage.sections_label"))
         label.setObjectName("dim")
         label.setFont(theme.ui_font(8, 700))
         layout.addWidget(label)
@@ -274,10 +286,10 @@ class ProjectPage(QWidget):
         self.nav_group.setExclusive(True)
         for index, text in enumerate(
             (
-                "Обзор",
-                "ИИ-агент",
-                "Код",
-                "Ассеты",
+                t("projectpage.nav_overview"),
+                t("projectpage.nav_agent"),
+                t("projectpage.nav_code"),
+                t("projectpage.nav_assets"),
             )
         ):
             button = QPushButton(text)
@@ -291,7 +303,7 @@ class ProjectPage(QWidget):
         self.nav_buttons[0].setChecked(True)
         layout.addSpacing(12)
 
-        label = QLabel("ПРОЕКТ")
+        label = QLabel(t("projectpage.project_label"))
         label.setObjectName("dim")
         label.setFont(theme.ui_font(8, 700))
         layout.addWidget(label)
@@ -299,38 +311,38 @@ class ProjectPage(QWidget):
         self.side_meta.setWordWrap(True)
         layout.addWidget(self.side_meta)
         layout.addSpacing(6)
-        edit = QPushButton("Настройки проекта")
+        edit = QPushButton(t("projectpage.project_settings_btn"))
         edit.setObjectName("ghost")
         edit.clicked.connect(self._open_project_settings)
         layout.addWidget(edit)
-        self.history_sidebar = QPushButton("История версий")
+        self.history_sidebar = QPushButton(t("projectpage.history_btn"))
         self.history_sidebar.setObjectName("ghost")
-        self.history_sidebar.setToolTip("Снимки проекта и возврат к рабочей версии")
+        self.history_sidebar.setToolTip(t("projectpage.history_tooltip"))
         self.history_sidebar.clicked.connect(self.open_history)
         layout.addWidget(self.history_sidebar)
-        folder = QPushButton("Открыть папку")
+        folder = QPushButton(t("projectpage.open_folder_btn"))
         folder.setObjectName("ghost")
         folder.clicked.connect(self._open_folder)
         layout.addWidget(folder)
-        convert = QPushButton("Конвертировать…")
+        convert = QPushButton(t("projectpage.convert_btn"))
         convert.setObjectName("ghost")
-        convert.setToolTip("Создать новый проект для другой платформы или с другими настройками")
+        convert.setToolTip(t("projectpage.convert_tooltip"))
         convert.clicked.connect(self._open_convert)
         self.convert_button = convert
         layout.addWidget(convert)
-        delete = QPushButton("Удалить проект")
+        delete = QPushButton(t("projectpage.delete_btn"))
         delete.setObjectName("danger")
-        delete.setToolTip("Убрать проект из списка или удалить его папку с диска")
+        delete.setToolTip(t("projectpage.delete_tooltip"))
         delete.clicked.connect(self.delete_requested)
         layout.addWidget(delete)
         layout.addStretch(1)
 
         ai = Card(soft=True, padding=12)
-        ai.layout().addWidget(title_label("ИИ проекта", 10))
+        ai.layout().addWidget(title_label(t("projectpage.ai_project_title"), 10))
         self.side_ai = muted("", size=8)
         self.side_ai.setWordWrap(True)
         ai.layout().addWidget(self.side_ai)
-        guide = QPushButton("Инструкции агента")
+        guide = QPushButton(t("projectpage.guide_btn"))
         guide.setObjectName("teal")
         guide.clicked.connect(self._open_guide)
         ai.layout().addWidget(guide)
@@ -349,24 +361,23 @@ class ProjectPage(QWidget):
         card = Card(padding=16)
         top = QHBoxLayout()
         top.setSpacing(9)
-        label = QLabel("Результат запуска")
+        label = QLabel(t("projectpage.run_result_label"))
         label.setObjectName("title")
         label.setFont(theme.display_font(12, 700))
         top.addWidget(label)
-        self.run_result_badge = Badge("НЕ ЗАПУСКАЛСЯ", "default")
+        self.run_result_badge = Badge(t("projectpage.badge_not_run"), "default")
         top.addWidget(self.run_result_badge)
         top.addStretch(1)
         self.run_result_when = muted("", size=8)
         top.addWidget(self.run_result_when)
         card.layout().addLayout(top)
 
-        self.run_result_title = QLabel("Проверьте проект в предпросмотре")
+        self.run_result_title = QLabel(t("projectpage.run_result_idle_title"))
         self.run_result_title.setFont(theme.ui_font(10, 700))
         self.run_result_title.setStyleSheet("color: #E7E9EC;")
         card.layout().addWidget(self.run_result_title)
         self.run_result_detail = muted(
-            "Быстрый цикл: запустите проект, посмотрите результат, исправьте код или "
-            "попросите ИИ — и запустите снова.",
+            t("projectpage.run_result_idle_detail"),
             size=9,
         )
         self.run_result_detail.setWordWrap(True)
@@ -384,22 +395,22 @@ class ProjectPage(QWidget):
 
         actions = QHBoxLayout()
         actions.setSpacing(7)
-        self.run_again_button = QPushButton("▶  Запустить снова")
+        self.run_again_button = QPushButton("▶  " + t("projectpage.run_again_btn"))
         self.run_again_button.setObjectName("primary")
         self.run_again_button.clicked.connect(self.run_project)
         actions.addWidget(self.run_again_button)
-        self.fix_ai_button = QPushButton("✎  Исправить с ИИ")
+        self.fix_ai_button = QPushButton("✎  " + t("projectpage.fix_ai_btn"))
         self.fix_ai_button.setObjectName("teal")
-        self.fix_ai_button.setToolTip("Подготовить задачу агенту с текстом ошибки и открыть ИИ-агента")
+        self.fix_ai_button.setToolTip(t("projectpage.fix_ai_tooltip"))
         self.fix_ai_button.clicked.connect(self._fix_failed_run_with_ai)
         actions.addWidget(self.fix_ai_button)
-        self.rollback_button = QPushButton("↶  Вернуть рабочую версию")
+        self.rollback_button = QPushButton("↶  " + t("projectpage.rollback_btn"))
         self.rollback_button.setObjectName("ghost")
-        self.rollback_button.setToolTip("Восстановить последний снимок проекта")
+        self.rollback_button.setToolTip(t("projectpage.rollback_tooltip"))
         self.rollback_button.clicked.connect(self._rollback_last_run)
         actions.addWidget(self.rollback_button)
         actions.addStretch(1)
-        self.run_history_button = QPushButton("История")
+        self.run_history_button = QPushButton(t("projectpage.run_history_btn"))
         self.run_history_button.setObjectName("ghost")
         self.run_history_button.clicked.connect(self.open_history)
         actions.addWidget(self.run_history_button)
@@ -419,10 +430,10 @@ class ProjectPage(QWidget):
     ) -> None:
         tones = {"success": "teal", "failure": "gold", "running": "gold", "idle": "default"}
         labels = {
-            "success": "УСПЕШНО",
-            "failure": "ОШИБКА",
-            "running": "ЗАПУЩЕН",
-            "idle": "НЕ ЗАПУСКАЛСЯ",
+            "success": t("projectpage.badge_success"),
+            "failure": t("projectpage.badge_failure"),
+            "running": t("projectpage.badge_running"),
+            "idle": t("projectpage.badge_not_run"),
         }
         self.run_result_badge.setText(labels.get(state, state.upper()))
         self.run_result_badge.set_tone(tones.get(state, "default"))
@@ -434,7 +445,9 @@ class ProjectPage(QWidget):
         self.run_result_when.setText(when)
         self.fix_ai_button.setVisible(state == "failure")
         self.rollback_button.setVisible(state == "failure" and self._has_restorable_snapshot())
-        self.run_again_button.setText("▶  Запустить снова" if state != "running" else "■  Остановить")
+        self.run_again_button.setText(
+            "■  " + t("projectpage.stop_btn") if state == "running" else "▶  " + t("projectpage.run_again_btn")
+        )
         if state == "running":
             try:
                 self.run_again_button.clicked.disconnect()
@@ -470,12 +483,12 @@ class ProjectPage(QWidget):
 
         hero = Card(padding=20)
         top = QHBoxLayout()
-        title = QLabel("Прогресс разработки")
+        title = QLabel(t("projectpage.progress_title"))
         title.setObjectName("title")
         title.setFont(theme.display_font(14, 700))
         top.addWidget(title)
         top.addStretch(1)
-        self.overview_status = Badge("ОЖИДАНИЕ", "default")
+        self.overview_status = Badge(t("projectpage.status_idle"), "default")
         top.addWidget(self.overview_status)
         hero.layout().addLayout(top)
 
@@ -487,7 +500,7 @@ class ProjectPage(QWidget):
         self.percent_label.setFont(theme.display_font(34, 700))
         self.percent_label.setStyleSheet("color: #FFFFFF; padding-bottom: 8px;")
         left.addWidget(self.percent_label)
-        self.stage_label = QLabel("Ожидание")
+        self.stage_label = QLabel(t("progress.idle_stage"))
         self.stage_label.setFont(theme.ui_font(11, 700))
         self.stage_label.setStyleSheet("color: #B7BDC6;")
         left.addWidget(self.stage_label)
@@ -498,8 +511,8 @@ class ProjectPage(QWidget):
 
         stats = QHBoxLayout()
         stats.setSpacing(8)
-        self.tasks_stat = StatBox("Задачи", "0/0", "план работ")
-        self.files_stat = StatBox("Файлы", "0", "в проекте")
+        self.tasks_stat = StatBox(t("projectpage.stat_tasks"), "0/0", t("projectpage.stat_tasks_hint"))
+        self.files_stat = StatBox(t("projectpage.stat_files"), "0", t("projectpage.stat_files_hint"))
         stats.addWidget(self.tasks_stat)
         stats.addWidget(self.files_stat)
         progress_row.addLayout(stats, 2)
@@ -512,14 +525,14 @@ class ProjectPage(QWidget):
 
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
-        self.hero_agent = QPushButton("Открыть агента")
+        self.hero_agent = QPushButton(t("projectpage.open_agent_btn"))
         self.hero_agent.setObjectName("primary")
         self.hero_agent.clicked.connect(self._open_agent)
         action_row.addWidget(self.hero_agent)
-        code_button = QPushButton("Редактировать код")
+        code_button = QPushButton(t("projectpage.edit_code_btn"))
         code_button.clicked.connect(lambda: self._show_page(2))
         action_row.addWidget(code_button)
-        sprite_button = QPushButton("Спрайты")
+        sprite_button = QPushButton(t("projectpage.sprites_btn"))
         sprite_button.clicked.connect(lambda: self._show_page(3))
         action_row.addWidget(sprite_button)
         action_row.addStretch(1)
@@ -532,10 +545,10 @@ class ProjectPage(QWidget):
         middle.setSpacing(13)
         tasks_card = Card()
         task_header = QHBoxLayout()
-        task_header.addWidget(title_label("План работ", 12))
+        task_header.addWidget(title_label(t("projectpage.plan_title"), 12))
         task_header.addStretch(1)
         tasks_card.layout().addLayout(task_header)
-        self.tasks_card_hint = muted("План ведёт ИИ-агент. Здесь он показывается для чтения.", size=8)
+        self.tasks_card_hint = muted(t("projectpage.plan_hint"), size=8)
         tasks_card.layout().addWidget(self.tasks_card_hint)
         self.task_host = QVBoxLayout()
         self.task_host.setSpacing(5)
@@ -545,7 +558,7 @@ class ProjectPage(QWidget):
 
         events_card = Card()
         events_header = QHBoxLayout()
-        events_header.addWidget(title_label("События", 12))
+        events_header.addWidget(title_label(t("projectpage.events_title"), 12))
         events_header.addStretch(1)
         self.events_count = Badge("0", "default")
         events_header.addWidget(self.events_count)
@@ -563,9 +576,9 @@ class ProjectPage(QWidget):
         bottom.setSpacing(13)
         goal_card = Card(soft=True)
         goal_top = QHBoxLayout()
-        goal_top.addWidget(title_label("Цель и заметки", 11))
+        goal_top.addWidget(title_label(t("projectpage.goal_notes_title"), 11))
         goal_top.addStretch(1)
-        edit_goal = QPushButton("Изменить")
+        edit_goal = QPushButton(t("projectpage.edit_btn"))
         edit_goal.setObjectName("ghost")
         edit_goal.clicked.connect(self._open_project_settings)
         goal_top.addWidget(edit_goal)
@@ -582,9 +595,9 @@ class ProjectPage(QWidget):
 
         files_card = Card(soft=True)
         files_header = QHBoxLayout()
-        files_header.addWidget(title_label("Недавние файлы", 11))
+        files_header.addWidget(title_label(t("projectpage.recent_files_title"), 11))
         files_header.addStretch(1)
-        refresh_files = QPushButton("Обновить")
+        refresh_files = QPushButton(t("projectpage.refresh_btn"))
         refresh_files.setObjectName("ghost")
         refresh_files.clicked.connect(lambda: self._refresh_files(force=True))
         files_header.addWidget(refresh_files)
@@ -599,23 +612,23 @@ class ProjectPage(QWidget):
 
         history_card = Card(soft=True)
         history_header = QHBoxLayout()
-        history_header.addWidget(title_label("История версий", 11))
+        history_header.addWidget(title_label(t("projectpage.history_title"), 11))
         history_header.addStretch(1)
         self.history_count = Badge("0", "default")
         history_header.addWidget(self.history_count)
         history_card.layout().addLayout(history_header)
-        self.history_latest = muted("Снимки появятся перед первым запуском агента.", size=9)
+        self.history_latest = muted(t("projectpage.history_empty_initial"), size=9)
         self.history_latest.setWordWrap(True)
         history_card.layout().addWidget(self.history_latest)
         history_actions = QHBoxLayout()
         history_actions.setSpacing(7)
-        history_open = QPushButton("Открыть историю")
+        history_open = QPushButton(t("projectpage.open_history_btn"))
         history_open.setObjectName("teal")
         history_open.clicked.connect(self.open_history)
         history_actions.addWidget(history_open)
-        history_save = QPushButton("Снимок сейчас")
+        history_save = QPushButton(t("projectpage.snapshot_now_btn"))
         history_save.setObjectName("ghost")
-        history_save.setToolTip("Сохранить текущее состояние как версию, к которой можно вернуться")
+        history_save.setToolTip(t("projectpage.snapshot_now_tooltip"))
         history_save.clicked.connect(self._create_manual_snapshot)
         history_actions.addWidget(history_save)
         history_actions.addStretch(1)
@@ -638,18 +651,18 @@ class ProjectPage(QWidget):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(5)
         top = QHBoxLayout()
-        self.console_title = QLabel("Запуск проекта")
+        self.console_title = QLabel(t("projectpage.console_title"))
         self.console_title.setFont(theme.ui_font(9, 700))
         top.addWidget(self.console_title)
         top.addStretch(1)
-        self.console_stop = QPushButton("Остановить")
+        self.console_stop = QPushButton(t("projectpage.stop_btn"))
         self.console_stop.setObjectName("danger")
         self.console_stop.clicked.connect(self.stop_project)
         top.addWidget(self.console_stop)
         close = QPushButton("×")
         close.setObjectName("ghost")
         close.setFixedSize(24, 24)
-        close.setToolTip("Скрыть консоль")
+        close.setToolTip(t("projectpage.hide_console_tooltip"))
         close.clicked.connect(self._hide_console)
         top.addWidget(close)
         layout.addLayout(top)
@@ -684,8 +697,8 @@ class ProjectPage(QWidget):
         if self.process is not None and self.process.state() != QProcess.ProcessState.NotRunning:
             answer = QMessageBox.question(
                 self,
-                "Проект запущен",
-                "Проект ещё запущен. Остановить его и вернуться к списку?",
+                t("dialog.project_running_title"),
+                t("projectpage.back_running_text"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -723,7 +736,7 @@ class ProjectPage(QWidget):
         if path.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
         else:
-            QMessageBox.information(self, "Инструкция", "AGENT_GUIDE.md ещё не создан.")
+            QMessageBox.information(self, t("projectpage.guide_missing_title"), t("projectpage.guide_missing_text"))
 
     def _open_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.project.root)))
@@ -755,10 +768,10 @@ class ProjectPage(QWidget):
         self._refresh_history_card(force=True)
         self._set_run_result(
             "idle",
-            "Версия восстановлена",
-            "Файлы проекта возвращены к выбранному снимку. Запустите проект, чтобы проверить результат.",
+            t("projectpage.restored_title"),
+            t("projectpage.restored_detail"),
         )
-        self.status_message.emit("Версия проекта восстановлена. Предыдущее состояние сохранено в истории.")
+        self.status_message.emit(t("projectpage.restored_status"))
 
     def _create_manual_snapshot(self) -> None:
         if not self._history_available():
@@ -767,23 +780,23 @@ class ProjectPage(QWidget):
             return
         label, ok = QInputDialog.getText(
             self,
-            "Снимок версии",
-            "Название версии (необязательно):",
+            t("projectpage.snapshot_dialog_title"),
+            t("projectpage.snapshot_dialog_label"),
         )
         if not ok:
             return
         try:
             snapshot = create_snapshot(
                 self.project,
-                label=label.strip() or "Ручной снимок рабочей версии",
+                label=label.strip() or t("projectpage.manual_snapshot_label"),
                 reason="manual",
             )
         except Exception as exc:
-            QMessageBox.warning(self, "Не удалось создать снимок", str(exc))
+            QMessageBox.warning(self, t("projectpage.snapshot_failed_title"), str(exc))
             return
         self._refresh_history_card(force=True)
         self.status_message.emit(
-            f"Снимок «{snapshot.get('label')}» создан. Его можно вернуть из истории."
+            t("projectpage.snapshot_created_status", label=snapshot.get("label"))
         )
 
     def _restore_snapshot(self, snapshot_id: str) -> None:
@@ -795,10 +808,11 @@ class ProjectPage(QWidget):
         label = str(snapshot.get("label") if snapshot else snapshot_id)
         answer = QMessageBox.question(
             self,
-            "Отменить изменения",
-            f"Вернуть версию «{label}»?\n\n"
-            "Текущее состояние сначала сохранится отдельным снимком, поэтому "
-            "восстановление тоже можно отменить.",
+            t("projectpage.restore_confirm_title"),
+            t(
+                "projectpage.restore_confirm_text",
+                label=label,
+            ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -807,12 +821,16 @@ class ProjectPage(QWidget):
         try:
             result = restore_snapshot(self.project, snapshot_id, safety=True)
         except Exception as exc:
-            QMessageBox.critical(self, "Не удалось вернуть версию", str(exc))
+            QMessageBox.critical(self, t("projectpage.restore_failed_title"), str(exc))
             return
         self._history_restored(snapshot_id)
         self.status_message.emit(
-            f"Версия «{label}» восстановлена: файлов {result.get('restored', 0)}, "
-            f"удалено {result.get('removed', 0)}."
+            t(
+                "projectpage.restored_files_status",
+                label=label,
+                restored=result.get("restored", 0),
+                removed=result.get("removed", 0),
+            )
         )
 
     def _rollback_last_run(self) -> None:
@@ -823,8 +841,8 @@ class ProjectPage(QWidget):
         if not snapshot:
             QMessageBox.information(
                 self,
-                "Нет снимков",
-                "Пока нет сохранённых версий. Они создаются автоматически перед запуском агента.",
+                t("projectpage.no_snapshots_title"),
+                t("projectpage.no_snapshots_text"),
             )
             return
         self._restore_snapshot(str(snapshot.get("id")))
@@ -834,9 +852,8 @@ class ProjectPage(QWidget):
         if self.chat is not None and self.chat.running:
             QMessageBox.information(
                 self,
-                "Агент работает",
-                "Дождитесь завершения агента или остановите его — затем можно "
-                "создавать снимки и возвращать версии.",
+                t("progress.heartbeat"),
+                t("projectpage.agent_running_text"),
             )
             return False
         return True
@@ -857,17 +874,15 @@ class ProjectPage(QWidget):
         self._history_signature = signature
         self.history_count.setText(str(len(snapshots)))
         if not snapshots:
-            self.history_latest.setText(
-                "Снимков пока нет. Перед каждым запуском ИИ-агента рабочая версия "
-                "сохраняется автоматически."
-            )
+            self.history_latest.setText(t("projectpage.history_empty"))
             return
         latest = snapshots[0]
         changed = len(latest.get("changed_files") or [])
-        extra = f" · изменено {changed} файл(ов)" if changed else ""
+        extra = t("history.changed_files", count=changed) if changed else ""
         self.history_latest.setText(
             f"{describe_snapshot(latest)}\n"
-            f"{human_time(latest.get('created_at'))} · файлов {latest.get('file_count', 0)}{extra}"
+            + t("projectpage.history_files_line", time=human_time(latest.get("created_at")), count=latest.get("file_count", 0))
+            + extra
         )
 
     # ------------------------------------------------------------------
@@ -882,7 +897,7 @@ class ProjectPage(QWidget):
         self._update_header()
         self._tick_refresh(force=True)
         self.code_page.refresh_tree()
-        self.status_message.emit("Настройки проекта сохранены.")
+        self.status_message.emit(t("projectpage.project_settings_saved"))
 
     def _open_global_settings(self) -> None:
         dialog = SettingsDialog(self.settings, self, advanced=True)
@@ -891,7 +906,7 @@ class ProjectPage(QWidget):
 
     def _ai_settings_saved(self) -> None:
         self.refresh_ai()
-        self.status_message.emit("Настройки ИИ сохранены.")
+        self.status_message.emit(t("projectpage.ai_settings_saved"))
 
     def refresh_ai(self) -> None:
         self._update_header_model()
@@ -903,7 +918,7 @@ class ProjectPage(QWidget):
         if not self.code_page.save_all():
             return
         dialog = ExportDialog(self.project, self)
-        dialog.exported.connect(lambda result: self.status_message.emit(result.get("message", "Экспорт завершён.")))
+        dialog.exported.connect(lambda result: self.status_message.emit(result.get("message", t("projectpage.export_done_default"))))
         dialog.exec()
         self._tick_refresh(force=True)
 
@@ -915,59 +930,70 @@ class ProjectPage(QWidget):
         dialog.exec()
 
     def _converted_project(self, path: str) -> None:
-        self.status_message.emit(f"Новый проект создан: {path}")
+        self.status_message.emit(t("projectpage.converted_status", path=path))
         self.converted.emit(path)
 
     def _update_header(self) -> None:
         from reasonable.core.project import UI_LEVEL_LABELS
 
         self.name_label.setText(_shorten(self.project.name, 32))
-        self.goal_label_header.setText(self.project.goal or "Цель пока не описана")
-        self.type_badge.setText("ИГРА" if self.project.project_type == "game" else "ПРИЛОЖЕНИЕ")
+        self.goal_label_header.setText(self.project.goal or t("projectpage.goal_missing"))
+        self.type_badge.setText(t("projectpage.badge_game") if self.project.project_type == "game" else t("projectpage.badge_app"))
         self.platform_badge.setText("WINDOWS" if self.project.platform == "windows" else "ANDROID")
-        self.mode_badge.setText("ВСТРОЕННЫЙ ИИ" if self.project.mode == "builtin" else "ВНЕШНИЙ АГЕНТ")
+        self.mode_badge.setText(t("projectpage.badge_mode_builtin") if self.project.mode == "builtin" else t("projectpage.badge_mode_external"))
         self.project_icon.setPixmap(project_icon_pixmap(self.project.icon_path, 48))
-        levels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in self.project.ui_levels)
+        levels = ", ".join(_tl(f"project.ui_{level}", UI_LEVEL_LABELS.get(level, level)) for level in self.project.ui_levels)
+        orientation = (
+            t("projectpage.orientation_portrait")
+            if self.project.manifest.get("orientation") == "portrait"
+            else t("projectpage.orientation_landscape")
+        )
         self.side_meta.setText(
             f"{'Windows' if self.project.platform == 'windows' else 'Android'} · "
-            f"{'портрет' if self.project.manifest.get('orientation') == 'portrait' else 'альбом'}\n"
-            f"Интерфейс: {levels}\n"
+            f"{orientation}\n"
+            f"{t('projectpage.meta_ui_line', levels=levels)}\n"
             f"{'Python/pygame' if self.project.project_type == 'game' else 'Python/pygame UI'} · "
-            "окно настроит агент"
+            + t("projectpage.meta_window_note")
         )
         self._update_header_model()
         self._update_side_ai()
-        self.hero_agent.setText("Открыть ИИ-агента")
+        self.hero_agent.setText(t("projectpage.open_agent_btn_full"))
 
     def _provider_label(self, config: dict) -> str:
         """Short provider name for the header and sidebar."""
-        return short_provider_name(config.get("name") or config.get("id") or "ИИ")
+        return short_provider_name(config.get("name") or config.get("id") or t("projectpage.fallback_ai"))
 
     def _model_text(self) -> str:
         config = self.settings.get_provider_config()
         name = self._provider_label(config)
-        model = config.get("model") or "модель не выбрана"
+        model = config.get("model") or t("projectpage.model_not_selected")
         return f"{name} · {model}"
 
     def _update_header_model(self) -> None:
         text = self._model_text()
         config = self.settings.get_provider_config()
-        full = str(config.get("name") or config.get("id") or "ИИ")
+        full = str(config.get("name") or config.get("id") or t("projectpage.fallback_ai"))
         self.header_model.setText(_shorten(text, 46))
-        self.header_model.setToolTip(f"Активная модель: {full} · {config.get('model') or 'модель не выбрана'}")
+        self.header_model.setToolTip(
+            t(
+                "projectpage.active_model_tooltip",
+                full=full,
+                model=config.get("model") or t("projectpage.model_not_selected"),
+            )
+        )
 
     def _update_side_ai(self) -> None:
         config = self.settings.get_provider_config()
         name = self._provider_label(config)
-        model = config.get("model") or "модель не выбрана"
+        model = config.get("model") or t("projectpage.model_not_selected")
         if self.project.mode == "external":
-            access = "внешний агент · API не требуется"
+            access = t("projectpage.access_external")
         elif config.get("requires_key") and not config.get("api_key"):
-            access = "нужен API-ключ"
+            access = t("projectpage.access_need_key")
         elif config.get("api_key"):
-            access = "ключ сохранён"
+            access = t("projectpage.access_key_saved")
         else:
-            access = "работает без ключа"
+            access = t("projectpage.access_no_key")
         self.side_ai.setText(f"{name}\n{model}\n{access}")
 
     # ------------------------------------------------------------------
@@ -993,22 +1019,22 @@ class ProjectPage(QWidget):
     def _run_error_hint(error_line: str) -> str:
         text = error_line.lower()
         if "modulenotfounderror" in text or "no module named" in text:
-            return "Не установлена нужная библиотека. Установите её или попросите агента убрать зависимость."
+            return t("projectpage.hint_module_missing")
         if "importerror" in text:
-            return "Ошибка импорта: модуль есть, но импортируется неверное имя или не хватает зависимости."
+            return t("projectpage.hint_import")
         if "syntaxerror" in text or "indentationerror" in text:
-            return "В коде синтаксическая ошибка — файл нужно исправить и сохранить."
+            return t("projectpage.hint_syntax")
         if "filenotfounderror" in text or "no such file" in text:
-            return "Код обращается к файлу, которого нет в проекте. Проверьте путь к ассету."
+            return t("projectpage.hint_filenotfound")
         if "permissionerror" in text:
-            return "Не хватает прав на файл или папку. Закройте занявший файл и попробуйте снова."
+            return t("projectpage.hint_permission")
         if "pygame.error" in text:
-            return "Ошибка pygame: окно, звук или поверхность созданы неправильно для этого окружения."
+            return t("projectpage.hint_pygame")
         if "typeerror" in text or "attributeerror" in text or "valueerror" in text or "keyerror" in text:
-            return "Ошибка в данных или вызове функции. Агент может найти точное место по трассировке."
+            return t("projectpage.hint_type")
         if "timeout" in text or "timed out" in text:
-            return "Проект не завершился вовремя — проверьте бесконечные циклы или ожидание ввода."
-        return "Проект завершился с ошибкой. Полный вывод и трассировка остаются в консоли ниже."
+            return t("projectpage.hint_timeout")
+        return t("projectpage.hint_generic")
 
     def _analyze_run(self, code: int, output: str) -> tuple[str, str, str, str]:
         """Turn a process result into a short, actionable UI message."""
@@ -1016,13 +1042,17 @@ class ProjectPage(QWidget):
         if code == 0:
             return (
                 "success",
-                "Проект запустился и завершился без ошибок",
-                "Предпросмотр работает. Можно менять код или попросить ИИ о следующем шаге.",
+                t("projectpage.success_title"),
+                t("projectpage.success_detail"),
                 "",
             )
         error_line = self._run_error_line(output)
         hint = self._run_error_hint(error_line)
-        title = "Проект не запустился" if "Traceback" in output else f"Проект завершился с кодом {code}"
+        title = (
+            t("projectpage.no_start_title")
+            if "Traceback" in output
+            else t("projectpage.exit_code_title", code=code)
+        )
         detail = hint
         if error_line:
             detail = f"{hint}\n{error_line}"
@@ -1037,8 +1067,8 @@ class ProjectPage(QWidget):
     def _set_running_result(self) -> None:
         self._set_run_result(
             "running",
-            "Проект запущен в предпросмотре",
-            "Посмотрите окно проекта. Ошибки появятся здесь сразу после завершения процесса.",
+            t("projectpage.running_title"),
+            t("projectpage.running_detail"),
             when=datetime.now().strftime("%H:%M"),
         )
 
@@ -1046,30 +1076,28 @@ class ProjectPage(QWidget):
         if self.chat is None:
             QMessageBox.information(
                 self,
-                "Внешний агент",
-                "Этот проект работает с внешним агентом. Скопируйте ошибку из консоли "
-                "в задачу для Claude Code, Codex, Cursor или другого агента.",
+                t("settings.external_title"),
+                t("projectpage.external_agent_text"),
             )
             return
-        error = (self._last_run_error or self.run_result_error.text() or "Проект завершился с ошибкой.").strip()
-        prompt = (
-            "Проект не запускается. Найди причину, исправь файлы и проверь запуск.\n\n"
-            f"Ошибка запуска:\n{error[:3000]}\n\n"
-            "Сначала прочитай нужные файлы, затем измени только необходимое. "
-            "В конце вызови validate_project и run_project."
-        )
+        error = (
+            self._last_run_error
+            or self.run_result_error.text()
+            or t("projectpage.default_error")
+        ).strip()
+        prompt = t("projectpage.fix_prompt", error=error[:3000])
         self.chat.prefill_task(prompt)
         self.open_agent_page(focus=True)
-        self.status_message.emit("Задача с текстом ошибки подготовлена в ИИ-агенте.")
+        self.status_message.emit(t("projectpage.fix_prepared_status"))
 
     def run_project(self) -> None:
         if self.process is not None and self.process.state() != QProcess.ProcessState.NotRunning:
-            self.status_message.emit("Проект уже запущен.")
+            self.status_message.emit(t("projectpage.already_running"))
             return
         if not self.code_page.save_all():
             return
         if not self.project.entry.exists():
-            QMessageBox.warning(self, "Нет точки входа", f"Файл {self.project.entry.name} не найден.")
+            QMessageBox.warning(self, t("projectpage.no_entry_title"), t("projectpage.no_entry_text", name=self.project.entry.name))
             return
         env = QProcessEnvironment()
         for key, value in self.project.run_env().items():
@@ -1080,7 +1108,7 @@ class ProjectPage(QWidget):
         self._last_run_error = ""
         self.console.clear()
         self.console_frame.show()
-        self.console_title.setText("Запуск проекта · заставка Reasonable Engine")
+        self.console_title.setText(t("projectpage.console_title_splash"))
         self.console_stop.setEnabled(True)
         self.process = QProcess(self)
         self.process.setProcessEnvironment(env)
@@ -1092,22 +1120,22 @@ class ProjectPage(QWidget):
         command = self.project.run_command()
         self.process.start(command[0], command[1:])
         if not self.process.waitForStarted(5000):
-            self._append_console("Не удалось запустить процесс.\n")
+            self._append_console(t("projectpage.start_failed_console"))
             self._set_run_result(
                 "failure",
-                "Не удалось запустить процесс",
-                "Python или папка проекта недоступны. Проверьте установку Python в настройках.",
-                "Процесс не стартовал за 5 секунд.",
+                t("projectpage.start_failed_title"),
+                t("projectpage.start_failed_detail"),
+                t("projectpage.start_failed_error"),
                 when=datetime.now().strftime("%H:%M"),
             )
             return
-        self._append_console(f"Проект: {self.project.name}\nПапка: {self.project.root}\n")
-        self.run_button.setText("■  Остановить")
+        self._append_console(t("projectpage.console_project", name=self.project.name, folder=self.project.root))
+        self.run_button.setText("■  " + t("projectpage.stop_btn"))
         self.run_button.setObjectName("danger")
         self.run_button.style().unpolish(self.run_button)
         self.run_button.style().polish(self.run_button)
         self._set_running_result()
-        self.status_message.emit("Проект запущен. Заставка ~3 секунды, затем игра/приложение.")
+        self.status_message.emit(t("projectpage.run_started_status"))
         self._show_page(0)
 
     def _read_process_output(self) -> None:
@@ -1125,7 +1153,7 @@ class ProjectPage(QWidget):
         bar.setValue(bar.maximum())
 
     def _process_finished(self, code: int, _status) -> None:
-        self._append_console(f"\nПроцесс завершён с кодом {code}.\n")
+        self._append_console(t("projectpage.exit_console", code=code))
         self._last_run_code = int(code)
         state, title, detail, error = self._analyze_run(int(code), self._process_output)
         self._last_run_error = error or detail
@@ -1136,49 +1164,55 @@ class ProjectPage(QWidget):
             error,
             when=datetime.now().strftime("%H:%M"),
         )
-        self.run_button.setText("▶  Запустить")
+        self.run_button.setText("▶  " + t("projectpage.run_btn"))
         self.run_button.setObjectName("primary")
         self.run_button.style().unpolish(self.run_button)
         self.run_button.style().polish(self.run_button)
         self.console_stop.setEnabled(False)
-        self.console_title.setText("Проект завершён" if code == 0 else f"Проект завершён с ошибкой ({code})")
+        self.console_title.setText(
+            t("projectpage.console_finished") if code == 0 else t("projectpage.console_finished_error", code=code)
+        )
         try:
             record_event(
                 self.project.root,
                 "run",
-                "Проект запустился без ошибок" if code == 0 else f"Проект завершился с ошибкой (код {code})",
+                t("projectpage.event_success")
+                if code == 0
+                else t("projectpage.event_failed", code=code),
                 {"returncode": int(code), "error": self._run_error_line(self._process_output)},
             )
         except Exception:
             pass
-        self.status_message.emit("Проект завершён." if code == 0 else f"Проект завершился с кодом {code}.")
+        self.status_message.emit(
+            t("projectpage.finished_status") if code == 0 else t("projectpage.finished_status_code", code=code)
+        )
         self._tick_refresh(force=True)
 
     def _process_error(self, error) -> None:
-        self._append_console(f"\nОшибка процесса: {error}\n")
+        self._append_console(t("projectpage.process_error_console", error=error))
         self._last_run_error = str(error)
         if self._last_run_code is None:
             self._set_run_result(
                 "failure",
-                "Ошибка запуска процесса",
-                "Процесс не смог стартовать. Проверьте путь к Python и папку проекта.",
+                t("projectpage.process_error_title"),
+                t("projectpage.process_error_detail"),
                 str(error),
                 when=datetime.now().strftime("%H:%M"),
             )
 
     def stop_project(self) -> None:
         if self.process is not None and self.process.state() != QProcess.ProcessState.NotRunning:
-            self._append_console("\nОстанавливаю проект…\n")
+            self._append_console(t("projectpage.stopping_console"))
             self.process.kill()
-        self.run_button.setText("▶  Запустить")
+        self.run_button.setText("▶  " + t("projectpage.run_btn"))
         self.run_button.setObjectName("primary")
         self.run_button.style().unpolish(self.run_button)
         self.run_button.style().polish(self.run_button)
         if self._last_run_code is None:
             self._set_run_result(
                 "idle",
-                "Запуск остановлен",
-                "Проект остановлен до завершения. Запустите снова, когда будете готовы.",
+                t("projectpage.stopped_title"),
+                t("projectpage.stopped_detail"),
                 when=datetime.now().strftime("%H:%M"),
             )
 
@@ -1212,31 +1246,31 @@ class ProjectPage(QWidget):
         self._state_signature = signature
         percent = int(round(derived_percent(state)))
         status = str(state.get("status") or "idle")
-        text, tone = STATUS_MAP.get(status, ("ОЖИДАНИЕ", "default"))
+        text, tone = _status_label(status), STATUS_TONES.get(status, "default")
         self.overview_status.setText(text)
         self.overview_status.set_tone(tone)
         self.header_status.setText(text)
         self.header_status.set_tone(tone)
         self.percent_label.setText(f"{percent}%")
         self.overview_progress.setValue(percent)
-        stage = state.get("stage") or "Ожидание"
+        stage = state.get("stage") or t("progress.idle_stage")
         self.stage_label.setText(stage)
         message = state.get("message") or ""
         self.message_label.setText(message)
         self.message_label.setVisible(bool(message))
         tasks = state.get("tasks") or []
         done = sum(1 for task in tasks if task.get("status") == "done")
-        self.tasks_stat.set_value(f"{done}/{len(tasks)}", "задач выполнено")
-        self.last_activity_label.setText(f"Активность: {human_time(state.get('last_event_at'))}")
+        self.tasks_stat.set_value(f"{done}/{len(tasks)}", t("projectpage.stat_tasks_value"))
+        self.last_activity_label.setText(t("projectpage.activity", time=human_time(state.get("last_event_at"))))
         if force or self._file_count == 0 or self._tick % 6 == 0:
             self._file_count = len(self.project.list_files(limit=2000))
-        self.files_stat.set_value(str(self._file_count), "файлов в проекте")
-        self.goal_label.setText(self.project.goal or "Цель не описана. Добавьте её в настройках проекта.")
+        self.files_stat.set_value(str(self._file_count), t("projectpage.stat_files_value"))
+        self.goal_label.setText(self.project.goal or t("projectpage.goal_missing_long"))
         notes = self.project.notes.strip()
         self.notes_label.setText(
             _shorten(notes, 420)
             if notes
-            else "Заметок пока нет. Их можно добавить в настройках проекта или попросить агента."
+            else t("projectpage.notes_empty")
         )
 
     def _refresh_tasks(self, state: dict, force: bool) -> None:
@@ -1251,7 +1285,7 @@ class ProjectPage(QWidget):
             if widget is not None:
                 widget.deleteLater()
         if not tasks:
-            self.task_host.addWidget(muted("План пока пуст. Агент создаст его при запуске.", size=9))
+            self.task_host.addWidget(muted(t("projectpage.plan_empty"), size=9))
             return
         for task in tasks:
             row = QFrame()
@@ -1321,10 +1355,10 @@ class ProjectPage(QWidget):
             stamp = datetime.fromtimestamp(row["mtime"]).strftime("%H:%M")
             item = QListWidgetItem(f"{stamp}   {row['path']}")
             item.setData(Qt.ItemDataRole.UserRole, row["path"])
-            item.setToolTip("Двойной клик — открыть в редакторе")
+            item.setToolTip(t("projectpage.files_tooltip"))
             self.recent_files.addItem(item)
         if not rows:
-            self.recent_files.addItem("Пока нет изменённых файлов.")
+            self.recent_files.addItem(t("projectpage.files_empty"))
 
     # ------------------------------------------------------------------
     def _agent_finished(self) -> None:
@@ -1338,28 +1372,26 @@ class ProjectPage(QWidget):
             if outcome == "error":
                 self._set_run_result(
                     "failure",
-                    "Агент не смог завершить работу",
-                    "Подробности — в чате агента. Проверьте ключ, модель и сеть, "
-                    "затем запустите задачу снова.",
-                    self.chat.last_error or "Ошибка ИИ-агента.",
+                    t("projectpage.agent_error_title"),
+                    t("projectpage.agent_error_detail"),
+                    self.chat.last_error or t("projectpage.agent_error_fallback"),
                     when=when,
                 )
             elif outcome == "incomplete":
                 self._set_run_result(
                     "idle",
-                    "Агент не завершил работу",
-                    "Агент остановился до проверки и запуска. Запустите проект, "
-                    "чтобы увидеть результат, или продолжите задачу в чате.",
+                    t("projectpage.agent_incomplete_title"),
+                    t("projectpage.agent_incomplete_detail"),
                     when=when,
                 )
             else:
                 self._set_run_result(
                     "idle",
-                    "Агент изменил проект — проверьте предпросмотр",
-                    "Запустите проект, чтобы увидеть результат. Если стало хуже, верните версию из истории.",
+                    t("projectpage.agent_done_title"),
+                    t("projectpage.agent_done_detail"),
                     when=when,
                 )
-        self.status_message.emit("Агент завершил работу. Прогресс обновлён.")
+        self.status_message.emit(t("projectpage.agent_finished_status"))
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:

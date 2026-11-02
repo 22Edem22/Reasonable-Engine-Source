@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from reasonable.core.i18n import t
 from reasonable.core.paths import slugify
 from reasonable.core.project import (
     UI_LEVELS,
@@ -46,6 +47,11 @@ from reasonable.core.settings import Settings
 from . import theme
 from .widgets import Badge, Card, muted, title_label
 from .workers import ScaffoldWorker
+
+
+def _level_label(level: str) -> str:
+    text = t(f"project.ui_{level}")
+    return UI_LEVEL_LABELS.get(level, level) if text.startswith("project.") else text
 
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9][A-Za-z0-9 _-]{0,58}$")
@@ -107,7 +113,7 @@ class NewProjectDialog(QDialog):
         self._creating = False
         self._name_touched = False
 
-        self.setWindowTitle("Новый проект — Reasonable Engine")
+        self.setWindowTitle(t("newproj.title"))
         self.setMinimumSize(980, 740)
         self.resize(1000, 770)
         self.setModal(True)
@@ -124,15 +130,15 @@ class NewProjectDialog(QDialog):
         root.addWidget(self.stack, 1)
 
         footer = QHBoxLayout()
-        self.cancel_button = QPushButton("Отмена")
+        self.cancel_button = QPushButton(t("common.cancel"))
         self.cancel_button.setObjectName("ghost")
         self.cancel_button.clicked.connect(self.reject)
         footer.addWidget(self.cancel_button)
         footer.addStretch(1)
-        self.back_button = QPushButton("Назад")
+        self.back_button = QPushButton(t("common.back"))
         self.back_button.clicked.connect(self._back)
         footer.addWidget(self.back_button)
-        self.next_button = QPushButton("Далее")
+        self.next_button = QPushButton(t("common.next"))
         self.next_button.setObjectName("primary")
         self.next_button.setMinimumWidth(150)
         self.next_button.clicked.connect(self._next)
@@ -162,12 +168,12 @@ class NewProjectDialog(QDialog):
         logo = QLabel()
         logo.setPixmap(theme.logo_pixmap(30))
         row.addWidget(logo)
-        heading = QLabel("Новый проект")
+        heading = QLabel(t("newproj.heading"))
         heading.setObjectName("title")
         heading.setFont(theme.display_font(13, 700))
         row.addWidget(heading)
         row.addSpacing(18)
-        self.step_pills = [StepPill(1, "Идея"), StepPill(2, "Название")]
+        self.step_pills = [StepPill(1, t("newproj.pill_idea")), StepPill(2, t("newproj.pill_name"))]
         for pill in self.step_pills:
             row.addWidget(pill)
         row.addStretch(1)
@@ -205,26 +211,25 @@ class NewProjectDialog(QDialog):
     # ------------------------------------------------------------------
     def _build_goal_page(self) -> QWidget:
         page, layout = self._page_shell(
-            "С чего начинается проект?",
-            "Одно короткое предложение — главная идея. Детали, окно и первую задачу "
-            "агенту добавим после создания, когда проект уже будет перед глазами.",
+            t("newproj.goal_page_title"),
+            t("newproj.goal_page_sub"),
         )
-        goal_label = QLabel("Главная цель")
+        goal_label = QLabel(t("newproj.goal_label"))
         goal_label.setFont(theme.ui_font(10, 700))
         layout.addWidget(goal_label)
         self.goal_label = goal_label
 
         self.goal_edit = QLineEdit()
-        self.goal_edit.setPlaceholderText("Например: 2D-платформер, где кот собирает звёзды и убегает от слизней")
+        self.goal_edit.setPlaceholderText(t("newproj.goal_placeholder"))
         self.goal_edit.setMinimumHeight(48)
         self.goal_edit.setFont(theme.ui_font(12))
         self.goal_edit.textChanged.connect(self._goal_changed)
         layout.addWidget(self.goal_edit)
-        self.goal_hint = muted("Коротко и по делу: жанр + герой + главное действие.", size=9)
+        self.goal_hint = muted(t("newproj.goal_hint"), size=9)
         layout.addWidget(self.goal_hint)
 
         layout.addSpacing(8)
-        self.type_section = self._section("Что создаём")
+        self.type_section = self._section(t("newproj.type_section"))
         layout.addWidget(self.type_section)
         type_row = QHBoxLayout()
         type_row.setSpacing(12)
@@ -232,8 +237,8 @@ class NewProjectDialog(QDialog):
         self.type_group = QButtonGroup(self)
         self.type_buttons: dict[str, QPushButton] = {}
         for key, text, hint in (
-            ("game", "ИГРА", "Уровни, персонажи, очки, геймплей"),
-            ("app", "ПРИЛОЖЕНИЕ", "Экраны, списки, формы, ИИ-панели"),
+            ("game", t("newproj.type_game"), t("newproj.type_game_hint")),
+            ("app", t("newproj.type_app"), t("newproj.type_app_hint")),
         ):
             button = QPushButton(f"{text}\n{hint}")
             button.setObjectName("choice")
@@ -247,22 +252,22 @@ class NewProjectDialog(QDialog):
         layout.addLayout(type_row)
 
         layout.addSpacing(8)
-        self.levels_section = self._section("Уровень интерфейса")
+        self.levels_section = self._section(t("newproj.levels_section"))
         layout.addWidget(self.levels_section)
         self.level_checks: dict[str, QCheckBox] = {}
         levels_hints = {
-            "simple": "Обычные окна, кнопки и списки. Для утилит и программ Windows",
-            "standard": "Готовые виджеты движка: тёмная тема, панели, списки, прокрутка",
-            "advanced": "Своя графика, частицы, анимации. Для игр",
+            "simple": t("newproj.level_hint_simple"),
+            "standard": t("newproj.level_hint_standard"),
+            "advanced": t("newproj.level_hint_advanced"),
         }
         for level in UI_LEVELS:
-            check = QCheckBox(f"{UI_LEVEL_LABELS[level]} — {levels_hints[level]}")
+            check = QCheckBox(f"{_level_label(level)} — {levels_hints[level]}")
             check.setStyleSheet("font-size: 10px;")
             check.toggled.connect(self._levels_changed)
             self.level_checks[level] = check
             layout.addWidget(check)
         self.levels_hint = muted(
-            "Можно выбрать несколько: в проект лягут только нужные инструменты и навыки.",
+            t("newproj.levels_hint"),
             size=9,
         )
         self.levels_hint.setWordWrap(True)
@@ -273,7 +278,7 @@ class NewProjectDialog(QDialog):
             button.toggled.connect(self._apply_level_defaults_from_type)
 
         layout.addSpacing(8)
-        self.mode_section = self._section("Кто будет собирать проект")
+        self.mode_section = self._section(t("newproj.mode_section"))
         layout.addWidget(self.mode_section)
         mode_row = QHBoxLayout()
         mode_row.setSpacing(12)
@@ -281,8 +286,8 @@ class NewProjectDialog(QDialog):
         self.mode_group = QButtonGroup(self)
         self.mode_buttons: dict[str, QPushButton] = {}
         for key, text, hint in (
-            ("builtin", "ВСТРОЕННЫЙ ИИ", "Агент работает прямо в редакторе"),
-            ("external", "ВНЕШНИЙ АГЕНТ", "Claude Code, Codex, Cursor, Cline…"),
+            ("builtin", t("newproj.mode_builtin"), t("newproj.mode_builtin_hint")),
+            ("external", t("newproj.mode_external"), t("newproj.mode_external_hint")),
         ):
             button = QPushButton(f"{text}\n{hint}")
             button.setObjectName("choice")
@@ -295,7 +300,7 @@ class NewProjectDialog(QDialog):
         self.mode_buttons["builtin"].setChecked(True)
         layout.addLayout(mode_row)
         self.mode_hint = muted(
-            "Встроенный агент сразу читает проект, меняет файлы, рисует спрайты и показывает прогресс.",
+            t("newproj.mode_hint_initial"),
             size=9,
         )
         self.mode_hint.setWordWrap(True)
@@ -305,11 +310,10 @@ class NewProjectDialog(QDialog):
 
         layout.addSpacing(8)
         after = Card(soft=True, padding=13)
-        after.layout().addWidget(title_label("Что будет дальше", 10))
+        after.layout().addWidget(title_label(t("newproj.after_title"), 10))
         after.layout().addWidget(
             muted(
-                "После создания откроется проект и раздел «ИИ-агент». Там вы напишете "
-                "первую задачу и сможете менять окно, заметки, код и ассеты.",
+                t("newproj.after_text"),
                 size=9,
             )
         )
@@ -317,12 +321,10 @@ class NewProjectDialog(QDialog):
         self.after_card = after
 
         self.blank_card = Card(soft=True, padding=14)
-        self.blank_card.layout().addWidget(title_label("Минимальный шаблон", 10))
+        self.blank_card.layout().addWidget(title_label(t("newproj.blank_title"), 10))
         self.blank_card.layout().addWidget(
             muted(
-                "Будет создан короткий main.py с пустым окном, project.json, папка assets "
-                "и инструкции для агента. Никакая игра и никакие вопросы про ИИ не создаются: "
-                "вы сразу попадёте в редактор кода и сможете писать сами или позвать агента.",
+                t("newproj.blank_text"),
                 size=9,
             )
         )
@@ -333,20 +335,20 @@ class NewProjectDialog(QDialog):
 
     def _build_finish_page(self) -> QWidget:
         page, layout = self._page_shell(
-            "Название и место",
-            "Последний штрих. Укажите имя проекта и папку — остальное Reasonable Engine сделает сам.",
+            t("newproj.finish_header"),
+            t("newproj.finish_sub"),
         )
 
         name_box = QVBoxLayout()
         name_box.setSpacing(5)
-        name_box.addWidget(self._small_label("Название проекта (на английском)"))
+        name_box.addWidget(self._small_label(t("newproj.name_label")))
         self.name_edit = QLineEdit()
         self.name_edit.setMinimumHeight(42)
         self.name_edit.setPlaceholderText("My Great Project")
         self.name_edit.textEdited.connect(self._name_edited)
         name_box.addWidget(self.name_edit)
         self.name_hint = muted(
-            "Латиницей, например «Task Manager». Используется для папки и файлов проекта.",
+            t("newproj.name_hint"),
             size=9,
         )
         self.name_hint.setWordWrap(True)
@@ -355,12 +357,12 @@ class NewProjectDialog(QDialog):
 
         folder_box = QVBoxLayout()
         folder_box.setSpacing(5)
-        folder_box.addWidget(self._small_label("Папка"))
+        folder_box.addWidget(self._small_label(t("common.folder")))
         folder_row = QHBoxLayout()
         self.folder_edit = QLineEdit(str(default_projects_dir(self.settings)))
         self.folder_edit.setMinimumHeight(42)
         folder_row.addWidget(self.folder_edit, 1)
-        browse = QPushButton("Выбрать…")
+        browse = QPushButton(t("common.browse"))
         browse.clicked.connect(self._browse)
         folder_row.addWidget(browse)
         folder_box.addLayout(folder_row)
@@ -372,9 +374,9 @@ class NewProjectDialog(QDialog):
         layout.addSpacing(4)
         self.ai_card = Card(soft=True)
         ai_top = QHBoxLayout()
-        ai_top.addWidget(title_label("ИИ для проекта", 11))
+        ai_top.addWidget(title_label(t("newproj.ai_title"), 11))
         ai_top.addStretch(1)
-        self.ai_badge = Badge("Проверка", "default")
+        self.ai_badge = Badge(t("welcome.ai_checking"), "default")
         ai_top.addWidget(self.ai_badge)
         self.ai_card.layout().addLayout(ai_top)
         self.ai_text = muted("", size=9)
@@ -382,14 +384,14 @@ class NewProjectDialog(QDialog):
         self.ai_card.layout().addWidget(self.ai_text)
         ai_buttons = QHBoxLayout()
         ai_buttons.addStretch(1)
-        ai_configure = QPushButton("Настроить ИИ")
+        ai_configure = QPushButton(t("newproj.configure_ai"))
         ai_configure.setObjectName("teal")
         ai_configure.clicked.connect(self.settings_requested)
         ai_buttons.addWidget(ai_configure)
         self.ai_card.layout().addLayout(ai_buttons)
         layout.addWidget(self.ai_card)
 
-        layout.addWidget(self._small_label("Сводка"))
+        layout.addWidget(self._small_label(t("newproj.summary_label")))
         self.summary_card = Card(soft=True)
         self.summary_label = muted("", size=9)
         self.summary_label.setWordWrap(True)
@@ -397,11 +399,10 @@ class NewProjectDialog(QDialog):
         layout.addWidget(self.summary_card)
 
         note = Card(soft=True, padding=13)
-        note.layout().addWidget(title_label("Первая задача — после создания", 10))
+        note.layout().addWidget(title_label(t("newproj.task_after_title"), 10))
         note.layout().addWidget(
             muted(
-                "Мастер не просит писать техническое задание заранее. После создания "
-                "откроется раздел «ИИ-агент», где вы опишете первую задачу обычными словами.",
+                t("newproj.task_after_text"),
                 size=9,
             )
         )
@@ -420,13 +421,13 @@ class NewProjectDialog(QDialog):
         self.progress_logo.setPixmap(theme.logo_pixmap(64))
         self.progress_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.progress_logo)
-        self.progress_title = QLabel("Собираю проект")
+        self.progress_title = QLabel(t("newproj.progress_title"))
         self.progress_title.setObjectName("title")
         self.progress_title.setFont(theme.display_font(21, 700))
         self.progress_title.setStyleSheet("padding-bottom: 8px;")
         self.progress_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.progress_title)
-        self.progress_stage = muted("Готовлю папки и файлы…", size=10)
+        self.progress_stage = muted(t("newproj.progress_stage"), size=10)
         self.progress_stage.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.progress_stage)
         self.progress_bar = QProgressBar()
@@ -441,12 +442,12 @@ class NewProjectDialog(QDialog):
         layout.addWidget(self.progress_detail)
         self.progress_buttons = QHBoxLayout()
         self.progress_buttons.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.open_project_button = QPushButton("Открыть проект")
+        self.open_project_button = QPushButton(t("newproj.open_project_btn"))
         self.open_project_button.setObjectName("primary")
         self.open_project_button.clicked.connect(self._finish_open)
         self.open_project_button.hide()
         self.progress_buttons.addWidget(self.open_project_button)
-        self.close_button = QPushButton("Закрыть")
+        self.close_button = QPushButton(t("common.close"))
         self.close_button.clicked.connect(self.reject)
         self.close_button.hide()
         self.progress_buttons.addWidget(self.close_button)
@@ -516,15 +517,9 @@ class NewProjectDialog(QDialog):
 
     def _mode_changed(self, _checked: bool) -> None:
         if self.mode() == "external":
-            self.mode_hint.setText(
-                "Внешний агент: редактор подготовит AGENT_GUIDE.md, навыки, re.bat и будет "
-                "показывать его прогресс в реальном времени. Работает с Claude Code, Codex, Cursor, Cline и другими."
-            )
+            self.mode_hint.setText(t("newproj.mode_hint_external"))
         else:
-            self.mode_hint.setText(
-                "Встроенный агент: работает сразу в редакторе, меняет файлы, рисует спрайты и "
-                "показывает план и прогресс. Нужен настроенный провайдер ИИ."
-            )
+            self.mode_hint.setText(t("newproj.mode_hint_builtin"))
         if hasattr(self, "ai_text"):
             self._refresh_summary()
 
@@ -536,12 +531,9 @@ class NewProjectDialog(QDialog):
         header = getattr(page, "_header", None)
         sub = getattr(page, "_sub", None)
         if header is not None:
-            header.setText("Пустой проект")
+            header.setText(t("newproj.blank_header"))
         if sub is not None:
-            sub.setText(
-                "Сразу к результату: создаём минимальный проект без игры и без вопросов "
-                "про ИИ. Вы начнёте с пустого main.py, который уже запускается."
-            )
+            sub.setText(t("newproj.blank_sub"))
         for widget in (
             self.goal_label,
             self.goal_edit,
@@ -558,11 +550,11 @@ class NewProjectDialog(QDialog):
         for button in (*self.type_buttons.values(), *self.mode_buttons.values()):
             button.hide()
         self.blank_card.show()
-        self.step_pills[0].setText("1  Пустой проект")
+        self.step_pills[0].setText(f"1  {t('newproj.pill_blank')}")
         self.ai_card.hide()
         self.goal_edit.setPlaceholderText("")
-        self.name_edit.setPlaceholderText("Мой проект")
-        self.stack.widget(1)._header.setText("Название и место")
+        self.name_edit.setPlaceholderText(t("newproj.blank_name_placeholder"))
+        self.stack.widget(1)._header.setText(t("newproj.finish_header"))
 
     # ------------------------------------------------------------------
     def project_type(self) -> str:
@@ -597,7 +589,7 @@ class NewProjectDialog(QDialog):
         index = self.stack.currentIndex()
         if index == 0:
             if self.starter != "blank" and len(self.goal_edit.text().strip()) < 3:
-                QMessageBox.warning(self, "Нужна цель", "Опишите главную цель проекта хотя бы тремя символами.")
+                QMessageBox.warning(self, t("newproj.goal_required_title"), t("newproj.goal_required_text"))
                 self.goal_edit.setFocus()
                 return
             self.stack.setCurrentIndex(1)
@@ -614,12 +606,12 @@ class NewProjectDialog(QDialog):
         index = self.stack.currentIndex()
         self.back_button.setVisible(0 < index < 2)
         self.cancel_button.setVisible(not self._creating)
-        self.next_button.setText("Создать проект" if index == 1 else "Далее")
+        self.next_button.setText(t("newproj.create_btn") if index == 1 else t("common.next"))
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Куда сохранить проект",
+            t("newproj.folder_dialog"),
             self.folder_edit.text() or str(Path.home()),
         )
         if folder:
@@ -635,50 +627,62 @@ class NewProjectDialog(QDialog):
             from reasonable.core.paths import slugify
 
             target = Path(folder) / slugify(name, "project")
-            self.folder_hint.setText(f"Проект появится здесь: {target}")
+            self.folder_hint.setText(t("newproj.folder_hint", target=target))
         else:
             self.folder_hint.setText("")
 
     def _update_ai_card(self) -> None:
         config = self.settings.get_provider_config()
-        name = config.get("name") or config.get("id") or "Не выбран"
-        model = config.get("model") or "не указана"
+        name = config.get("name") or config.get("id") or t("welcome.ai_not_selected")
+        model = config.get("model") or t("newproj.model_unspecified")
         needs_key = bool(config.get("requires_key") and not config.get("api_key"))
         if self.mode() == "external":
-            self.ai_badge.setText("Не требуется")
+            self.ai_badge.setText(t("newproj.badge_not_required"))
             self.ai_badge.set_tone("default")
             self.ai_text.setText(
-                f"{name} · {model}\nВнешний режим не использует API редактора. Если захотите "
-                "включить встроенного агента позже, ключ можно добавить в настройках."
+                t(
+                    "newproj.external_api_text",
+                    name=name,
+                    model=model,
+                )
             )
         elif needs_key:
-            self.ai_badge.setText("Нужен ключ")
+            self.ai_badge.setText(t("welcome.ai_need_key"))
             self.ai_badge.set_tone("gold")
             self.ai_text.setText(
-                f"{name} · {model}\nДля этой модели нужен API-ключ. Проект можно создать сейчас, "
-                "но агент запустится только после настройки."
+                t(
+                    "newproj.need_key_text",
+                    name=name,
+                    model=model,
+                )
             )
         else:
-            self.ai_badge.setText("Готов")
+            self.ai_badge.setText(t("welcome.ai_ready"))
             self.ai_badge.set_tone("default")
-            self.ai_text.setText(f"{name} · {model}\n{config.get('base_url') or 'Локальный провайдер'}")
+            self.ai_text.setText(
+                t("newproj.ready_text", name=name, model=model, base_url=config.get("base_url") or t("newproj.local_provider"))
+            )
 
-        kind = "Игра" if self.project_type() == "game" else "Приложение"
-        mode = "встроенный ИИ" if self.mode() == "builtin" else "внешний агент"
+        kind = t("newproj.kind_game") if self.project_type() == "game" else t("newproj.kind_app")
+        mode = t("convert.mode.builtin") if self.mode() == "builtin" else t("convert.mode.external")
         if self.starter == "blank":
             self.summary_label.setText(
-                "Пустой проект · минимальный main.py\n"
-                "Без игры и без вопросов про ИИ\n"
-                "После создания откроется раздел «Код»\n"
-                f"Папка: {self.folder_edit.text().strip() or '—'}"
+                t(
+                    "newproj.summary_blank",
+                    folder=self.folder_edit.text().strip() or "—",
+                )
             )
             return
         levels = self.selected_ui_levels()
-        level_labels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in levels) or "—"
+        level_labels = ", ".join(_level_label(level) for level in levels) or "—"
         self.summary_label.setText(
-            f"{kind} · {mode}\n"
-            f"Интерфейс: {level_labels}\n"
-            f"Папка: {self.folder_edit.text().strip() or '—'}"
+            t(
+                "newproj.summary_line",
+                kind=kind,
+                mode=mode,
+                levels=level_labels,
+                folder=self.folder_edit.text().strip() or "—",
+            )
         )
 
     def refresh_ai(self) -> None:
@@ -692,14 +696,12 @@ class NewProjectDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _create_project(self) -> None:
-        name = self.name_edit.text().strip() or self.goal_edit.text().strip()[:58] or "Новый проект"
+        name = self.name_edit.text().strip() or self.goal_edit.text().strip()[:58] or t("newproj.fallback_name")
         if not PROJECT_NAME_RE.match(name):
             QMessageBox.warning(
                 self,
-                "Название проекта",
-                "Название должно быть на английском: начинаться с буквы, содержать только "
-                "латинские буквы, цифры, пробелы, дефис или подчёркивание (2–60 символов).\n"
-                "Например: Task Manager или my-great-game",
+                t("newproj.name_dialog_title"),
+                t("newproj.name_invalid_text"),
             )
             self.name_edit.setFocus()
             self.name_edit.selectAll()
@@ -708,7 +710,7 @@ class NewProjectDialog(QDialog):
         try:
             parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            QMessageBox.critical(self, "Не удалось создать папку", str(exc))
+            QMessageBox.critical(self, t("newproj.mkdir_failed_title"), str(exc))
             return
         # Remember the chosen parent so the next project starts in the same place.
         self.settings.set_projects_dir(parent)
@@ -746,26 +748,19 @@ class NewProjectDialog(QDialog):
         self.project = project
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
-        self.progress_title.setText("Проект готов!")
+        self.progress_title.setText(t("newproj.done_title"))
         if self.starter == "blank":
-            self.progress_stage.setText(f"{project.name} · пустой проект")
-            self.progress_detail.setText(
-                "Созданы минимальный main.py, project.json, папка assets и инструкции для агента.\n"
-                "Сейчас откроется раздел «Код» — можно писать самому или позвать ИИ-агента."
-            )
+            self.progress_stage.setText(t("newproj.done_stage_blank", name=project.name))
+            self.progress_detail.setText(t("newproj.done_detail_blank"))
         else:
-            mode_text = "встроенный ИИ" if project.mode == "builtin" else "внешний агент"
-            self.progress_stage.setText(f"{project.name} · {mode_text}")
-            self.progress_detail.setText(
-                "Созданы main.py, project.json, иконка, фон, стартовые спрайты, "
-                "progress/ и инструкции для агента.\n"
-                "Первая задача пишется в разделе «ИИ-агент» — уже после создания."
-            )
+            mode_text = t("convert.mode.builtin") if project.mode == "builtin" else t("convert.mode.external")
+            self.progress_stage.setText(t("newproj.done_stage", name=project.name, mode=mode_text))
+            self.progress_detail.setText(t("newproj.done_detail"))
         self.progress_logo.setPixmap(theme.logo_pixmap(64))
         self.open_project_button.show()
         self.close_button.show()
         self.cancel_button.show()
-        self.cancel_button.setText("Закрыть")
+        self.cancel_button.setText(t("common.close"))
         self.cancel_button.clicked.disconnect()
         self.cancel_button.clicked.connect(self.reject)
         self.project_created.emit(project)
@@ -774,11 +769,11 @@ class NewProjectDialog(QDialog):
         self._creating = False
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.progress_title.setText("Не удалось создать проект")
+        self.progress_title.setText(t("newproj.failed_title"))
         self.progress_stage.setText(message)
         self.progress_detail.setText(trace[-1500:])
         self.cancel_button.show()
-        self.cancel_button.setText("Закрыть")
+        self.cancel_button.setText(t("common.close"))
         self.back_button.show()
 
     def _finish_open(self) -> None:
@@ -788,8 +783,8 @@ class NewProjectDialog(QDialog):
         if self.worker is not None and self.worker.isRunning():
             answer = QMessageBox.question(
                 self,
-                "Создание проекта",
-                "Проект ещё создаётся. Закрыть окно? Это может оставить неполные файлы.",
+                t("newproj.close_confirm_title"),
+                t("newproj.close_confirm_text"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

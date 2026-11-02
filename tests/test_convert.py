@@ -116,8 +116,9 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(read_state(target.root)["mode"], "external")
         self.assertEqual(read_state(target.root)["percent"], 42.0)
         guide = (target.root / "AGENT_GUIDE.md").read_text(encoding="utf-8")
-        self.assertIn("режим: внешний агент", guide)
-        self.assertIn("Платформа:** Windows", guide)
+        # The guide is agent material: English-only regardless of UI language.
+        self.assertIn("mode: external", guide)
+        self.assertIn("Platform:** Windows", guide)
         changes = "\n".join(result["changes"])
         self.assertIn("Windows", changes)
         self.assertIn("внешний агент", changes)

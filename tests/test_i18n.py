@@ -109,6 +109,68 @@ class DetectUserLanguageTests(unittest.TestCase):
         self.assertEqual(i18n.detect_user_language(""), "ru")
 
 
+class InstallerLanguageTests(unittest.TestCase):
+    """The installer writes an ASCII marker; the app merges it into settings.json."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._old_home = os.environ.get("REASONABLE_HOME")
+        self._old_lang = os.environ.get("REASONABLE_LANG")
+        os.environ["REASONABLE_HOME"] = self._tmp.name
+        os.environ.pop("REASONABLE_LANG", None)
+        i18n.set_override(None)
+        i18n.invalidate_cache()
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        if self._old_home is None:
+            os.environ.pop("REASONABLE_HOME", None)
+        else:
+            os.environ["REASONABLE_HOME"] = self._old_home
+        if self._old_lang is None:
+            os.environ.pop("REASONABLE_LANG", None)
+        else:
+            os.environ["REASONABLE_LANG"] = self._old_lang
+        i18n.set_override(None)
+        i18n.invalidate_cache()
+
+    def _marker_path(self) -> Path:
+        return Path(self._tmp.name) / i18n.INSTALLER_LANGUAGE_MARKER
+
+    def _write_marker(self, language: str) -> None:
+        self._marker_path().write_text(language, encoding="ascii")
+
+    def test_marker_is_read_when_settings_have_no_language(self) -> None:
+        self._write_marker("en")
+        self.assertEqual(i18n.read_installer_language(), "en")
+        self.assertEqual(i18n.current_language(), "en")
+
+    def test_explicit_settings_language_wins_over_marker(self) -> None:
+        self._write_marker("en")
+        (Path(self._tmp.name) / "settings.json").write_text(
+            json.dumps({"ui": {"language": "ru"}}), encoding="utf-8"
+        )
+        i18n.invalidate_cache()
+        self.assertEqual(i18n.current_language(), "ru")
+
+    def test_settings_load_consumes_marker(self) -> None:
+        from reasonable.core.settings import Settings
+
+        self._write_marker("en")
+        settings = Settings()
+        self.assertEqual(settings.language(), "en")
+        self.assertFalse(self._marker_path().exists())
+        stored = json.loads((Path(self._tmp.name) / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["ui"]["language"], "en")
+        # The choice survives restarts without the marker.
+        self.assertEqual(Settings().language(), "en")
+
+    def test_missing_marker_defaults_to_russian(self) -> None:
+        self.assertEqual(i18n.read_installer_language(), "")
+        self.assertEqual(i18n.current_language(), "ru")
+
+
 class AgentMaterialEnglishOnlyTests(unittest.TestCase):
     """Skills, tool schemas and guides fed to the AI must be English-only."""
 

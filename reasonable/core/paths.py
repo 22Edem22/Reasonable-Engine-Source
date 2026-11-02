@@ -73,11 +73,17 @@ def python_executable() -> Path | None:
         found = shutil.which(name)
         if found:
             return Path(found)
-    local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    for folder in sorted((local / "Programs" / "Python").glob("Python3*"), reverse=True):
-        candidate = folder / "python.exe"
-        if candidate.is_file():
-            return candidate
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        try:
+            local = str(Path.home() / "AppData" / "Local")
+        except RuntimeError:  # home directory cannot be determined
+            local = ""
+    if local:
+        for folder in sorted((Path(local) / "Programs" / "Python").glob("Python3*"), reverse=True):
+            candidate = folder / "python.exe"
+            if candidate.is_file():
+                return candidate
     for candidate in (
         Path("C:/Python313/python.exe"),
         Path("C:/Python312/python.exe"),

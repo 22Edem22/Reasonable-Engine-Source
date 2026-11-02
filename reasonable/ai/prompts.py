@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from .prompts_en import (  # noqa: F401  (re-exported for existing imports)
     AGENT_LANGUAGE_RULE,
+    AGENT_SYSTEM_PROMPT,
     AGENT_SYSTEM_PROMPT_BODY,
     AGENT_TASKS_TEMPLATE,
     ENGINE_API_GUIDE,

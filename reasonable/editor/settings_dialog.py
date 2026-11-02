@@ -36,6 +36,8 @@ from reasonable.ai.providers import (
     get_image_provider,
     get_provider,
 )
+from reasonable.core import i18n
+from reasonable.core.i18n import t
 from reasonable.core.settings import Settings
 
 from . import theme
@@ -58,8 +60,8 @@ def _list_name(name: str) -> str:
     """Short, readable provider name for the narrow list column."""
     short = name.split(" (", 1)[0]
     short = short.replace(" La Plateforme", "").replace(" API", "")
-    if short.startswith("Свой "):
-        short = "Свой сервер"
+    if short.startswith(("Свой ", "Custom ")) or short in ("Свой сервер", "Custom server"):
+        short = t("settings.custom_server")
     return short
 
 
@@ -79,12 +81,14 @@ class SettingsDialog(QDialog):
         self._test_worker: ProviderTestWorker | None = None
         self._models_worker: Worker | None = None
         self._loading = False
+        self._initial_language = self.settings.language()
+        self.language_combos: list[QComboBox] = []
         if advanced is None:
             self._advanced = bool((settings.data.get("ui") or {}).get("advanced_settings", False))
         else:
             self._advanced = bool(advanced)
 
-        self.setWindowTitle("Настройки — Reasonable Engine")
+        self.setWindowTitle(t("settings.title"))
         self.setMinimumSize(1080, 680)
         self.resize(1180, 760)
         self.setModal(True)
@@ -115,10 +119,10 @@ class SettingsDialog(QDialog):
         self.test_result.setObjectName("muted")
         footer.addWidget(self.test_result)
         footer.addStretch(1)
-        cancel = QPushButton("Отмена")
+        cancel = QPushButton(t("common.cancel"))
         cancel.clicked.connect(self.reject)
         footer.addWidget(cancel)
-        save = QPushButton("Сохранить настройки")
+        save = QPushButton(t("settings.save"))
         save.setObjectName("primary")
         save.setMinimumWidth(180)
         save.clicked.connect(self._save)
@@ -139,21 +143,19 @@ class SettingsDialog(QDialog):
         row.addWidget(logo)
         titles = QVBoxLayout()
         titles.setSpacing(0)
-        title = QLabel("Настройки")
+        title = QLabel(t("settings.heading"))
         title.setObjectName("title")
         title.setFont(theme.display_font(14, 700))
         titles.addWidget(title)
-        titles.addWidget(muted("Основные настройки · расширенные — по переключателю", wrap=False, size=9))
+        titles.addWidget(muted(t("settings.subtitle"), wrap=False, size=9))
         row.addLayout(titles)
         row.addStretch(1)
-        self.advanced_toggle = QCheckBox("Расширенные настройки")
-        self.advanced_toggle.setToolTip(
-            "Провайдеры, модели, Base URL, картинки, параметры агента, Android и внешние агенты."
-        )
+        self.advanced_toggle = QCheckBox(t("settings.advanced_toggle"))
+        self.advanced_toggle.setToolTip(t("settings.advanced_tooltip"))
         self.advanced_toggle.setChecked(self._advanced)
         self.advanced_toggle.toggled.connect(self._toggle_advanced)
         row.addWidget(self.advanced_toggle)
-        row.addWidget(Badge("ДАННЫЕ ХРАНЯТСЯ ЛОКАЛЬНО", "default"))
+        row.addWidget(Badge(t("settings.badge_local"), "default"))
         return row
 
     def _build_sidebar(self) -> QWidget:
@@ -166,10 +168,10 @@ class SettingsDialog(QDialog):
         self.nav_buttons: list[QPushButton] = []
         for index, label in enumerate(
             (
-                "Провайдеры ИИ",
-                "Бесплатные API",
-                "Картинки и спрайты",
-                "Агент и предпросмотр",
+                t("settings.nav_providers"),
+                t("settings.nav_free"),
+                t("settings.nav_images"),
+                t("settings.nav_agent"),
             )
         ):
             button = QPushButton(label)
@@ -185,11 +187,10 @@ class SettingsDialog(QDialog):
 
         info = Card(soft=True, padding=12)
         info.setFrameShape(QFrame.Shape.NoFrame)
-        info.layout().addWidget(title_label("Без ключа", 10))
+        info.layout().addWidget(title_label(t("settings.no_key_title"), 10))
         info.layout().addWidget(
             muted(
-                "OpenRouter, Groq, Gemini и другие бесплатные тарифы требуют ключ. "
-                "Ollama и LM Studio работают полностью локально, если запущены на этом ПК.",
+                t("settings.no_key_text"),
                 size=9,
             )
         )
@@ -213,20 +214,19 @@ class SettingsDialog(QDialog):
         layout.setSpacing(12)
         scroll.setWidget(body)
 
-        layout.addWidget(title_label("Основные настройки", 16))
+        layout.addWidget(title_label(t("settings.simple_title"), 16))
         layout.addWidget(
             muted(
-                "Только необходимое для работы. Провайдеры, модели, Base URL, картинки, "
-                "параметры Android и внешних агентов находятся в расширенных настройках.",
+                t("settings.simple_intro"),
                 size=9,
             )
         )
 
         ai_card = Card()
         ai_header = QHBoxLayout()
-        ai_header.addWidget(title_label("ИИ-помощник", 11))
+        ai_header.addWidget(title_label(t("welcome.ai_helper"), 11))
         ai_header.addStretch(1)
-        self.simple_ai_status = Badge("Проверка", "default")
+        self.simple_ai_status = Badge(t("welcome.ai_checking"), "default")
         ai_header.addWidget(self.simple_ai_status)
         ai_card.layout().addLayout(ai_header)
         self.simple_ai_text = muted("", size=9)
@@ -234,26 +234,28 @@ class SettingsDialog(QDialog):
         ai_card.layout().addWidget(self.simple_ai_text)
         ai_buttons = QHBoxLayout()
         ai_buttons.addStretch(1)
-        ai_setup = QPushButton("Настроить провайдера и модель…")
+        ai_setup = QPushButton(t("settings.setup_provider"))
         ai_setup.setObjectName("teal")
         ai_setup.clicked.connect(lambda: self.advanced_toggle.setChecked(True))
         ai_buttons.addWidget(ai_setup)
         ai_card.layout().addLayout(ai_buttons)
         layout.addWidget(ai_card)
 
+        layout.addWidget(self._language_card())
+
         projects = Card(soft=True)
-        projects.layout().addWidget(title_label("Папка проектов", 11))
+        projects.layout().addWidget(title_label(t("settings.projects_title"), 11))
         projects.layout().addWidget(
-            muted("Где создаются новые проекты. Существующие папки не перемещаются.", size=9)
+            muted(t("settings.projects_hint"), size=9)
         )
         projects_row = QHBoxLayout()
         self.simple_projects_edit = QLineEdit()
-        self.simple_projects_edit.setPlaceholderText("По умолчанию: папка Projects рядом с движком")
+        self.simple_projects_edit.setPlaceholderText(t("settings.projects_placeholder"))
         projects_row.addWidget(self.simple_projects_edit, 1)
-        browse = QPushButton("Выбрать…")
+        browse = QPushButton(t("common.browse"))
         browse.clicked.connect(self._browse_simple_projects_dir)
         projects_row.addWidget(browse)
-        reset = QPushButton("По умолчанию")
+        reset = QPushButton(t("settings.reset_default"))
         reset.setObjectName("ghost")
         reset.clicked.connect(lambda: self.simple_projects_edit.setText(""))
         projects_row.addWidget(reset)
@@ -261,11 +263,10 @@ class SettingsDialog(QDialog):
         layout.addWidget(projects)
 
         preview = Card(soft=True)
-        preview.layout().addWidget(title_label("Предпросмотр", 11))
+        preview.layout().addWidget(title_label(t("settings.preview_title"), 11))
         preview.layout().addWidget(
             muted(
-                "Заставка Reasonable Engine всегда играет перед запуском проекта — "
-                "и в редакторе, и в готовой игре. Отключить её может только разработчик движка.",
+                t("settings.preview_hint"),
                 size=9,
             )
         )
@@ -273,26 +274,57 @@ class SettingsDialog(QDialog):
         layout.addStretch(1)
         return scroll
 
+    def _language_card(self) -> Card:
+        """Card with the interface-language switcher (shown on both pages)."""
+        card = Card(soft=True)
+        card.layout().addWidget(title_label(t("settings.language_title"), 11))
+        card.layout().addWidget(muted(t("settings.language_hint"), size=9))
+        row = QHBoxLayout()
+        combo = QComboBox()
+        for code, label in (("ru", "Русский"), ("en", "English")):
+            combo.addItem(label, code)
+        index = combo.findData(self.settings.language())
+        combo.setCurrentIndex(max(0, index))
+        combo.currentIndexChanged.connect(lambda _index, box=combo: self._language_changed(box))
+        self.language_combos.append(combo)
+        row.addWidget(combo, 1)
+        card.layout().addLayout(row)
+        return card
+
+    def _language_changed(self, box: QComboBox) -> None:
+        code = box.currentData()
+        for other in self.language_combos:
+            if other is not box and other.currentData() != code:
+                other.blockSignals(True)
+                other.setCurrentIndex(max(0, other.findData(code)))
+                other.blockSignals(False)
+        self.settings.data.setdefault("ui", {})["language"] = code
+        try:
+            self.settings.save()
+        except Exception:
+            pass
+        i18n.invalidate_cache()
+
     def _load_simple(self) -> None:
         self.simple_projects_edit.setText(str(self.settings.data.get("projects_dir") or ""))
         config = self.settings.get_provider_config()
-        name = config.get("name") or config.get("id") or "Не выбран"
-        model = config.get("model") or "модель не указана"
+        name = config.get("name") or config.get("id") or t("welcome.ai_not_selected")
+        model = config.get("model") or t("welcome.ai_model_unspecified")
         if config.get("requires_key") and not config.get("api_key"):
-            self.simple_ai_status.setText("Нужен ключ")
+            self.simple_ai_status.setText(t("welcome.ai_need_key"))
             self.simple_ai_status.set_tone("gold")
             self.simple_ai_text.setText(
-                f"{name} · {model}\n"
-                "Ключ понадобится только для встроенного агента. Ручная работа и запуск "
-                "проекта доступны без него."
+                t(
+                    "settings.simple_need_key",
+                    name=name,
+                    model=model,
+                )
             )
         else:
-            self.simple_ai_status.setText("Готов")
+            self.simple_ai_status.setText(t("welcome.ai_ready"))
             self.simple_ai_status.set_tone("default")
-            self.simple_ai_text.setText(
-                f"{name} · {model}\n"
-                f"{'Ключ сохранён' if config.get('api_key') else 'Работает без ключа'}."
-            )
+            key_state = t("welcome.ai_key_saved") if config.get("api_key") else t("welcome.ai_no_key_needed")
+            self.simple_ai_text.setText(t("settings.simple_ready_line", name=name, model=model, key_state=key_state))
 
     def _toggle_advanced(self, checked: bool) -> None:
         self._advanced = bool(checked)
@@ -316,7 +348,7 @@ class SettingsDialog(QDialog):
         from reasonable.core.paths import ensure_projects_dir
 
         start = self.simple_projects_edit.text().strip() or str(ensure_projects_dir())
-        folder = QFileDialog.getExistingDirectory(self, "Папка для новых проектов", start)
+        folder = QFileDialog.getExistingDirectory(self, t("settings.folder_dialog"), start)
         if folder:
             self.simple_projects_edit.setText(folder)
 
@@ -333,8 +365,8 @@ class SettingsDialog(QDialog):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(10, 12, 10, 10)
         left_layout.setSpacing(6)
-        left_layout.addWidget(title_label("Модель для агента", 11))
-        left_layout.addWidget(muted("Выберите провайдера. Ключ нужен не всем.", size=9))
+        left_layout.addWidget(title_label(t("settings.model_for_agent"), 11))
+        left_layout.addWidget(muted(t("settings.pick_provider"), size=9))
         self.provider_list = QListWidget()
         self.provider_list.setSpacing(2)
         self.provider_list.setTextElideMode(Qt.TextElideMode.ElideRight)
@@ -364,7 +396,7 @@ class SettingsDialog(QDialog):
         top.addStretch(1)
         self.provider_key_badge = Badge("", "default")
         top.addWidget(self.provider_key_badge)
-        self.provider_active_badge = Badge("АКТИВНЫЙ", "accent")
+        self.provider_active_badge = Badge(t("settings.active_badge"), "accent")
         top.addWidget(self.provider_active_badge)
         self.provider_card.layout().addLayout(top)
         self.provider_description = muted("", size=10)
@@ -390,23 +422,23 @@ class SettingsDialog(QDialog):
         self.model_combo = QComboBox()
         self.model_combo.setEditable(True)
         self.model_combo.setMinimumWidth(240)
-        form.addRow(self._label("Модель"), self.model_combo)
+        form.addRow(self._label(t("settings.label_model")), self.model_combo)
 
         key_row = QHBoxLayout()
         self.key_edit = QLineEdit()
         self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.key_edit.setPlaceholderText("API-ключ (если требуется)")
+        self.key_edit.setPlaceholderText(t("settings.key_placeholder"))
         key_row.addWidget(self.key_edit, 1)
-        self.show_key = QPushButton("Показать")
+        self.show_key = QPushButton(t("settings.show"))
         self.show_key.setObjectName("ghost")
         self.show_key.setCheckable(True)
         self.show_key.toggled.connect(self._toggle_key)
         key_row.addWidget(self.show_key)
-        self.get_key = QPushButton("Получить ключ")
+        self.get_key = QPushButton(t("settings.get_key"))
         self.get_key.setObjectName("teal")
         self.get_key.clicked.connect(self._open_key_url)
         key_row.addWidget(self.get_key)
-        form.addRow(self._label("API-ключ"), key_row)
+        form.addRow(self._label(t("settings.label_api_key")), key_row)
         self.provider_card.layout().addLayout(form)
 
         self.provider_links = QLabel("")
@@ -415,10 +447,10 @@ class SettingsDialog(QDialog):
         self.provider_card.layout().addWidget(self.provider_links)
 
         test_row = QHBoxLayout()
-        self.models_button = QPushButton("Загрузить модели")
+        self.models_button = QPushButton(t("settings.load_models"))
         self.models_button.clicked.connect(self._load_models)
         test_row.addWidget(self.models_button)
-        self.test_button = QPushButton("Проверить подключение")
+        self.test_button = QPushButton(t("settings.test_connection"))
         self.test_button.clicked.connect(self._test_provider)
         test_row.addWidget(self.test_button)
         self.test_status = QLabel("")
@@ -429,13 +461,10 @@ class SettingsDialog(QDialog):
         self.provider_detail.addWidget(self.provider_card)
 
         hint = Card(soft=True)
-        hint.layout().addWidget(title_label("Как это работает", 11))
+        hint.layout().addWidget(title_label(t("settings.how_it_works"), 11))
         hint.layout().addWidget(
             muted(
-                "Reasonable Engine общается с моделями через OpenAI-совместимый /chat/completions "
-                "или нативный Anthropic API. Для агента важна поддержка tool calling: Claude, "
-                "GPT-4.1, Gemini 2.5, Qwen и Llama 3.3 подходят. Если провайдер отклонит инструменты, "
-                "агент переключится на текстовый JSON-протокол.",
+                t("settings.how_it_works_text"),
                 size=9,
             )
         )
@@ -513,10 +542,10 @@ class SettingsDialog(QDialog):
         self.provider_note.setText(preset.note)
         self.provider_note.setVisible(bool(preset.note))
         if preset.requires_key:
-            self.provider_key_badge.setText("НУЖЕН КЛЮЧ")
+            self.provider_key_badge.setText(t("settings.key_required_badge"))
             self.provider_key_badge.set_tone("gold")
         else:
-            self.provider_key_badge.setText("БЕЗ КЛЮЧА")
+            self.provider_key_badge.setText(t("settings.no_key_badge"))
             self.provider_key_badge.set_tone("default")
 
         self.base_edit.setText(config.get("base_url", ""))
@@ -535,9 +564,9 @@ class SettingsDialog(QDialog):
 
         links = []
         if preset.key_url:
-            links.append(f'<a style="color:#D9917A" href="{preset.key_url}">Получить API-ключ</a>')
+            links.append(f'<a style="color:#D9917A" href="{preset.key_url}">{t("settings.get_api_key_link")}</a>')
         if preset.docs_url:
-            links.append(f'<a style="color:#9AA1AB" href="{preset.docs_url}">Документация</a>')
+            links.append(f'<a style="color:#9AA1AB" href="{preset.docs_url}">{t("settings.docs_link")}</a>')
         self.provider_links.setText("  ·  ".join(links))
         self.provider_links.setVisible(bool(links))
 
@@ -552,7 +581,7 @@ class SettingsDialog(QDialog):
 
     def _toggle_key(self, visible: bool) -> None:
         self.key_edit.setEchoMode(QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password)
-        self.show_key.setText("Скрыть" if visible else "Показать")
+        self.show_key.setText(t("settings.hide") if visible else t("settings.show"))
 
     def _open_key_url(self) -> None:
         preset = get_provider(self._current_provider)
@@ -572,13 +601,13 @@ class SettingsDialog(QDialog):
             "headers": dict(preset.headers),
         }
         if not config["base_url"]:
-            self.test_status.setText("Укажите Base URL.")
+            self.test_status.setText(t("settings.specify_base_url"))
             return
         if preset.requires_key and not config["api_key"]:
-            self.test_status.setText("Введите API-ключ.")
+            self.test_status.setText(t("settings.enter_api_key"))
             return
         self.test_button.setEnabled(False)
-        self.test_status.setText("Проверяю соединение…")
+        self.test_status.setText(t("settings.testing"))
         self._test_worker = ProviderTestWorker(config)
         self._test_worker.done.connect(self._test_done)
         self._test_worker.failed.connect(self._test_failed)
@@ -586,13 +615,13 @@ class SettingsDialog(QDialog):
 
     def _test_done(self, ok: bool, message: str) -> None:
         self.test_button.setEnabled(True)
-        self.test_status.setText(("Успешно: " if ok else "") + message[:300])
-        self.test_result.setText("Подключение работает." if ok else message[:200])
+        self.test_status.setText((t("settings.success_prefix") if ok else "") + message[:300])
+        self.test_result.setText(t("settings.connection_ok") if ok else message[:200])
 
     def _test_failed(self, message: str, _trace: str) -> None:
         self.test_button.setEnabled(True)
-        self.test_status.setText("Ошибка: " + message[:400])
-        self.test_result.setText("Не удалось подключиться к модели.")
+        self.test_status.setText(t("settings.error_prefix") + message[:400])
+        self.test_result.setText(t("settings.connection_failed"))
 
     def _load_models(self) -> None:
         preset = get_provider(self._current_provider)
@@ -607,15 +636,15 @@ class SettingsDialog(QDialog):
             "headers": dict(preset.headers),
         }
         if not config["base_url"]:
-            self.test_status.setText("Укажите Base URL.")
+            self.test_status.setText(t("settings.specify_base_url"))
             return
         if preset.requires_key and not config["api_key"]:
-            self.test_status.setText("Введите API-ключ, чтобы загрузить список моделей.")
+            self.test_status.setText(t("settings.enter_key_models"))
             return
         if self._models_worker is not None and self._models_worker.isRunning():
             return
         self.models_button.setEnabled(False)
-        self.test_status.setText("Загружаю список моделей…")
+        self.test_status.setText(t("settings.loading_models"))
         from reasonable.ai.client import fetch_models
 
         provider_id = self._current_provider
@@ -634,7 +663,7 @@ class SettingsDialog(QDialog):
         if provider_id != self._current_provider:
             return
         if not models:
-            self.test_status.setText("Провайдер не вернул список. Введите модель вручную.")
+            self.test_status.setText(t("settings.empty_model_list"))
             return
         current = self.model_combo.currentText().strip()
         self.model_combo.blockSignals(True)
@@ -642,15 +671,15 @@ class SettingsDialog(QDialog):
         self.model_combo.addItems(models[:500])
         self.model_combo.setCurrentText(current or models[0])
         self.model_combo.blockSignals(False)
-        suffix = " (показаны первые 500)" if len(models) > 500 else ""
-        self.test_status.setText(f"Загружено моделей: {len(models)}{suffix}")
+        suffix = t("settings.shown_first_500") if len(models) > 500 else ""
+        self.test_status.setText(t("settings.models_loaded", count=len(models)) + suffix)
 
     def _models_failed(self, message: str, provider_id: str) -> None:
         self.models_button.setEnabled(True)
         if provider_id != self._current_provider:
             return
         self.test_status.setText(
-            "Не удалось загрузить список: " + message[:300] + " Можно ввести модель вручную."
+            t("settings.load_failed_prefix") + message[:300] + t("settings.load_failed_suffix")
         )
 
     # ------------------------------------------------------------------
@@ -665,21 +694,19 @@ class SettingsDialog(QDialog):
         layout.setSpacing(12)
         scroll.setWidget(body)
 
-        layout.addWidget(title_label("Бесплатные API-ключи", 16))
+        layout.addWidget(title_label(t("settings.free_title"), 16))
         layout.addWidget(
             muted(
-                "Эти сервисы дают бесплатный уровень или пробные кредиты. Лимиты меняются — "
-                "проверяйте условия на сайте. Локальные модели вообще не требуют ключа.",
+                t("settings.free_intro"),
                 size=9,
             )
         )
 
         no_key = Card(soft=True)
-        no_key.layout().addWidget(title_label("Работает без ключа", 11))
+        no_key.layout().addWidget(title_label(t("welcome.ai_no_key_needed"), 11))
         no_key.layout().addWidget(
             muted(
-                "Ollama / LM Studio — запустите локальный сервер и укажите модель.\n"
-                "Для остальных провайдеров добавьте бесплатный API-ключ.",
+                t("settings.local_no_key_text"),
                 size=9,
             )
         )
@@ -703,11 +730,11 @@ class SettingsDialog(QDialog):
             buttons.addStretch(1)
             provider_id = SITE_PROVIDER_MAP.get(site.name)
             if provider_id:
-                use = QPushButton("Настроить провайдера")
+                use = QPushButton(t("settings.setup_provider_btn"))
                 use.setObjectName("teal")
                 use.clicked.connect(lambda checked=False, pid=provider_id: self._use_site_provider(pid))
                 buttons.addWidget(use)
-            open_button = QPushButton("Открыть сайт")
+            open_button = QPushButton(t("settings.open_site"))
             open_button.clicked.connect(lambda checked=False, url=site.url: QDesktopServices.openUrl(QUrl(url)))
             buttons.addWidget(open_button)
             card.layout().addLayout(buttons)
@@ -733,11 +760,10 @@ class SettingsDialog(QDialog):
         layout.setSpacing(12)
         scroll.setWidget(body)
 
-        layout.addWidget(title_label("Картинки и спрайты", 16))
+        layout.addWidget(title_label(t("settings.nav_images"), 16))
         layout.addWidget(
             muted(
-                "Встроенный агент и кнопка «Сгенерировать спрайт» используют этот провайдер. "
-                "Если сеть недоступна, процедурный генератор создаст аккуратный спрайт локально.",
+                t("settings.images_intro"),
                 size=9,
             )
         )
@@ -749,35 +775,33 @@ class SettingsDialog(QDialog):
         for provider in IMAGE_PROVIDERS:
             self.image_provider.addItem(provider.name, provider.id)
         self.image_provider.currentIndexChanged.connect(self._image_provider_changed)
-        form.addRow(self._label("Провайдер"), self.image_provider)
+        form.addRow(self._label(t("settings.label_provider")), self.image_provider)
 
         self.image_description = muted("", size=9)
-        form.addRow(self._label("Описание"), self.image_description)
+        form.addRow(self._label(t("settings.label_description")), self.image_description)
 
         self.image_base = QLineEdit()
-        form.addRow(self._label("Base URL"), self.image_base)
+        form.addRow(self._label(t("settings.label_base_url")), self.image_base)
 
         self.image_model = QComboBox()
         self.image_model.setEditable(True)
-        form.addRow(self._label("Модель"), self.image_model)
+        form.addRow(self._label(t("settings.label_model")), self.image_model)
 
         self.image_key = QLineEdit()
         self.image_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.image_key.setPlaceholderText("API-ключ (если требуется)")
-        form.addRow(self._label("API-ключ"), self.image_key)
+        self.image_key.setPlaceholderText(t("settings.key_placeholder"))
+        form.addRow(self._label(t("settings.label_api_key")), self.image_key)
 
-        self.image_fallback = QCheckBox("Если сеть недоступна — рисовать процедурно")
+        self.image_fallback = QCheckBox(t("settings.fallback_checkbox"))
         form.addRow("", self.image_fallback)
         card.layout().addLayout(form)
         layout.addWidget(card)
 
         note = Card(soft=True)
-        note.layout().addWidget(title_label("Совет", 10))
+        note.layout().addWidget(title_label(t("settings.tip_title"), 10))
         note.layout().addWidget(
             muted(
-                "Для спрайтов лучше всего работают короткие предметные промпты: "
-                "«золотая звезда, флэт, прозрачный фон». Фон можно сгенерировать отдельно "
-                "кнопкой в разделе «Ассеты».",
+                t("settings.tip_text"),
                 size=9,
             )
         )
@@ -816,7 +840,8 @@ class SettingsDialog(QDialog):
         layout.setSpacing(12)
         scroll.setWidget(body)
 
-        layout.addWidget(title_label("Агент и предпросмотр", 16))
+        layout.addWidget(title_label(t("settings.nav_agent"), 16))
+        layout.addWidget(self._language_card())
         card = Card()
         form = QFormLayout()
         form.setSpacing(12)
@@ -824,30 +849,29 @@ class SettingsDialog(QDialog):
         self.temperature.setRange(0.0, 1.6)
         self.temperature.setSingleStep(0.05)
         self.temperature.setDecimals(2)
-        form.addRow(self._label("Температура"), self.temperature)
+        form.addRow(self._label(t("settings.label_temperature")), self.temperature)
         self.context_messages = QSpinBox()
         self.context_messages.setRange(12, 120)
-        form.addRow(self._label("Помнить сообщений"), self.context_messages)
+        form.addRow(self._label(t("settings.label_context")), self.context_messages)
         card.layout().addLayout(form)
         layout.addWidget(card)
 
         projects = Card(soft=True)
-        projects.layout().addWidget(title_label("Папка проектов", 11))
+        projects.layout().addWidget(title_label(t("settings.projects_title"), 11))
         projects.layout().addWidget(
             muted(
-                "По умолчанию новые проекты создаются в папке Projects рядом с движком. "
-                "Можно выбрать любую другую папку — путь сохранится.",
+                t("settings.projects_hint2"),
                 size=9,
             )
         )
         projects_row = QHBoxLayout()
         self.projects_dir_edit = QLineEdit()
-        self.projects_dir_edit.setPlaceholderText("По умолчанию: папка Projects рядом с движком")
+        self.projects_dir_edit.setPlaceholderText(t("settings.projects_placeholder"))
         projects_row.addWidget(self.projects_dir_edit, 1)
-        browse = QPushButton("Выбрать…")
+        browse = QPushButton(t("common.browse"))
         browse.clicked.connect(self._browse_projects_dir)
         projects_row.addWidget(browse)
-        reset = QPushButton("По умолчанию")
+        reset = QPushButton(t("settings.reset_default"))
         reset.setObjectName("ghost")
         reset.clicked.connect(lambda: self.projects_dir_edit.setText(""))
         projects_row.addWidget(reset)
@@ -855,24 +879,20 @@ class SettingsDialog(QDialog):
         layout.addWidget(projects)
 
         preview = Card(soft=True)
-        preview.layout().addWidget(title_label("Предпросмотр и заставка", 11))
+        preview.layout().addWidget(title_label(t("settings.preview_splash_title"), 11))
         preview.layout().addWidget(
             muted(
-                "Заставка Reasonable Engine всегда играет перед запуском проекта — "
-                "и в редакторе, и в готовой игре. Отключить её может только разработчик движка.",
+                t("settings.preview_hint"),
                 size=9,
             )
         )
         layout.addWidget(preview)
 
         external = Card(soft=True)
-        external.layout().addWidget(title_label("Внешний агент", 11))
+        external.layout().addWidget(title_label(t("settings.external_title"), 11))
         external.layout().addWidget(
             muted(
-                "Для внешнего режима в каждом проекте создаются AGENT_GUIDE.md, AGENTS.md, "
-                "CLAUDE.md, правила для Cursor/Copilot, skills/, AGENT_TASKS.md и re.bat. "
-                "Агент обновляет прогресс командами `re.bat progress`, `re.bat task` и `re.bat event` — "
-                "редактор показывает их в реальном времени.",
+                t("settings.external_text"),
                 size=9,
             )
         )
@@ -884,7 +904,7 @@ class SettingsDialog(QDialog):
         from reasonable.core.paths import ensure_projects_dir
 
         start = self.projects_dir_edit.text().strip() or str(ensure_projects_dir())
-        folder = QFileDialog.getExistingDirectory(self, "Папка для новых проектов", start)
+        folder = QFileDialog.getExistingDirectory(self, t("settings.folder_dialog"), start)
         if folder:
             self.projects_dir_edit.setText(folder)
 
@@ -896,6 +916,11 @@ class SettingsDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _save(self) -> None:
+        language_changed = False
+        if self.language_combos:
+            chosen = self.language_combos[0].currentData()
+            language_changed = chosen != self._initial_language
+            self.settings.data.setdefault("ui", {})["language"] = chosen
         self._store_current_provider()
         self.settings.active_provider = self._current_provider
         self.settings.data.setdefault("agent", {}).update(
@@ -917,7 +942,12 @@ class SettingsDialog(QDialog):
             fallback_to_procedural=bool(self.image_fallback.isChecked()),
         )
         self.settings.save()
+        i18n.invalidate_cache()
         self.settings_saved.emit()
+        if language_changed:
+            # Widgets built before the switch keep their old texts; new windows
+            # and dialogs already open in the chosen language.
+            QMessageBox.information(self, t("settings.language_title"), t("settings.restart_hint"))
         self.accept()
 
     def closeEvent(self, event) -> None:  # noqa: N802

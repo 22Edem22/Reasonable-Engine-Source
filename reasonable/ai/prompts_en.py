@@ -300,6 +300,14 @@ def build_agent_system_prompt(project) -> str:
     return build_agent_system_prompt_body(project)
 
 
+AGENT_SYSTEM_PROMPT = build_agent_system_prompt_body()
+"""Static English system prompt without the per-project block.
+
+Importable as a plain constant (tests, diagnostics); the agent runtime still
+uses :func:`build_agent_system_prompt` so the project context is included.
+"""
+
+
 def build_initial_user_message(project) -> str:
     """Fallback first message when an API caller needs one.
 

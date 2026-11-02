@@ -69,6 +69,24 @@ class Settings:
         else:
             self.data = copy.deepcopy(DEFAULT_SETTINGS)
         self._migrate()
+        self._consume_installer_language()
+
+    def _consume_installer_language(self) -> None:
+        """Persist the language chosen in the installer, then drop its marker.
+
+        Runs on every Settings load; the marker normally exists only on the
+        first launch after (re)installation. The marker is deleted only after
+        the language has been successfully written, so a failed save retries
+        on the next start.
+        """
+        from .i18n import read_installer_language, remove_installer_language_marker
+
+        language = read_installer_language()
+        if not language:
+            return
+        self.data.setdefault("ui", {})["language"] = language
+        self.save()
+        remove_installer_language_marker()
 
     def _migrate(self) -> None:
         """Drop removed anonymous gateway providers and keep settings usable."""
