@@ -1573,4 +1573,175 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "widgets.kind_game": _pair("Игра", "Game"),
     "widgets.kind_app": _pair("Приложение", "App"),
     "widgets.delete_project": _pair("Удалить проект", "Delete project"),
+    # --- Export dialog (editor/export_dialog.py) ---
+    "exportdlg.android_help": _pair(
+        "Сборка APK выполняется на Linux или в WSL2:\n"
+        "\n"
+        "1. Установите WSL: wsl --install\n"
+        "2. В Ubuntu выполните:\n"
+        "   sudo apt update && sudo apt install -y git zip unzip openjdk-17-jdk \\\\\n"
+        "     autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \\\\\n"
+        "     libtinfo6 cmake libffi-dev libssl-dev\n"
+        "   pip install --user buildozer cython\n"
+        "3. cd <папка-экспорта>\n"
+        "4. buildozer -v android debug\n"
+        "5. APK появится в bin/ — установите через adb install -r bin/*.apk\n"
+        "\n"
+        "В экспортированном пакете есть README_ANDROID.md и готовый GitHub Actions\n"
+        "workflow: загрузите проект в GitHub и получите APK во вкладке Actions.",
+        "The APK is built on Linux or inside WSL2:\n"
+        "\n"
+        "1. Install WSL: wsl --install\n"
+        "2. In Ubuntu run:\n"
+        "   sudo apt update && sudo apt install -y git zip unzip openjdk-17-jdk \\\n"
+        "     autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \\\n"
+        "     libtinfo6 cmake libffi-dev libssl-dev\n"
+        "   pip install --user buildozer cython\n"
+        "3. cd <export folder>\n"
+        "4. buildozer -v android debug\n"
+        "5. The APK appears in bin/ — install it with adb install -r bin/*.apk\n"
+        "\n"
+        "The exported package contains README_ANDROID.md and a ready GitHub Actions\n"
+        "workflow: push the project to GitHub and get the APK in the Actions tab.",
+    ),
+    "exportdlg.window_title": _pair("Экспорт — Reasonable Engine", "Export — Reasonable Engine"),
+    "exportdlg.header": _pair("Экспорт проекта", "Project export"),
+    "exportdlg.subtitle": _pair(
+        "Windows — папка или .exe. Android — готовый buildozer-пакет.",
+        "Windows — folder or .exe. Android — ready-to-build buildozer package.",
+    ),
+    "exportdlg.choice_windows": _pair("WINDOWS · ПАПКА", "WINDOWS · FOLDER"),
+    "exportdlg.choice_windows_hint": _pair("Play.bat и файлы проекта.", "Play.bat and the project files."),
+    "exportdlg.choice_exe": _pair("WINDOWS · .EXE", "WINDOWS · .EXE"),
+    "exportdlg.choice_exe_hint": _pair("Один файл через PyInstaller.", "A single file via PyInstaller."),
+    "exportdlg.choice_android": _pair("ANDROID · ПАКЕТ", "ANDROID · PACKAGE"),
+    "exportdlg.choice_android_hint": _pair("buildozer.spec, ZIP и инструкция.", "buildozer.spec, a ZIP and instructions."),
+    "exportdlg.explain_windows": _pair("Папка Windows", "Windows folder"),
+    "exportdlg.explain_windows_text": _pair(
+        "Самодостаточная папка: main.py, assets/, встроенный движок и Play.bat. "
+        "Запускается на Windows с Python 3.10+. Заставка Reasonable Engine играет всегда.",
+        "A self-contained folder: main.py, assets/, the bundled engine and Play.bat. "
+        "Runs on Windows with Python 3.10+. The Reasonable Engine splash always plays.",
+    ),
+    "exportdlg.output_title": _pair("Куда сохранить", "Where to save"),
+    "exportdlg.browse": _pair("Изменить…", "Change…"),
+    "exportdlg.output_hint_windows": _pair(
+        "По умолчанию — Рабочий стол. Если папка уже есть, новая получит суффикс -2.",
+        "Defaults to the Desktop. If the folder already exists, the new one gets a -2 suffix.",
+    ),
+    "exportdlg.contents_title": _pair("Что внутри", "What is inside"),
+    "exportdlg.contents_windows": _pair(
+        "main.py · project.json · assets/ · _engine/ · progress/ · AGENT_GUIDE.md · "
+        "Play.bat · README_WINDOWS.txt · app.ico",
+        "main.py · project.json · assets/ · _engine/ · progress/ · AGENT_GUIDE.md · "
+        "Play.bat · README_WINDOWS.txt · app.ico",
+    ),
+    "exportdlg.exe_label": _pair("Имя файла .exe:", ".exe file name:"),
+    "exportdlg.exe_placeholder": _pair("например, MyGame", "for example, MyGame"),
+    "exportdlg.exe_hint": _pair(
+        "Латиницей — это имя получит готовый файл программы.",
+        "Latin letters only — this becomes the name of the finished program file.",
+    ),
+    "exportdlg.one_file": _pair(
+        "Собрать один .exe (медленнее, но удобнее для отправки)",
+        "Build a single .exe (slower, but easier to share)",
+    ),
+    "exportdlg.overall_progress": _pair("Общий прогресс", "Overall progress"),
+    "exportdlg.stage": _pair("Этап", "Stage"),
+    "exportdlg.ready": _pair("Готово", "Done"),
+    "exportdlg.open_folder": _pair("Открыть папку", "Open folder"),
+    "exportdlg.android_instructions": _pair("Инструкция Android", "Android instructions"),
+    "exportdlg.close": _pair("Закрыть", "Close"),
+    "exportdlg.export": _pair("Экспортировать", "Export"),
+    "exportdlg.explain_exe": _pair("Windows .exe через PyInstaller", "Windows .exe via PyInstaller"),
+    "exportdlg.explain_exe_text": _pair(
+        "Соберёт автономный .exe с иконкой. Первая сборка занимает несколько минут. "
+        "Если PyInstaller не установлен, установите его командой python -m pip install pyinstaller.",
+        "Builds a standalone .exe with an icon. The first build takes a few minutes. "
+        "If PyInstaller is missing, install it with: python -m pip install pyinstaller.",
+    ),
+    "exportdlg.output_hint_exe": _pair(
+        "Папка на Рабочем столе. Внутри появится .exe и вспомогательные файлы.",
+        "A folder on the Desktop. It will contain the .exe and helper files.",
+    ),
+    "exportdlg.output_hint_exe_missing": _pair(
+        "PyInstaller не найден — установите его, чтобы включить этот режим.",
+        "PyInstaller not found — install it to enable this mode.",
+    ),
+    "exportdlg.contents_exe": _pair(
+        "Исполняемый файл проекта · иконка · ассеты · встроенный движок. "
+        "Заставка и все ресурсы включены.",
+        "The project executable · icon · assets · bundled engine. "
+        "The splash screen and all resources are included.",
+    ),
+    "exportdlg.explain_android": _pair("Android-пакет", "Android package"),
+    "exportdlg.explain_android_text": _pair(
+        "Готовый проект python-for-android/buildozer с buildozer.spec, README_ANDROID.md, "
+        "иконкой, presplash и GitHub Actions. APK собирается на Linux/WSL — это ограничение buildozer, "
+        "а не движка.",
+        "A ready python-for-android/buildozer project with buildozer.spec, README_ANDROID.md, "
+        "an icon, presplash and GitHub Actions. The APK is built on Linux/WSL — that is a "
+        "buildozer limitation, not an engine one.",
+    ),
+    "exportdlg.output_hint_android": _pair(
+        "ZIP на Рабочем столе и папка проекта рядом с ним.",
+        "A ZIP on the Desktop and the project folder next to it.",
+    ),
+    "exportdlg.contents_android": _pair(
+        "main.py · buildozer.spec · assets/ · _engine/ · progress/ · README_ANDROID.md · "
+        ".github/workflows/android.yml",
+        "main.py · buildozer.spec · assets/ · _engine/ · progress/ · README_ANDROID.md · "
+        ".github/workflows/android.yml",
+    ),
+    "exportdlg.save_android": _pair("Сохранить Android-пакет", "Save the Android package"),
+    "exportdlg.pick_folder": _pair("Выберите папку для экспорта", "Choose a folder for the export"),
+    "exportdlg.apk_build_title": _pair("Сборка Android APK", "Building the Android APK"),
+    "exportdlg.apk_build_text": _pair(
+        "Android-пакет готов к сборке через buildozer.",
+        "The Android package is ready to build with buildozer.",
+    ),
+    "exportdlg.exe_name_invalid": _pair(
+        "Имя: латиница, цифры, пробел и дефис. Начинается с буквы.",
+        "Name: Latin letters, digits, spaces and hyphens. Must start with a letter.",
+    ),
+    "exportdlg.exe_ready_file": _pair("Готовый файл: {name}.exe", "Output file: {name}.exe"),
+    "exportdlg.no_path_title": _pair("Путь не задан", "No path set"),
+    "exportdlg.no_path_text": _pair(
+        "Укажите папку или файл для экспорта.",
+        "Specify a folder or file for the export.",
+    ),
+    "exportdlg.no_pyinstaller_title": _pair("PyInstaller не установлен", "PyInstaller is not installed"),
+    "exportdlg.no_pyinstaller_text": _pair(
+        "Установите PyInstaller командой:\n\npython -m pip install pyinstaller\n\n"
+        "Или выберите экспорт в папку Windows.",
+        "Install PyInstaller with:\n\npython -m pip install pyinstaller\n\n"
+        "Or choose the Windows folder export instead.",
+    ),
+    "exportdlg.exe_name_title": _pair("Имя .exe", ".exe name"),
+    "exportdlg.exe_name_text": _pair(
+        "Имя файла латиницей, начинается с буквы; допустимы цифры, пробел и дефис.",
+        "Latin file name starting with a letter; digits, spaces and hyphens are allowed.",
+    ),
+    "exportdlg.running_button": _pair("Экспортирую…", "Exporting…"),
+    "exportdlg.preparing": _pair("Подготовка…", "Preparing…"),
+    "exportdlg.again_button": _pair("Экспортировать ещё", "Export again"),
+    "exportdlg.finished_message": _pair("Экспорт завершён.", "Export finished."),
+    "exportdlg.done_prefix": _pair("Готово: ", "Done: "),
+    "exportdlg.build_time": _pair("Время сборки: {minutes} мин {seconds} с.", "Build time: {minutes} min {seconds} s."),
+    "exportdlg.splash_note": _pair(
+        "Заставка Reasonable Engine включена в сборку.",
+        "The Reasonable Engine splash screen is included in the build.",
+    ),
+    "exportdlg.next_step_android": _pair(
+        "Следующий шаг: buildozer android debug на Linux/WSL или GitHub Actions.",
+        "Next step: buildozer android debug on Linux/WSL or GitHub Actions.",
+    ),
+    "exportdlg.retry_button": _pair("Повторить экспорт", "Retry export"),
+    "exportdlg.error_prefix": _pair("Ошибка: ", "Error: "),
+    "exportdlg.failed_title": _pair("Экспорт не удался", "Export failed"),
+    "exportdlg.close_running_title": _pair("Экспорт", "Export"),
+    "exportdlg.close_running_text": _pair(
+        "Экспорт ещё выполняется. Закрыть окно?",
+        "The export is still running. Close the window?",
+    ),
 }

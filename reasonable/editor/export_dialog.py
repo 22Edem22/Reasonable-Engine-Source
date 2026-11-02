@@ -28,27 +28,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from reasonable.core.i18n import t
 from reasonable.core.paths import slugify
 from reasonable.export import desktop_dir, exe_file_name
 
 from . import theme
 from .widgets import Badge, Card, muted, title_label
 from .workers import ExportWorker
-
-ANDROID_HELP = """Сборка APK выполняется на Linux или в WSL2:
-
-1. Установите WSL: wsl --install
-2. В Ubuntu выполните:
-   sudo apt update && sudo apt install -y git zip unzip openjdk-17-jdk \\
-     autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \\
-     libtinfo6 cmake libffi-dev libssl-dev
-   pip install --user buildozer cython
-3. cd <папка-экспорта>
-4. buildozer -v android debug
-5. APK появится в bin/ — установите через adb install -r bin/*.apk
-
-В экспортированном пакете есть README_ANDROID.md и готовый GitHub Actions
-workflow: загрузите проект в GitHub и получите APK во вкладке Actions."""
 
 EXE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _-]{0,58}$")
 
@@ -66,7 +52,7 @@ class ExportDialog(QDialog):
         self._running = False
         self._started_at = 0.0
 
-        self.setWindowTitle("Экспорт — Reasonable Engine")
+        self.setWindowTitle(t("exportdlg.window_title"))
         self.setMinimumSize(800, 760)
         self.resize(840, 780)
         self.setModal(True)
@@ -81,11 +67,11 @@ class ExportDialog(QDialog):
         header.addWidget(logo)
         titles = QVBoxLayout()
         titles.setSpacing(0)
-        title = QLabel("Экспорт проекта")
+        title = QLabel(t("exportdlg.header"))
         title.setObjectName("title")
         title.setFont(theme.display_font(15, 700))
         titles.addWidget(title)
-        titles.addWidget(muted("Windows — папка или .exe. Android — готовый buildozer-пакет.", wrap=False, size=9))
+        titles.addWidget(muted(t("exportdlg.subtitle"), wrap=False, size=9))
         header.addLayout(titles)
         header.addStretch(1)
         header.addWidget(Badge(project.name, "default"))
@@ -97,9 +83,9 @@ class ExportDialog(QDialog):
         self.buttons: dict[str, QPushButton] = {}
         pyinstaller_ready = importlib.util.find_spec("PyInstaller") is not None
         for key, title_text, hint in (
-            ("windows", "WINDOWS · ПАПКА", "Play.bat и файлы проекта."),
-            ("exe", "WINDOWS · .EXE", "Один файл через PyInstaller."),
-            ("android", "ANDROID · ПАКЕТ", "buildozer.spec, ZIP и инструкция."),
+            ("windows", t("exportdlg.choice_windows"), t("exportdlg.choice_windows_hint")),
+            ("exe", t("exportdlg.choice_exe"), t("exportdlg.choice_exe_hint")),
+            ("android", t("exportdlg.choice_android"), t("exportdlg.choice_android_hint")),
         ):
             button = QPushButton(f"{title_text}\n{hint}")
             button.setObjectName("choice")
@@ -116,18 +102,18 @@ class ExportDialog(QDialog):
         self.buttons["android"].toggled.connect(lambda checked: checked and self._select_target("android"))
 
         self.explain = Card(soft=True)
-        self.explain_title = title_label("Папка Windows", 11)
+        self.explain_title = title_label(t("exportdlg.explain_windows"), 11)
         self.explain.layout().addWidget(self.explain_title)
         self.explain_text = muted("", size=9)
         self.explain.layout().addWidget(self.explain_text)
         layout.addWidget(self.explain)
 
         output_card = Card()
-        output_card.layout().addWidget(title_label("Куда сохранить", 10))
+        output_card.layout().addWidget(title_label(t("exportdlg.output_title"), 10))
         row = QHBoxLayout()
         self.output_edit = QLineEdit()
         row.addWidget(self.output_edit, 1)
-        browse = QPushButton("Изменить…")
+        browse = QPushButton(t("exportdlg.browse"))
         browse.clicked.connect(self._browse)
         row.addWidget(browse)
         output_card.layout().addLayout(row)
@@ -135,31 +121,31 @@ class ExportDialog(QDialog):
         output_card.layout().addWidget(self.output_hint)
 
         self.exe_row = QHBoxLayout()
-        self.exe_label = QLabel("Имя файла .exe:")
+        self.exe_label = QLabel(t("exportdlg.exe_label"))
         self.exe_label.setStyleSheet("color:#9AA4B2;")
         self.exe_edit = QLineEdit()
-        self.exe_edit.setPlaceholderText("например, MyGame")
+        self.exe_edit.setPlaceholderText(t("exportdlg.exe_placeholder"))
         self.exe_edit.textChanged.connect(self._validate_inputs)
         self.exe_row.addWidget(self.exe_label)
         self.exe_row.addWidget(self.exe_edit, 1)
         output_card.layout().addLayout(self.exe_row)
-        self.exe_hint = muted("Латиницей — это имя получит готовый файл программы.", size=9)
+        self.exe_hint = muted(t("exportdlg.exe_hint"), size=9)
         output_card.layout().addWidget(self.exe_hint)
 
-        self.one_file = QCheckBox("Собрать один .exe (медленнее, но удобнее для отправки)")
+        self.one_file = QCheckBox(t("exportdlg.one_file"))
         self.one_file.hide()
         output_card.layout().addWidget(self.one_file)
         layout.addWidget(output_card)
 
         self.contents = Card(soft=True)
-        self.contents.layout().addWidget(title_label("Что внутри", 10))
+        self.contents.layout().addWidget(title_label(t("exportdlg.contents_title"), 10))
         self.contents_text = muted("", size=9)
         self.contents.layout().addWidget(self.contents_text)
         layout.addWidget(self.contents)
 
         # Two live bars: overall build progress and the current stage.
         overall_row = QHBoxLayout()
-        self.overall_label = QLabel("Общий прогресс")
+        self.overall_label = QLabel(t("exportdlg.overall_progress"))
         self.overall_label.setStyleSheet("color:#9AA4B2;")
         overall_row.addWidget(self.overall_label)
         overall_row.addStretch(1)
@@ -174,7 +160,7 @@ class ExportDialog(QDialog):
         layout.addWidget(self.overall_bar)
 
         stage_row = QHBoxLayout()
-        self.stage_label = QLabel("Этап")
+        self.stage_label = QLabel(t("exportdlg.stage"))
         self.stage_label.setStyleSheet("color:#9AA4B2;")
         stage_row.addWidget(self.stage_label)
         stage_row.addStretch(1)
@@ -193,12 +179,12 @@ class ExportDialog(QDialog):
 
         self.result_card = Card(soft=True)
         self.result_card.hide()
-        self.result_title = title_label("Готово", 11)
+        self.result_title = title_label(t("exportdlg.ready"), 11)
         self.result_card.layout().addWidget(self.result_title)
         self.result_text = muted("", size=9)
         self.result_card.layout().addWidget(self.result_text)
         result_buttons = QHBoxLayout()
-        self.open_result = QPushButton("Открыть папку")
+        self.open_result = QPushButton(t("exportdlg.open_folder"))
         self.open_result.setObjectName("teal")
         self.open_result.clicked.connect(self._open_result)
         result_buttons.addWidget(self.open_result)
@@ -208,16 +194,16 @@ class ExportDialog(QDialog):
 
         layout.addStretch(1)
         buttons = QHBoxLayout()
-        self.android_help = QPushButton("Инструкция Android")
+        self.android_help = QPushButton(t("exportdlg.android_instructions"))
         self.android_help.setObjectName("ghost")
         self.android_help.clicked.connect(self._show_android_help)
         self.android_help.hide()
         buttons.addWidget(self.android_help)
         buttons.addStretch(1)
-        close = QPushButton("Закрыть")
+        close = QPushButton(t("exportdlg.close"))
         close.clicked.connect(self.reject)
         buttons.addWidget(close)
-        self.export_button = QPushButton("Экспортировать")
+        self.export_button = QPushButton(t("exportdlg.export"))
         self.export_button.setObjectName("primary")
         self.export_button.setMinimumWidth(170)
         self.export_button.clicked.connect(self._export)
@@ -255,50 +241,31 @@ class ExportDialog(QDialog):
         if exe_mode and not self.exe_edit.text().strip():
             self.exe_edit.setText(self._default_exe_name())
         if target == "windows":
-            self.explain_title.setText("Папка Windows")
-            self.explain_text.setText(
-                "Самодостаточная папка: main.py, assets/, встроенный движок и Play.bat. "
-                "Запускается на Windows с Python 3.10+. Заставка Reasonable Engine играет всегда."
-            )
-            self.output_hint.setText("По умолчанию — Рабочий стол. Если папка уже есть, новая получит суффикс -2.")
-            self.contents_text.setText(
-                "main.py · project.json · assets/ · _engine/ · progress/ · AGENT_GUIDE.md · "
-                "Play.bat · README_WINDOWS.txt · app.ico"
-            )
+            self.explain_title.setText(t("exportdlg.explain_windows"))
+            self.explain_text.setText(t("exportdlg.explain_windows_text"))
+            self.output_hint.setText(t("exportdlg.output_hint_windows"))
+            self.contents_text.setText(t("exportdlg.contents_windows"))
         elif target == "exe":
-            self.explain_title.setText("Windows .exe через PyInstaller")
-            self.explain_text.setText(
-                "Соберёт автономный .exe с иконкой. Первая сборка занимает несколько минут. "
-                "Если PyInstaller не установлен, установите его командой python -m pip install pyinstaller."
-            )
+            self.explain_title.setText(t("exportdlg.explain_exe"))
+            self.explain_text.setText(t("exportdlg.explain_exe_text"))
             self.output_hint.setText(
-                "Папка на Рабочем столе. Внутри появится .exe и вспомогательные файлы."
+                t("exportdlg.output_hint_exe")
                 if self._pyinstaller_ready
-                else "PyInstaller не найден — установите его, чтобы включить этот режим."
+                else t("exportdlg.output_hint_exe_missing")
             )
-            self.contents_text.setText(
-                "Исполняемый файл проекта · иконка · ассеты · встроенный движок. "
-                "Заставка и все ресурсы включены."
-            )
+            self.contents_text.setText(t("exportdlg.contents_exe"))
         else:
-            self.explain_title.setText("Android-пакет")
-            self.explain_text.setText(
-                "Готовый проект python-for-android/buildozer с buildozer.spec, README_ANDROID.md, "
-                "иконкой, presplash и GitHub Actions. APK собирается на Linux/WSL — это ограничение buildozer, "
-                "а не движка."
-            )
-            self.output_hint.setText("ZIP на Рабочем столе и папка проекта рядом с ним.")
-            self.contents_text.setText(
-                "main.py · buildozer.spec · assets/ · _engine/ · progress/ · README_ANDROID.md · "
-                ".github/workflows/android.yml"
-            )
+            self.explain_title.setText(t("exportdlg.explain_android"))
+            self.explain_text.setText(t("exportdlg.explain_android_text"))
+            self.output_hint.setText(t("exportdlg.output_hint_android"))
+            self.contents_text.setText(t("exportdlg.contents_android"))
         self._validate_inputs()
 
     def _browse(self) -> None:
         if self.target == "android":
             path, _filter = QFileDialog.getSaveFileName(
                 self,
-                "Сохранить Android-пакет",
+                t("exportdlg.save_android"),
                 self.output_edit.text() or str(desktop_dir() / f"{slugify(self.project.name, 'project')}-android.zip"),
                 "ZIP (*.zip)",
             )
@@ -309,7 +276,7 @@ class ExportDialog(QDialog):
         else:
             path = QFileDialog.getExistingDirectory(
                 self,
-                "Выберите папку для экспорта",
+                t("exportdlg.pick_folder"),
                 str(desktop_dir()),
             )
             if path:
@@ -317,10 +284,10 @@ class ExportDialog(QDialog):
 
     def _show_android_help(self) -> None:
         box = QMessageBox(self)
-        box.setWindowTitle("Сборка Android APK")
+        box.setWindowTitle(t("exportdlg.apk_build_title"))
         box.setIcon(QMessageBox.Icon.Information)
-        box.setText("Android-пакет готов к сборке через buildozer.")
-        box.setDetailedText(ANDROID_HELP)
+        box.setText(t("exportdlg.apk_build_text"))
+        box.setDetailedText(t("exportdlg.android_help"))
         box.exec()
 
     # ------------------------------------------------------------------
@@ -329,10 +296,10 @@ class ExportDialog(QDialog):
         if self.target == "exe":
             name = self.exe_edit.text().strip()
             if not EXE_NAME_RE.match(name):
-                self.exe_hint.setText("Имя: латиница, цифры, пробел и дефис. Начинается с буквы.")
+                self.exe_hint.setText(t("exportdlg.exe_name_invalid"))
                 self.export_button.setEnabled(not self._running and False)
                 return
-            self.exe_hint.setText(f"Готовый файл: {exe_file_name(name, self.project)}.exe")
+            self.exe_hint.setText(t("exportdlg.exe_ready_file", name=exe_file_name(name, self.project)))
         self.export_button.setEnabled(not self._running and (self.target != "exe" or self._pyinstaller_ready))
 
     def _export(self) -> None:
@@ -340,24 +307,23 @@ class ExportDialog(QDialog):
             return
         output = self.output_edit.text().strip()
         if not output:
-            QMessageBox.warning(self, "Путь не задан", "Укажите папку или файл для экспорта.")
+            QMessageBox.warning(self, t("exportdlg.no_path_title"), t("exportdlg.no_path_text"))
             return
         exe_name = ""
         if self.target == "exe":
             if not self._pyinstaller_ready:
                 QMessageBox.warning(
                     self,
-                    "PyInstaller не установлен",
-                    "Установите PyInstaller командой:\n\npython -m pip install pyinstaller\n\n"
-                    "Или выберите экспорт в папку Windows.",
+                    t("exportdlg.no_pyinstaller_title"),
+                    t("exportdlg.no_pyinstaller_text"),
                 )
                 return
             raw = self.exe_edit.text().strip()
             if not EXE_NAME_RE.match(raw):
                 QMessageBox.warning(
                     self,
-                    "Имя .exe",
-                    "Имя файла латиницей, начинается с буквы; допустимы цифры, пробел и дефис.",
+                    t("exportdlg.exe_name_title"),
+                    t("exportdlg.exe_name_text"),
                 )
                 return
             exe_name = exe_file_name(raw, self.project)
@@ -365,14 +331,14 @@ class ExportDialog(QDialog):
         self._started_at = time.monotonic()
         self._set_inputs_enabled(False)
         self.export_button.setEnabled(False)
-        self.export_button.setText("Экспортирую…")
+        self.export_button.setText(t("exportdlg.running_button"))
         self.overall_bar.show()
         self.stage_bar.show()
         self.overall_bar.setValue(0)
         self.overall_percent.setText("0%")
         self.stage_bar.setValue(0)
         self.stage_percent.setText("")
-        self.status.setText("Подготовка…")
+        self.status.setText(t("exportdlg.preparing"))
         self.result_card.hide()
         self.worker = ExportWorker(self.project, self.target, output, self.mode, exe_name)
         self.worker.progress.connect(self._on_progress)
@@ -404,21 +370,21 @@ class ExportDialog(QDialog):
         self.stage_bar.setValue(100)
         self.stage_percent.setText("100%")
         self.export_button.setEnabled(True)
-        self.export_button.setText("Экспортировать ещё")
-        self.status.setText(result.get("message", "Экспорт завершён."))
+        self.export_button.setText(t("exportdlg.again_button"))
+        self.status.setText(result.get("message", t("exportdlg.finished_message")))
         self.result_card.show()
         elapsed = max(1, int(time.monotonic() - self._started_at))
         minutes, seconds = divmod(elapsed, 60)
-        self.result_title.setText("Готово: " + ("Android" if self.target == "android" else "Windows"))
+        self.result_title.setText(t("exportdlg.done_prefix") + ("Android" if self.target == "android" else "Windows"))
         lines = [str(result.get("path", ""))]
         if result.get("zip"):
             lines.append("ZIP: " + str(result["zip"]))
         if result.get("exe"):
             lines.append("EXE: " + str(result["exe"]))
-        lines.append(f"Время сборки: {minutes} мин {seconds} с.")
-        lines.append("Заставка Reasonable Engine включена в сборку.")
+        lines.append(t("exportdlg.build_time", minutes=minutes, seconds=seconds))
+        lines.append(t("exportdlg.splash_note"))
         if self.target == "android":
-            lines.append("Следующий шаг: buildozer android debug на Linux/WSL или GitHub Actions.")
+            lines.append(t("exportdlg.next_step_android"))
         self.result_text.setText("\n".join(lines))
         self.status_message = result.get("message", "")
         self.exported.emit(result)
@@ -427,10 +393,10 @@ class ExportDialog(QDialog):
         self._running = False
         self._set_inputs_enabled(True)
         self.export_button.setEnabled(True)
-        self.export_button.setText("Повторить экспорт")
-        self.status.setText("Ошибка: " + message)
+        self.export_button.setText(t("exportdlg.retry_button"))
+        self.status.setText(t("exportdlg.error_prefix") + message)
         box = QMessageBox(self)
-        box.setWindowTitle("Экспорт не удался")
+        box.setWindowTitle(t("exportdlg.failed_title"))
         box.setIcon(QMessageBox.Icon.Critical)
         box.setText(message)
         box.setDetailedText(trace)
@@ -447,8 +413,8 @@ class ExportDialog(QDialog):
         if self.worker is not None and self.worker.isRunning():
             answer = QMessageBox.question(
                 self,
-                "Экспорт",
-                "Экспорт ещё выполняется. Закрыть окно?",
+                t("exportdlg.close_running_title"),
+                t("exportdlg.close_running_text"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
