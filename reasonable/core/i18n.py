@@ -534,4 +534,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "tools.Это не текстовый файл. Используйте inspect_image для изображений.": _pair("Это не текстовый файл. Используйте inspect_image для изображений.", "This is not a text file. Use inspect_image for images."),
     "tools.ни один файл проекта не изменён": _pair("ни один файл проекта не изменён", "no project file was changed"),
     "tools.… (обрезано)": _pair("… (обрезано)", "… (truncated)"),
+    # --- External-agent UI (checklist labels; the agent pack itself is English-only) ---
+    "external.check_guide": _pair("AGENT_GUIDE.md создан", "AGENT_GUIDE.md created"),
+    "external.check_guide_hint": _pair("Полная инструкция для агента", "Full instructions for the agent"),
+    "external.check_skills": _pair("Навыки skills/ на месте", "skills/ pack present"),
+    "external.check_skills_hint": _pair("Игровой и UI-опыт", "Game and UI know-how"),
+    "external.check_cli": _pair("CLI re.bat / re.sh", "CLI re.bat / re.sh"),
+    "external.check_cli_hint": _pair("Обновление прогресса и экспорт", "Progress updates and export"),
+    "external.check_state": _pair("progress/state.json", "progress/state.json"),
+    "external.check_state_hint": _pair("Живой прогресс в редакторе", "Live progress in the editor"),
+    "external.check_pointers": _pair("Указатели для агентов", "Agent pointer files"),
+    "external.check_pointers_hint": _pair("Claude Code, Codex, Cursor, Cline", "Claude Code, Codex, Cursor, Cline"),
+    "external.check_engine": _pair("Встроенный движок", "Vendored engine"),
+    "external.check_engine_hint": _pair("Проект самодостаточен", "The project is self-contained"),
+    "external.readme_header": _pair("Внешний агент · {name}", "External agent · {name}"),
 }

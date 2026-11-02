@@ -66,7 +66,7 @@ def _schema(
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     _schema(
         "list_files",
-        _t("Показать файлы и папки проекта. Используй в начале работы."),
+        "List the project's files and folders. Use at the start of a job.",
         {
             "path": {"type": "string", "description": _t("Папка относительно корня проекта"), "default": "."},
             "depth": {"type": "integer", "description": _t("Глубина обхода"), "default": 3, "minimum": 1, "maximum": 8},
@@ -74,7 +74,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "read_file",
-        _t("Прочитать текстовый файл проекта. Для больших файлов используй start_line/end_line."),
+        "Read a project text file. For large files use start_line/end_line.",
         {
             "path": {"type": "string", "description": _t("Путь относительно корня проекта")},
             "start_line": {"type": "integer", "default": 1, "minimum": 1},
@@ -84,7 +84,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "write_file",
-        _t("Создать или полностью заменить файл. Для правок лучше edit_file."),
+        "Create or fully replace a file. Prefer edit_file for targeted changes.",
         {
             "path": {"type": "string", "description": _t("Путь относительно корня проекта")},
             "content": {"type": "string", "description": _t("Полное содержимое файла")},
@@ -93,7 +93,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "edit_file",
-        _t("Точечно заменить точный фрагмент файла. old_text должен встречаться ровно один раз (или укажи replace_all)."),
+        "Replace an exact fragment of a file. old_text must occur exactly once (or pass replace_all).",
         {
             "path": {"type": "string"},
             "old_text": {"type": "string", "description": _t("Точный существующий фрагмент")},
@@ -104,7 +104,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "delete_path",
-        _t("Удалить файл или папку внутри проекта. Защищённые файлы удалять нельзя."),
+        "Delete a file or folder inside the project. Protected files cannot be deleted.",
         {
             "path": {"type": "string"},
             "recursive": {"type": "boolean", "description": _t("Удалить папку со всем содержимым"), "default": False},
@@ -113,7 +113,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "search_text",
-        _t("Найти строку или регулярное выражение в текстовых файлах проекта."),
+        "Find a string or regex in the project's text files.",
         {
             "query": {"type": "string"},
             "path": {"type": "string", "default": "."},
@@ -124,7 +124,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "run_command",
-        _t("Выполнить команду в папке проекта (например, python -m pytest или python -m py_compile main.py)."),
+        "Run a command inside the project folder (e.g. python -m pytest or python -m py_compile main.py).",
         {
             "command": {"type": "string"},
             "timeout": {"type": "integer", "default": 120, "minimum": 5, "maximum": 300},
@@ -133,7 +133,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "run_project",
-        _t("Запустить проект в headless-режиме на несколько кадров и вернуть ошибки. Используй после крупных изменений."),
+        "Run the project headless for a few frames and return any errors. Use after major changes.",
         {
             "frames": {"type": "integer", "default": 8, "minimum": 1, "maximum": 600},
             "timeout": {"type": "integer", "default": 90, "minimum": 10, "maximum": 240},
@@ -141,12 +141,12 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "validate_project",
-        _t("Проверить структуру, project.json и синтаксис всех Python-файлов проекта."),
+        "Validate structure, project.json and the syntax of every Python file in the project.",
         {},
     ),
     _schema(
         "generate_sprite",
-        _t("Сгенерировать спрайт (один объект, прозрачный фон) и сохранить в assets/."),
+        "Generate a sprite (one object, transparent background) and save it into assets/.",
         {
             "prompt": {"type": "string", "description": _t("Что изобразить, по-английски или по-русски")},
             "path": {"type": "string", "description": _t("Например assets/sprites/player.png")},
@@ -157,7 +157,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "generate_background",
-        _t("Сгенерировать фон сцены и сохранить в assets/."),
+        "Generate a scene background and save it into assets/.",
         {
             "prompt": {"type": "string"},
             "path": {"type": "string", "description": _t("Например assets/backgrounds/forest.png")},
@@ -168,25 +168,25 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "inspect_image",
-        _t("Проверить PNG: размер, прозрачность, границы объекта и основные цвета."),
+        "Inspect a PNG: size, transparency, object bounds and dominant colors.",
         {"path": {"type": "string"}},
         ["path"],
     ),
     _schema(
         "set_plan",
-        _t("Заменить план работ списком конкретных задач."),
+        "Replace the work plan with a list of concrete tasks.",
         {
             "tasks": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": _t("3–8 выполнимых задач по порядку"),
+                "description": "3–8 concrete tasks in order",
             }
         },
         ["tasks"],
     ),
     _schema(
         "update_task",
-        _t("Обновить статус задачи плана."),
+        "Update the status of a plan task.",
         {
             "task": {"type": "string", "description": _t("id задачи (t1), номер или название")},
             "status": {"type": "string", "enum": ["pending", "in_progress", "done", "skipped"]},
@@ -195,7 +195,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "report_progress",
-        _t("Обновить процент, этап и сообщение для пользователя в редакторе."),
+        "Update the percentage, stage and user-visible message in the editor.",
         {
             "percent": {"type": "number", "minimum": 0, "maximum": 100},
             "stage": {"type": "string"},
@@ -205,12 +205,12 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "get_progress",
-        _t("Прочитать текущий прогресс, план и последние события проекта."),
+        "Read the current progress, plan and recent project events.",
         {},
     ),
     _schema(
         "finish",
-        _t("Завершить работу: 100%, все задачи выполнены, итоговое сообщение."),
+        "Finish the job: 100%, all tasks done, final message.",
         {"message": {"type": "string"}},
         ["message"],
     ),
