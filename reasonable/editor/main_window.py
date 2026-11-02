@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
 )
 
 from reasonable import branding
+from reasonable.core import i18n
+from reasonable.core.i18n import t
 from reasonable.core.logging_setup import configure_logging
 from reasonable.core.paths import BRAND_DIR
 from reasonable.core.project import Project
@@ -71,84 +73,99 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def _build_menus(self) -> None:
-        file_menu = self.menuBar().addMenu("Файл")
-        self.new_action = QAction("Новый проект с ИИ…", self)
+        """(Re)build the whole menu bar in the active language.
+
+        Menus are cheap to recreate, so a language switch simply calls this
+        again instead of patching every action text separately.
+        """
+        self.menuBar().clear()
+        file_menu = self.menuBar().addMenu(t("menu.file"))
+        self.new_action = QAction(t("menu.new_project"), self)
         self.new_action.setShortcut(QKeySequence.StandardKey.New)
         self.new_action.triggered.connect(self.new_project)
         file_menu.addAction(self.new_action)
 
-        self.blank_action = QAction("Пустой проект вручную…", self)
+        self.blank_action = QAction(t("menu.blank_project"), self)
         self.blank_action.setShortcut(QKeySequence("Ctrl+Shift+N"))
         self.blank_action.triggered.connect(lambda: self.new_project(starter="blank"))
         file_menu.addAction(self.blank_action)
 
-        self.open_action = QAction("Открыть проект…", self)
+        self.open_action = QAction(t("menu.open_project"), self)
         self.open_action.setShortcut(QKeySequence.StandardKey.Open)
         self.open_action.triggered.connect(self.choose_project)
         file_menu.addAction(self.open_action)
 
-        self.recent_menu = file_menu.addMenu("Недавние проекты")
+        self.recent_menu = file_menu.addMenu(t("menu.recent"))
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
 
         file_menu.addSeparator()
-        self.settings_action = QAction("Настройки…", self)
+        self.settings_action = QAction(t("menu.settings"), self)
         self.settings_action.setShortcut(QKeySequence("Ctrl+,"))
         self.settings_action.triggered.connect(self.open_settings)
         file_menu.addAction(self.settings_action)
         file_menu.addSeparator()
-        quit_action = QAction("Выход", self)
+        quit_action = QAction(t("menu.quit"), self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
-        project_menu = self.menuBar().addMenu("Проект")
-        self.run_action = QAction("Запустить проект", self)
+        project_menu = self.menuBar().addMenu(t("menu.project"))
+        self.run_action = QAction(t("menu.run"), self)
         self.run_action.setShortcut(QKeySequence("Ctrl+R"))
         self.run_action.triggered.connect(self._run_current)
         project_menu.addAction(self.run_action)
-        self.export_action = QAction("Экспорт…", self)
+        self.export_action = QAction(t("menu.export"), self)
         self.export_action.setShortcut(QKeySequence("Ctrl+E"))
         self.export_action.triggered.connect(self._export_current)
         project_menu.addAction(self.export_action)
-        self.convert_action = QAction("Конвертировать в новый проект…", self)
+        self.convert_action = QAction(t("menu.convert"), self)
         self.convert_action.setShortcut(QKeySequence("Ctrl+Shift+D"))
         self.convert_action.triggered.connect(self._convert_current)
         project_menu.addAction(self.convert_action)
-        self.project_settings_action = QAction("Настройки проекта…", self)
+        self.project_settings_action = QAction(t("menu.project_settings"), self)
         self.project_settings_action.setShortcut(QKeySequence("Ctrl+Shift+,"))
         self.project_settings_action.triggered.connect(self._project_settings_current)
         project_menu.addAction(self.project_settings_action)
-        self.history_action = QAction("История версий…", self)
+        self.history_action = QAction(t("menu.history"), self)
         self.history_action.setShortcut(QKeySequence("Ctrl+Shift+H"))
         self.history_action.triggered.connect(self._open_history_current)
         project_menu.addAction(self.history_action)
         project_menu.addSeparator()
 
         self.section_actions: list[QAction] = []
-        for index, label in enumerate(("Обзор", "ИИ-агент", "Код", "Ассеты"), start=1):
+        for index, key in enumerate(("section.overview", "section.agent", "section.code", "section.assets"), start=1):
+            label = t(key)
             action = QAction(f"{label}  (Ctrl+{index})", self)
             action.setShortcut(QKeySequence(f"Ctrl+{index}"))
             action.triggered.connect(lambda checked=False, i=index - 1: self._show_section(i))
             project_menu.addAction(action)
             self.section_actions.append(action)
         project_menu.addSeparator()
-        self.delete_action = QAction("Удалить проект…", self)
+        self.delete_action = QAction(t("menu.delete_project"), self)
         self.delete_action.setShortcut(QKeySequence("Ctrl+Shift+Delete"))
         self.delete_action.triggered.connect(self._delete_current)
         project_menu.addAction(self.delete_action)
         project_menu.addSeparator()
-        self.back_action = QAction("К списку проектов", self)
+        self.back_action = QAction(t("menu.back_to_list"), self)
         self.back_action.setShortcut(QKeySequence("Ctrl+Shift+W"))
         self.back_action.triggered.connect(self.show_welcome)
         project_menu.addAction(self.back_action)
 
-        help_menu = self.menuBar().addMenu("Помощь")
-        about = QAction("О Reasonable Engine", self)
+        help_menu = self.menuBar().addMenu(t("menu.help"))
+        about = QAction(t("menu.about"), self)
         about.triggered.connect(self._about)
         help_menu.addAction(about)
-        docs = QAction("Открыть README", self)
+        docs = QAction(t("menu.open_readme"), self)
         docs.triggered.connect(self._open_docs)
         help_menu.addAction(docs)
+
+    def retranslate_ui(self) -> None:
+        """Apply the currently selected language to every static UI piece."""
+        self.setWindowTitle(t("app.title", tagline=i18n.tagline()))
+        self._build_menus()
+        self.welcome.retranslate()
+        if self.current_page is not None:
+            self.current_page.retranslate()
 
     def _update_actions(self) -> None:
         active = self.current_page is not None
