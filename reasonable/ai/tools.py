@@ -26,15 +26,16 @@ from reasonable.core.progress import (
     update_task,
 )
 from reasonable.core.project import IGNORED_DIRS, Project, TEXT_SUFFIXES
-from reasonable.core.i18n import t as _translate
+from reasonable.core.i18n import tr
 
 
-def _t(russian: str, **values) -> str:
-    """Translate a tool string; the Russian literal doubles as the fallback key."""
-    try:
-        return _translate("tools." + russian, **values)
-    except KeyError:
-        return _translate(russian, **values)
+def _t(en: str, ru: str, **values) -> str:
+    """User-facing tool message in the UI language.
+
+    Tool schemas themselves stay English-only (they are AI-facing material);
+    only messages returned to the user through the chat panel are localized.
+    """
+    return tr(en, ru, **values)
 
 MAX_WRITE_BYTES = 600_000
 MAX_READ_BYTES = 400_000
@@ -68,17 +69,17 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "list_files",
         "List the project's files and folders. Use at the start of a job.",
         {
-            "path": {"type": "string", "description": _t("Папка относительно корня проекта"), "default": "."},
-            "depth": {"type": "integer", "description": _t("Глубина обхода"), "default": 3, "minimum": 1, "maximum": 8},
+            "path": {"type": "string", "description": "Folder relative to the project root", "default": "."},
+            "depth": {"type": "integer", "description": "Traversal depth", "default": 3, "minimum": 1, "maximum": 8},
         },
     ),
     _schema(
         "read_file",
         "Read a project text file. For large files use start_line/end_line.",
         {
-            "path": {"type": "string", "description": _t("Путь относительно корня проекта")},
+            "path": {"type": "string", "description": "Path relative to the project root"},
             "start_line": {"type": "integer", "default": 1, "minimum": 1},
-            "end_line": {"type": "integer", "description": _t("Последняя строка включительно"), "default": 800},
+            "end_line": {"type": "integer", "description": "Last line, inclusive", "default": 800},
         },
         ["path"],
     ),
@@ -86,8 +87,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "write_file",
         "Create or fully replace a file. Prefer edit_file for targeted changes.",
         {
-            "path": {"type": "string", "description": _t("Путь относительно корня проекта")},
-            "content": {"type": "string", "description": _t("Полное содержимое файла")},
+            "path": {"type": "string", "description": "Path relative to the project root"},
+            "content": {"type": "string", "description": "Full file contents"},
         },
         ["path", "content"],
     ),
@@ -96,8 +97,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "Replace an exact fragment of a file. old_text must occur exactly once (or pass replace_all).",
         {
             "path": {"type": "string"},
-            "old_text": {"type": "string", "description": _t("Точный существующий фрагмент")},
-            "new_text": {"type": "string", "description": _t("Новый фрагмент")},
+            "old_text": {"type": "string", "description": "Exact existing fragment"},
+            "new_text": {"type": "string", "description": "Replacement fragment"},
             "replace_all": {"type": "boolean", "default": False},
         },
         ["path", "old_text", "new_text"],
@@ -107,7 +108,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "Delete a file or folder inside the project. Protected files cannot be deleted.",
         {
             "path": {"type": "string"},
-            "recursive": {"type": "boolean", "description": _t("Удалить папку со всем содержимым"), "default": False},
+            "recursive": {"type": "boolean", "description": "Delete the folder with all its contents", "default": False},
         },
         ["path"],
     ),
@@ -148,8 +149,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "generate_sprite",
         "Generate a sprite (one object, transparent background) and save it into assets/.",
         {
-            "prompt": {"type": "string", "description": _t("Что изобразить, по-английски или по-русски")},
-            "path": {"type": "string", "description": _t("Например assets/sprites/player.png")},
+            "prompt": {"type": "string", "description": "What to draw, in English or Russian"},
+            "path": {"type": "string", "description": "For example assets/sprites/player.png"},
             "style": {"type": "string", "enum": ["flat", "pixel", "painterly", "icon"], "default": "flat"},
             "size": {"type": "integer", "default": 256, "minimum": 64, "maximum": 1024},
         },
@@ -160,7 +161,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "Generate a scene background and save it into assets/.",
         {
             "prompt": {"type": "string"},
-            "path": {"type": "string", "description": _t("Например assets/backgrounds/forest.png")},
+            "path": {"type": "string", "description": "For example assets/backgrounds/forest.png"},
             "width": {"type": "integer", "default": 1280, "minimum": 320, "maximum": 1920},
             "height": {"type": "integer", "default": 720, "minimum": 240, "maximum": 1080},
         },
@@ -188,7 +189,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "update_task",
         "Update the status of a plan task.",
         {
-            "task": {"type": "string", "description": _t("id задачи (t1), номер или название")},
+            "task": {"type": "string", "description": "Task id (t1), number or title"},
             "status": {"type": "string", "enum": ["pending", "in_progress", "done", "skipped"]},
         },
         ["task", "status"],
@@ -266,11 +267,11 @@ class AgentTools:
     def readiness(self) -> dict[str, Any]:
         missing: list[str] = []
         if self.files_changed <= 0:
-            missing.append(_t("ни один файл проекта не изменён"))
+            missing.append("no project file has been modified yet")
         if not self.validation_passed:
-            missing.append(_t("validate_project ещё не пройден без ошибок"))
+            missing.append("validate_project has not passed without errors")
         if not self.run_passed:
-            missing.append(_t("run_project ещё не завершился успешно"))
+            missing.append("run_project has not finished successfully")
         return {
             "files_changed": self.files_changed,
             "changed_files": self.changed_files,
@@ -284,14 +285,14 @@ class AgentTools:
     # -- helpers ----------------------------------------------------------
     def _path(self, relative: str, *, allow_protected: bool = True) -> Path:
         if not str(relative).strip():
-            raise ToolError(_t("Пустой путь."))
+            raise ToolError(_t("Empty path.", "Пустой путь."))
         path = self.project.ensure_inside(relative)
         parts = path.relative_to(self.project.root).parts
         if parts and parts[0] == "_engine":
-            raise ToolError(_t("Нельзя изменять встроенный движок _engine/. Используйте re.bat sync-engine."))
+            raise ToolError(_t("The built-in engine folder _engine/ is read-only. Use re.bat sync-engine instead.", "Нельзя изменять встроенный движок _engine/. Используйте re.bat sync-engine."))
         rel = "/".join(parts)
         if not allow_protected and rel in PROTECTED:
-            raise ToolError(_t("Файл защищён: {rel}", rel=rel))
+            raise ToolError(_t("Protected file: {rel}", "Файл защищён: {rel}", rel=rel))
         return path
 
     def _relative(self, path: Path) -> str:
@@ -310,11 +311,11 @@ class AgentTools:
         arguments = arguments or {}
         handler: Callable[..., str] | None = getattr(self, f"tool_{name}", None)
         if handler is None:
-            return self._fail(_t("Неизвестный инструмент: {name}", name=name))
+            return self._fail(_t("Unknown tool: {name}", "Неизвестный инструмент: {name}", name=name))
         try:
             return handler(**arguments)
         except TypeError as exc:
-            return self._fail(_t("Неверные аргументы для {name}: {exc}", exc=exc, name=name))
+            return self._fail(_t("Invalid arguments for {name}: {exc}", "Неверные аргументы для {name}: {exc}", exc=exc, name=name))
         except ToolError as exc:
             return self._fail(str(exc))
         except Exception as exc:
@@ -324,7 +325,7 @@ class AgentTools:
     def tool_list_files(self, path: str = ".", depth: int = 3) -> str:
         base = self._path(path or ".", allow_protected=True)
         if not base.exists():
-            raise ToolError(_t("Папка не найдена: {path}", path=path))
+            raise ToolError(_t("Folder not found: {path}", "Папка не найдена: {path}", path=path))
         if base.is_file():
             return self._ok(path=self._relative(base), size=base.stat().st_size)
         depth = max(1, min(8, int(depth)))
@@ -342,18 +343,18 @@ class AgentTools:
             size = f"  {item.stat().st_size} B" if item.is_file() else ""
             rows.append("  " * (len(parts) - 1) + item.name + suffix + size)
             if len(rows) >= 700:
-                rows.append(_t("… (обрезано)"))
+                rows.append(_t("... (truncated)", "… (обрезано)"))
                 break
         return self._ok(path=self._relative(base), entries=rows)
 
     def tool_read_file(self, path: str, start_line: int = 1, end_line: int = 800) -> str:
         file_path = self._path(path)
         if not file_path.is_file():
-            raise ToolError(_t("Файл не найден: {path}", path=path))
+            raise ToolError(_t("File not found: {path}", "Файл не найден: {path}", path=path))
         if file_path.suffix.lower() not in TEXT_SUFFIXES and file_path.stat().st_size > MAX_READ_BYTES:
-            raise ToolError(_t("Это не текстовый файл. Используйте inspect_image для изображений."))
+            raise ToolError(_t("Not a text file. Use inspect_image for images.", "Это не текстовый файл. Используйте inspect_image для изображений."))
         if file_path.stat().st_size > MAX_READ_BYTES:
-            raise ToolError(_t("Файл слишком большой. Укажите start_line/end_line."))
+            raise ToolError(_t("File too large. Pass start_line/end_line.", "Файл слишком большой. Укажите start_line/end_line."))
         text = file_path.read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
         start = max(1, int(start_line))
@@ -375,7 +376,7 @@ class AgentTools:
             try:
                 pattern = re.compile(query, re.IGNORECASE)
             except re.error as exc:
-                raise ToolError(_t("Плохое регулярное выражение: {exc}", exc=exc))
+                raise ToolError(_t("Bad regular expression: {exc}", "Плохое регулярное выражение: {exc}", exc=exc))
         matches: list[dict[str, Any]] = []
         candidates = [base] if base.is_file() else base.rglob("*")
         for file_path in candidates:
@@ -406,13 +407,13 @@ class AgentTools:
     # -- editing ----------------------------------------------------------
     def tool_write_file(self, path: str, content: str) -> str:
         if len(content.encode("utf-8")) > MAX_WRITE_BYTES:
-            raise ToolError(_t("Слишком большой файл. Разделите его на несколько."))
+            raise ToolError(_t("File too large. Split it into several files.", "Слишком большой файл. Разделите его на несколько."))
         file_path = self._path(path)
         if file_path.suffix.lower() == ".json":
             try:
                 json.loads(content)
             except ValueError as exc:
-                raise ToolError(_t("Некорректный JSON: {exc}", exc=exc))
+                raise ToolError(_t("Invalid JSON: {exc}", "Некорректный JSON: {exc}", exc=exc))
         existed = file_path.exists()
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
@@ -420,20 +421,20 @@ class AgentTools:
         self.validation_passed = False
         self.run_passed = False
         self._record_change(file_path, "edit" if existed else "create")
-        return self._ok(path=self._relative(file_path), bytes=len(content.encode("utf-8")), message=_t("Файл записан."))
+        return self._ok(path=self._relative(file_path), bytes=len(content.encode("utf-8")), message=_t("File written.", "Файл записан."))
 
     def tool_edit_file(self, path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
         if not old_text:
-            raise ToolError(_t("old_text не может быть пустым."))
+            raise ToolError(_t("old_text must not be empty.", "old_text не может быть пустым."))
         file_path = self._path(path)
         if not file_path.is_file():
-            raise ToolError(_t("Файл не найден: {path}", path=path))
+            raise ToolError(_t("File not found: {path}", "Файл не найден: {path}", path=path))
         text = file_path.read_text(encoding="utf-8")
         count = text.count(old_text)
         if count == 0:
-            raise ToolError(_t("Фрагмент old_text не найден. Прочитайте файл заново."))
+            raise ToolError(_t("old_text fragment not found. Re-read the file first.", "Фрагмент old_text не найден. Прочитайте файл заново."))
         if count > 1 and not replace_all:
-            raise ToolError(_t("Фрагмент встречается {count} раз. Уточните контекст или передайте replace_all=true.", count=count))
+            raise ToolError(_t("Fragment occurs {count} times. Add more context or pass replace_all=true.", "Фрагмент встречается {count} раз. Уточните контекст или передайте replace_all=true.", count=count))
         updated = text.replace(old_text, new_text) if replace_all else text.replace(old_text, new_text, 1)
         file_path.write_text(updated, encoding="utf-8")
         self.files_changed += 1
@@ -443,34 +444,34 @@ class AgentTools:
         return self._ok(
             path=self._relative(file_path),
             replacements=count if replace_all else 1,
-            message=_t("Файл изменён."),
+            message=_t("File edited.", "Файл изменён."),
         )
 
     def tool_delete_path(self, path: str, recursive: bool = False) -> str:
         file_path = self._path(path, allow_protected=False)
         rel = self._relative(file_path)
         if rel in {"assets", "progress", "_engine"}:
-            raise ToolError(_t("Эта папка защищена."))
+            raise ToolError(_t("This folder is protected.", "Эта папка защищена."))
         if file_path.is_dir():
             if not recursive and any(file_path.iterdir()):
-                raise ToolError(_t("Папка не пуста. Укажите recursive=true."))
+                raise ToolError(_t("Folder is not empty. Pass recursive=true.", "Папка не пуста. Укажите recursive=true."))
         was_directory = file_path.is_dir()
         self.project.delete_path(path)
         self.files_changed += 1
         self.validation_passed = False
         self.run_passed = False
         self._record_change(file_path, "delete", directory=was_directory)
-        return self._ok(path=rel, message=_t("Удалено."))
+        return self._ok(path=rel, message=_t("Deleted.", "Удалено."))
 
     # -- execution --------------------------------------------------------
     def tool_run_command(self, command: str, timeout: int = 120) -> str:
         command = command.strip()
         if not command:
-            raise ToolError(_t("Пустая команда."))
+            raise ToolError(_t("Empty command.", "Пустая команда."))
         lowered = command.lower()
         forbidden = ("format ", "shutdown", "rm -rf /", "del /s /q c:", "remove-item -recurse c:\\")
         if any(item in lowered for item in forbidden):
-            raise ToolError(_t("Команда заблокирована как небезопасная."))
+            raise ToolError(_t("Command blocked as unsafe.", "Команда заблокирована как небезопасная."))
         install_markers = (
             "pip install",
             "pip3 install",
@@ -498,7 +499,7 @@ class AgentTools:
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            return self._fail(_t("Команда не завершилась за {timeout} сек.", timeout=timeout))
+            return self._fail(_t("Command did not finish within {timeout} s.", "Команда не завершилась за {timeout} сек.", timeout=timeout))
         output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
         return self._ok(
             command=command,
@@ -510,7 +511,7 @@ class AgentTools:
     def tool_run_project(self, frames: int = 8, timeout: int = 90) -> str:
         entry = self.project.entry
         if not entry.exists():
-            raise ToolError(_t("Точка входа main.py не найдена."))
+            raise ToolError(_t("Entry point main.py not found.", "Точка входа main.py не найдена."))
         env = self.project.run_env()
         env["SDL_VIDEODRIVER"] = "dummy"
         env["SDL_AUDIODRIVER"] = "dummy"
@@ -532,8 +533,8 @@ class AgentTools:
             )
         except subprocess.TimeoutExpired:
             self.run_passed = False
-            self.last_run_error = _t("Проект не завершился за {timeout} сек.", timeout=timeout)
-            return self._fail(self.last_run_error + _t(" Проверьте бесконечные циклы/диалоги."))
+            self.last_run_error = _t("Project did not exit within {timeout} s.", "Проект не завершился за {timeout} сек.", timeout=timeout)
+            return self._fail(self.last_run_error + _t(" Check infinite loops or blocking dialogs.", " Проверьте бесконечные циклы/диалоги."))
         elapsed = time.perf_counter() - started
         output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
         self.run_passed = result.returncode == 0
@@ -542,7 +543,7 @@ class AgentTools:
             returncode=result.returncode,
             seconds=round(elapsed, 2),
             output=output[-9000:],
-            message=_t("Проект запустился без исключений.") if result.returncode == 0 else _t("Проект завершился с ошибкой."),
+            message=_t("The project ran without exceptions.", "Проект запустился без исключений.") if result.returncode == 0 else _t("The project exited with an error.", "Проект завершился с ошибкой."),
             readiness=self.readiness(),
         )
 
@@ -568,7 +569,7 @@ class AgentTools:
         target = self._path(path)
         assets = self.project.root / "assets"
         if not is_relative_to(target, assets):
-            raise ToolError(_t("Спрайты сохраняйте только в assets/."))
+            raise ToolError(_t("Save sprites only under assets/.", "Спрайты сохраняйте только в assets/."))
         result = generate_sprite(
             prompt,
             target,
@@ -578,9 +579,9 @@ class AgentTools:
             allow_fallback=True,
         )
         if result.get("fallback"):
-            record_event(self.project.root, "asset", _t("Спрайт создан офлайн: {path}", path=self._relative(target)))
+            record_event(self.project.root, "asset", _t("Sprite created offline: {path}", "Спрайт создан офлайн: {path}", path=self._relative(target)))
         else:
-            record_event(self.project.root, "asset", _t("Спрайт сгенерирован: {path}", path=self._relative(target)))
+            record_event(self.project.root, "asset", _t("Sprite generated: {path}", "Спрайт сгенерирован: {path}", path=self._relative(target)))
         self.files_changed += 1
         self._record_change(target, "generate", kind="sprite", prompt=prompt)
         return self._ok(**result)
@@ -597,7 +598,7 @@ class AgentTools:
         target = self._path(path)
         assets = self.project.root / "assets"
         if not is_relative_to(target, assets):
-            raise ToolError(_t("Фоны сохраняйте только в assets/."))
+            raise ToolError(_t("Save backgrounds only under assets/.", "Фоны сохраняйте только в assets/."))
         result = generate_background(
             prompt,
             target,
@@ -606,7 +607,7 @@ class AgentTools:
             image_config=self.image_config,
             allow_fallback=True,
         )
-        record_event(self.project.root, "asset", _t("Фон создан: {path}", path=self._relative(target)))
+        record_event(self.project.root, "asset", _t("Background created: {path}", "Фон создан: {path}", path=self._relative(target)))
         self.files_changed += 1
         self._record_change(target, "generate", kind="background", prompt=prompt)
         return self._ok(**result)
@@ -614,15 +615,15 @@ class AgentTools:
     def tool_inspect_image(self, path: str) -> str:
         file_path = self._path(path)
         if not file_path.is_file():
-            raise ToolError(_t("Файл не найден: {path}", path=path))
+            raise ToolError(_t("File not found: {path}", "Файл не найден: {path}", path=path))
         try:
             from PIL import Image
         except ImportError:
-            raise ToolError(_t("Pillow не установлен."))
+            raise ToolError(_t("Pillow is not installed.", "Pillow не установлен."))
         try:
             image = Image.open(file_path).convert("RGBA")
         except Exception as exc:
-            raise ToolError(_t("Не удалось открыть изображение: {exc}", exc=exc))
+            raise ToolError(_t("Could not open image: {exc}", "Не удалось открыть изображение: {exc}", exc=exc))
         alpha = image.getchannel("A")
         bbox = alpha.getbbox()
         small = image.copy()
@@ -656,13 +657,13 @@ class AgentTools:
 
     def tool_set_plan(self, tasks: list[str]) -> str:
         if not isinstance(tasks, list) or not tasks:
-            raise ToolError(_t("Нужен непустой список задач."))
+            raise ToolError(_t("A non-empty list of tasks is required.", "Нужен непустой список задач."))
         state = set_plan(self.project.root, [str(item) for item in tasks][:12])
-        return self._ok(tasks=state.get("tasks", []), message=_t("План обновлён."))
+        return self._ok(tasks=state.get("tasks", []), message=_t("Plan updated.", "План обновлён."))
 
     def tool_update_task(self, task: str, status: str) -> str:
         state = update_task(self.project.root, task, status)
-        return self._ok(tasks=state.get("tasks", []), message=_t("Задача обновлена."))
+        return self._ok(tasks=state.get("tasks", []), message=_t("Task updated.", "Задача обновлена."))
 
     def tool_report_progress(self, percent: float, stage: str = "", message: str = "") -> str:
         ready = self.readiness()
@@ -671,7 +672,7 @@ class AgentTools:
         note = ""
         if requested >= 100 and not ready["ready"]:
             capped = 99
-            note = _t(" 100% зарезервировано до успешной проверки и запуска проекта.")
+            note = _t(" 100% is reserved until validation and a successful run.", " 100% зарезервировано до успешной проверки и запуска проекта.")
         state = set_progress(
             self.project.root,
             capped,
@@ -692,6 +693,10 @@ class AgentTools:
             missing = "; ".join(ready["missing"])
             return self._fail(
                 _t(
+                    "Too early to finish. Still missing: {missing}. Keep going: "
+                    "edit the project files, run validate_project, fix every error "
+                    "and then run_project. Installing a library or reading files is "
+                    "not a completed task.",
                     "Завершать работу рано. Не выполнено: {missing}. Продолжай: "
                     "измени файлы проекта, запусти validate_project, исправь ошибки "
                     "и запусти run_project. Установка библиотеки или чтение файлов "
@@ -700,5 +705,5 @@ class AgentTools:
                 ),
                 readiness=ready,
             )
-        state = finish_progress(self.project.root, message or _t("Проект готов"))
+        state = finish_progress(self.project.root, message or _t("Project ready", "Проект готов"))
         return self._ok(percent=state.get("percent"), message=message, readiness=ready)

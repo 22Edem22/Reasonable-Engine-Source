@@ -117,6 +117,17 @@ def task_language_note(text: str) -> str:
     return _TASK_LANGUAGE_NOTES[detect_user_language(text)]
 
 
+def tr(en: str, ru: str, **values: Any) -> str:
+    """Return a string chosen by the current UI language.
+
+    Used for user-facing runtime messages (tool output, agent narration).
+    AI-facing material (tool schemas, skills, prompts) is English-only and
+    must not use this helper.
+    """
+    template = ru if current_language() == "ru" else en
+    return template.format(**values) if values else template
+
+
 def t(key: str, **values: Any) -> str:
     """Translate ``key`` into the active language, then interpolate values.
 
