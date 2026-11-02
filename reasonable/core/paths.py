@@ -109,18 +109,72 @@ def player_executable() -> Path | None:
     return None
 
 
-def project_launch_command(entry: str | Path) -> list[str]:
+# Substrings that mark an entry file as a tkinter program (the "simple"
+# interface level). ReasonablePlayer.exe deliberately ships without tkinter
+# (it is excluded in ReasonablePlayer.spec to keep the binary small), so such
+# projects must run on a full Python interpreter instead.
+TKINTER_MARKERS = ("import tkinter", "from tkinter")
+
+
+def entry_uses_tkinter(entry: str | Path) -> bool:
+    """True when the entry file imports tkinter at the top level."""
+    try:
+        text = Path(entry).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if any(stripped.startswith(marker) for marker in TKINTER_MARKERS):
+            return True
+    return False
+
+
+def project_needs_tkinter(project_root: str | Path, entry: str | Path) -> bool:
+    """Decide whether a project must be launched with a tkinter-capable Python.
+
+    The manifest's template/ui level is authoritative when present; otherwise
+    the entry file itself is inspected.
+    """
+    manifest = read_json(Path(project_root) / "project.json", None)
+    if isinstance(manifest, dict):
+        template = str(manifest.get("template") or "").strip().lower()
+        if template == "simple":
+            return True
+        levels = manifest.get("ui_levels")
+        if (
+            isinstance(levels, (list, tuple))
+            and levels
+            and all(str(level).strip().lower() == "simple" for level in levels)
+        ):
+            return True
+    return entry_uses_tkinter(entry)
+
+
+def project_launch_command(
+    entry: str | Path, *, project_root: str | Path | None = None
+) -> list[str]:
     """Command that runs a project entry point without starting the editor.
 
     In an installed build the small ``ReasonablePlayer.exe`` is preferred; it
-    embeds the pygame runtime and needs no Python installation. In a source
-    checkout we simply use the current interpreter.
+    embeds the pygame runtime and needs no Python installation. Tkinter
+    projects are the exception: the player has no tkinter bundled, so they go
+    through the portable/system Python instead. In a source checkout we simply
+    use the current interpreter.
     """
     entry = Path(entry)
     if is_frozen():
-        player = player_executable()
-        if player is not None:
-            return [str(player), str(entry)]
+        needs_tkinter = False
+        root = Path(project_root) if project_root else entry.parent
+        try:
+            from reasonable.core.project import MANIFEST_NAME
+        except ImportError:  # pragma: no cover - defensive
+            MANIFEST_NAME = "project.json"
+        if (root / MANIFEST_NAME).is_file() or entry_uses_tkinter(entry):
+            needs_tkinter = project_needs_tkinter(root, entry)
+        if not needs_tkinter:
+            player = player_executable()
+            if player is not None:
+                return [str(player), str(entry)]
     return [*python_command(), str(entry)]
 
 

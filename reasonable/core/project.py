@@ -367,7 +367,7 @@ class Project:
     def run_command(self) -> list[str]:
         from .paths import project_launch_command
 
-        return project_launch_command(self.entry)
+        return project_launch_command(self.entry, project_root=self.root)
 
     def launch(self) -> subprocess.Popen:
         if not self.entry.exists():
