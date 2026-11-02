@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from reasonable.core import i18n
 from reasonable.core.history import create_snapshot, update_snapshot
 from reasonable.core.progress import record_event, set_progress, set_status
 from reasonable.core.settings import Settings
@@ -300,10 +301,14 @@ class Agent:
         self._nudges = 0
         self._install_nudged = False
         self.messages = [{"role": "system", "content": build_agent_system_prompt(self.project)}]
+        task_text = user_message or build_initial_user_message(self.project)
+        # Tools and skills are English-only, but the agent must talk to the
+        # user in the language of exactly this task message.
+        note = i18n.task_language_note(task_text)
         self.messages.append(
             {
                 "role": "user",
-                "content": user_message or build_initial_user_message(self.project),
+                "content": f"{note}\n\n{task_text}",
             }
         )
         # Every run is reversible: the snapshot is taken before the first tool

@@ -97,11 +97,39 @@ def detect_user_language(text: str) -> str:
     return "ru" if _CYRILLIC_RE.search(text or "") else "en"
 
 
+_TASK_LANGUAGE_NOTES = {
+    "ru": (
+        "[SYSTEM NOTE] The user's task below is written in Russian. "
+        "Reply to the user strictly in Russian until they switch languages. "
+        "Tool names, code and file contents stay in English."
+    ),
+    "en": (
+        "[SYSTEM NOTE] The user's task below is written in English. "
+        "Reply to the user strictly in English until they switch languages. "
+        "Tool names, code and file contents stay in English."
+    ),
+}
+
+
+def task_language_note(text: str) -> str:
+    """Instruction injected before a user message so the agent answers in the
+    language of exactly that task (tools/skills themselves are English-only)."""
+    return _TASK_LANGUAGE_NOTES[detect_user_language(text)]
+
+
 def t(key: str, **values: Any) -> str:
-    """Translate ``key`` into the active language, then interpolate values."""
+    """Translate ``key`` into the active language, then interpolate values.
+
+    Agent tool/skill material is English-only by design (see
+    :mod:`reasonable.ai.prompts_en`); a missing key therefore falls back to
+    the key text itself instead of crashing — except for ``tools.<ru literal>``
+    schema keys, which must exist so the Russian UI stays translated.
+    """
     table = TRANSLATIONS.get(key)
     if not table:
-        raise KeyError(f"Unknown translation key: {key}")
+        if key.startswith("tools.") and _CYRILLIC_RE.search(key):
+            raise KeyError(f"Unknown translation key: {key}")
+        return key
     template = table.get(current_language())
     if template is None:
         template = table[DEFAULT_LANGUAGE]

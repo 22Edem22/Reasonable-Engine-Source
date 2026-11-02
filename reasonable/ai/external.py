@@ -18,28 +18,13 @@ from reasonable.core.paths import atomic_write_text
 
 from .prompts import (
     EXTERNAL_CONNECTION_GUIDE,
+    SHORT_AGENT_TEMPLATE,
     build_agent_tasks,
     build_external_guide,
     skills_for_project,
 )
 
 PACK_VERSION = 1
-
-_SHORT_AGENT = """# {name} — инструкции для ИИ-агента
-
-Этот проект создан в **Reasonable Engine**. Перед первой правкой обязательно
-прочитай `AGENT_GUIDE.md` целиком, затем `progress/state.json` и файлы в `skills/`.
-
-Кратко:
-
-- Runtime: `reasonable.runtime` (pygame), не PySide6.
-- Точка входа: `main.py`; ассеты: `assets/`.
-- План и прогресс: `re.bat plan/task/progress/event`; проверка: `re.bat validate`.
-- Пиши полноценный рабочий код, генерируй спрайты в `assets/`, не трогай `_engine/`.
-- Заверши только после успешного запуска и `re.bat done "..."`.
-
-Полные правила, API движка и навыки: [AGENT_GUIDE.md](AGENT_GUIDE.md).
-"""
 
 
 def generate_agent_pack(project) -> list[Path]:
@@ -54,7 +39,7 @@ def generate_agent_pack(project) -> list[Path]:
 
     write("AGENT_GUIDE.md", build_external_guide(project))
     write("EXTERNAL_AGENT.md", EXTERNAL_CONNECTION_GUIDE)
-    short = _SHORT_AGENT.format(name=project.name)
+    short = SHORT_AGENT_TEMPLATE.format(name=project.name)
     write("AGENTS.md", short)
     write("CLAUDE.md", "# Claude Code\n\n" + short)
     write(".github/copilot-instructions.md", short)

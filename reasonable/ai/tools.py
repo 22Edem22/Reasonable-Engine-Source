@@ -26,7 +26,15 @@ from reasonable.core.progress import (
     update_task,
 )
 from reasonable.core.project import IGNORED_DIRS, Project, TEXT_SUFFIXES
-from reasonable.core.i18n import t as _t
+from reasonable.core.i18n import t as _translate
+
+
+def _t(russian: str, **values) -> str:
+    """Translate a tool string; the Russian literal doubles as the fallback key."""
+    try:
+        return _translate("tools." + russian, **values)
+    except KeyError:
+        return _translate(russian, **values)
 
 MAX_WRITE_BYTES = 600_000
 MAX_READ_BYTES = 400_000
@@ -283,7 +291,7 @@ class AgentTools:
             raise ToolError(_t("Нельзя изменять встроенный движок _engine/. Используйте re.bat sync-engine."))
         rel = "/".join(parts)
         if not allow_protected and rel in PROTECTED:
-            raise ToolError(_t("Файл защищён: {rel}", rel=rel))
+            raise ToolError(_t("Файл защищён: {rel}", "Файл защищён: {rel}", rel=rel))
         return path
 
     def _relative(self, path: Path) -> str:
@@ -302,11 +310,11 @@ class AgentTools:
         arguments = arguments or {}
         handler: Callable[..., str] | None = getattr(self, f"tool_{name}", None)
         if handler is None:
-            return self._fail(_t("Неизвестный инструмент: {name}", name=name))
+            return self._fail(_t("Неизвестный инструмент: {name}", "Неизвестный инструмент: {name}", name=name))
         try:
             return handler(**arguments)
         except TypeError as exc:
-            return self._fail(_t("Неверные аргументы для {name}: {exc}", exc=exc, name=name))
+            return self._fail(_t("Неверные аргументы для {name}: {exc}", "Неверные аргументы для {name}: {exc}", exc=exc, name=name))
         except ToolError as exc:
             return self._fail(str(exc))
         except Exception as exc:
@@ -316,7 +324,7 @@ class AgentTools:
     def tool_list_files(self, path: str = ".", depth: int = 3) -> str:
         base = self._path(path or ".", allow_protected=True)
         if not base.exists():
-            raise ToolError(_t("Папка не найдена: {path}", path=path))
+            raise ToolError(_t("Папка не найдена: {path}", "Папка не найдена: {path}", path=path))
         if base.is_file():
             return self._ok(path=self._relative(base), size=base.stat().st_size)
         depth = max(1, min(8, int(depth)))
@@ -341,7 +349,7 @@ class AgentTools:
     def tool_read_file(self, path: str, start_line: int = 1, end_line: int = 800) -> str:
         file_path = self._path(path)
         if not file_path.is_file():
-            raise ToolError(_t("Файл не найден: {path}", path=path))
+            raise ToolError(_t("Файл не найден: {path}", "Файл не найден: {path}", path=path))
         if file_path.suffix.lower() not in TEXT_SUFFIXES and file_path.stat().st_size > MAX_READ_BYTES:
             raise ToolError(_t("Это не текстовый файл. Используйте inspect_image для изображений."))
         if file_path.stat().st_size > MAX_READ_BYTES:
@@ -367,7 +375,7 @@ class AgentTools:
             try:
                 pattern = re.compile(query, re.IGNORECASE)
             except re.error as exc:
-                raise ToolError(_t("Плохое регулярное выражение: {exc}", exc=exc))
+                raise ToolError(_t("Плохое регулярное выражение: {exc}", "Плохое регулярное выражение: {exc}", exc=exc))
         matches: list[dict[str, Any]] = []
         candidates = [base] if base.is_file() else base.rglob("*")
         for file_path in candidates:
@@ -404,7 +412,7 @@ class AgentTools:
             try:
                 json.loads(content)
             except ValueError as exc:
-                raise ToolError(_t("Некорректный JSON: {exc}", exc=exc))
+                raise ToolError(_t("Некорректный JSON: {exc}", "Некорректный JSON: {exc}", exc=exc))
         existed = file_path.exists()
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
@@ -419,13 +427,13 @@ class AgentTools:
             raise ToolError(_t("old_text не может быть пустым."))
         file_path = self._path(path)
         if not file_path.is_file():
-            raise ToolError(_t("Файл не найден: {path}", path=path))
+            raise ToolError(_t("Файл не найден: {path}", "Файл не найден: {path}", path=path))
         text = file_path.read_text(encoding="utf-8")
         count = text.count(old_text)
         if count == 0:
             raise ToolError(_t("Фрагмент old_text не найден. Прочитайте файл заново."))
         if count > 1 and not replace_all:
-            raise ToolError(_t("Фрагмент встречается {count} раз. Уточните контекст или передайте replace_all=true.", count=count))
+            raise ToolError(_t("Фрагмент встречается {count} раз. Уточните контекст или передайте replace_all=true.", "Фрагмент встречается {count} раз. Уточните контекст или передайте replace_all=true.", count=count))
         updated = text.replace(old_text, new_text) if replace_all else text.replace(old_text, new_text, 1)
         file_path.write_text(updated, encoding="utf-8")
         self.files_changed += 1
@@ -490,7 +498,7 @@ class AgentTools:
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            return self._fail(_t("Команда не завершилась за {timeout} сек.", timeout=timeout))
+            return self._fail(_t("Команда не завершилась за {timeout} сек.", "Команда не завершилась за {timeout} сек.", timeout=timeout))
         output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
         return self._ok(
             command=command,
@@ -524,7 +532,7 @@ class AgentTools:
             )
         except subprocess.TimeoutExpired:
             self.run_passed = False
-            self.last_run_error = _t("Проект не завершился за {timeout} сек.", timeout=timeout)
+            self.last_run_error = _t("Проект не завершился за {timeout} сек.", "Проект не завершился за {timeout} сек.", timeout=timeout)
             return self._fail(self.last_run_error + _t(" Проверьте бесконечные циклы/диалоги."))
         elapsed = time.perf_counter() - started
         output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
@@ -606,7 +614,7 @@ class AgentTools:
     def tool_inspect_image(self, path: str) -> str:
         file_path = self._path(path)
         if not file_path.is_file():
-            raise ToolError(_t("Файл не найден: {path}", path=path))
+            raise ToolError(_t("Файл не найден: {path}", "Файл не найден: {path}", path=path))
         try:
             from PIL import Image
         except ImportError:
@@ -614,7 +622,7 @@ class AgentTools:
         try:
             image = Image.open(file_path).convert("RGBA")
         except Exception as exc:
-            raise ToolError(_t("Не удалось открыть изображение: {exc}", exc=exc))
+            raise ToolError(_t("Не удалось открыть изображение: {exc}", "Не удалось открыть изображение: {exc}", exc=exc))
         alpha = image.getchannel("A")
         bbox = alpha.getbbox()
         small = image.copy()
