@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from reasonable.core.i18n import current_language, tr
+
 
 @dataclass(frozen=True)
 class ProviderPreset:
@@ -32,6 +34,30 @@ class ProviderPreset:
     @property
     def is_local(self) -> bool:
         return self.group == "Локальные"
+
+    @property
+    def display_name(self) -> str:
+        if current_language() == "en":
+            return _EN_PRESET_TEXT.get(self.id, {}).get("name") or self.name
+        return self.name
+
+    @property
+    def display_group(self) -> str:
+        if current_language() == "en":
+            return _EN_PRESET_TEXT.get(self.id, {}).get("group") or self.group
+        return self.group
+
+    @property
+    def display_description(self) -> str:
+        if current_language() == "en":
+            return _EN_PRESET_TEXT.get(self.id, {}).get("description") or self.description
+        return self.description
+
+    @property
+    def display_note(self) -> str:
+        if current_language() == "en":
+            return _EN_PRESET_TEXT.get(self.id, {}).get("note") or self.note
+        return self.note
 
 
 PROVIDERS: tuple[ProviderPreset, ...] = (
@@ -240,6 +266,126 @@ PROVIDER_GROUPS = (
     "Другое",
 )
 
+# English display text for the provider catalogue. Canonical (Russian) values
+# stay on the dataclasses so tests and internal comparisons keep working; the
+# editor renders the ``display_*`` properties.
+_EN_PRESET_TEXT: dict[str, dict[str, str]] = {
+    "ollama": {
+        "name": "Ollama (local)",
+        "group": "Local",
+        "description": (
+            "Fully local server. Install Ollama, pull a model and run `ollama serve`. "
+            "No key needed, no internet required."
+        ),
+        "note": "For agent work we recommend a 7B+ model with tool calling support.",
+    },
+    "lmstudio": {
+        "name": "LM Studio (local)",
+        "group": "Local",
+        "description": (
+            "Local OpenAI-compatible LM Studio server. Enable Local Server on the "
+            "Developer tab and load a model."
+        ),
+        "note": "You can get the model name with the “Load models” button.",
+    },
+    "openrouter": {
+        "name": "OpenRouter (many free models)",
+        "group": "Free key",
+        "description": (
+            "One API key — dozens of models, including free ones with the `:free` suffix. "
+            "The best choice for a full built-in agent."
+        ),
+        "note": "After pasting the key press “Load models” and pick a model marked FREE.",
+    },
+    "groq": {
+        "name": "Groq Cloud",
+        "group": "Free key",
+        "description": (
+            "Very fast free tier with a generous request limit. A great fit for "
+            "iterative AI-agent work."
+        ),
+        "note": "Free limits are listed in the Groq console and may change.",
+    },
+    "gemini": {
+        "name": "Google AI Studio (Gemini)",
+        "group": "Free key",
+        "description": (
+            "Free Gemini tier through the OpenAI-compatible endpoint. Handles code "
+            "and long context well."
+        ),
+        "note": "Use a Google AI Studio project, not a Google Cloud key, if you want the free tier.",
+    },
+    "cerebras": {
+        "name": "Cerebras Inference",
+        "group": "Free key",
+        "description": (
+            "Free tier with very high generation speed. Fits fast “edit → check” loops."
+        ),
+        "note": "Availability and limits depend on the current free tier.",
+    },
+    "mistral": {
+        "name": "Mistral La Plateforme",
+        "group": "Free key",
+        "description": (
+            "European provider with a free experimental tier. Good models for code and text."
+        ),
+        "note": "The free experimental tier may require phone verification.",
+    },
+    "github": {
+        "name": "GitHub Models",
+        "group": "Free key",
+        "description": (
+            "Free access to OpenAI, Meta, Mistral and other models via a regular GitHub PAT. "
+            "Handy if you already use GitHub."
+        ),
+        "note": "Create a fine-grained token with access to GitHub Models.",
+    },
+    "huggingface": {
+        "name": "Hugging Face Router",
+        "group": "Free key",
+        "description": (
+            "OpenAI-compatible router to Hugging Face models. A small free credit limit "
+            "and a huge model catalog."
+        ),
+        "note": "Some models are paid even with a token — check the catalog.",
+    },
+    "openai": {
+        "name": "OpenAI API",
+        "group": "Paid",
+        "description": "Official OpenAI API. Stable tool calling and code quality.",
+    },
+    "anthropic": {
+        "name": "Anthropic Claude API",
+        "group": "Paid",
+        "description": (
+            "Native Claude API with tool support. One of the best options for "
+            "autonomous project development."
+        ),
+    },
+    "custom": {
+        "name": "Custom OpenAI-compatible server",
+        "group": "Other",
+        "description": (
+            "Any server with a /chat/completions endpoint: vLLM, llama.cpp, LiteLLM, "
+            "OpenWebUI, a corporate gateway, etc."
+        ),
+    },
+}
+
+
+_GROUP_LABELS = {
+    "Локальные": ("Local", "Локальные"),
+    "Бесплатный ключ": ("Free key", "Бесплатный ключ"),
+    "Платные": ("Paid", "Платные"),
+    "Другое": ("Other", "Другое"),
+}
+
+
+def provider_group_label(group: str) -> str:
+    """Localized section title for a canonical group name."""
+    en, ru = _GROUP_LABELS.get(group, (group, group))
+    return tr(en, ru)
+
 
 @dataclass(frozen=True)
 class ImageProviderPreset:
@@ -250,6 +396,36 @@ class ImageProviderPreset:
     default_model: str
     requires_key: bool = False
     key_url: str = ""
+
+    @property
+    def display_name(self) -> str:
+        if current_language() == "en":
+            return _EN_IMAGE_TEXT.get(self.id, {}).get("name") or self.name
+        return self.name
+
+    @property
+    def display_description(self) -> str:
+        if current_language() == "en":
+            return _EN_IMAGE_TEXT.get(self.id, {}).get("description") or self.description
+        return self.description
+
+
+_EN_IMAGE_TEXT: dict[str, dict[str, str]] = {
+    "procedural": {
+        "name": "Procedural sprites (offline)",
+        "description": (
+            "Built-in pixel-art and flat-sprite generator. Needs no network and "
+            "quickly produces a consistent asset set."
+        ),
+    },
+    "openai": {
+        "name": "OpenAI-compatible images",
+        "description": (
+            "A local or remote server with a /images/generations endpoint "
+            "(OpenAI, ComfyUI proxy, SD WebUI proxy, etc.)."
+        ),
+    },
+}
 
 
 IMAGE_PROVIDERS: tuple[ImageProviderPreset, ...] = (
@@ -288,6 +464,61 @@ class FreeApiSite:
     models: str
     note: str
     badge: str = "FREE TIER"
+
+    @property
+    def display_models(self) -> str:
+        if current_language() == "en":
+            return _EN_SITE_TEXT.get(self.name, {}).get("models") or self.models
+        return self.models
+
+    @property
+    def display_note(self) -> str:
+        if current_language() == "en":
+            return _EN_SITE_TEXT.get(self.name, {}).get("note") or self.note
+        return self.note
+
+    @property
+    def display_badge(self) -> str:
+        if current_language() == "en":
+            return _EN_SITE_TEXT.get(self.name, {}).get("badge") or self.badge
+        return self.badge
+
+
+_EN_SITE_TEXT: dict[str, dict[str, str]] = {
+    "OpenRouter": {
+        "models": "Llama, Qwen, DeepSeek, Mistral and dozens more",
+        "note": "Models with the :free suffix. One key for everything. Free request limits depend on the account.",
+        "badge": "RECOMMENDED",
+    },
+    "Google AI Studio": {
+        "models": "Gemini 2.5 Flash / Pro",
+        "note": "Free tier with per-minute and daily request limits. The key is created in one click.",
+    },
+    "Groq Cloud": {
+        "models": "Llama 3.3 70B, Qwen 3",
+        "note": "Very fast generation, a free tier and a clear limits console.",
+    },
+    "Cerebras": {
+        "models": "Llama, Qwen",
+        "note": "Free tier for developers, high token speed.",
+    },
+    "GitHub Models": {
+        "models": "GPT-4o mini, Llama, Mistral",
+        "note": "Free with limits for GitHub users. Needs a fine-grained token.",
+    },
+    "Mistral": {
+        "models": "Mistral Small, Codestral",
+        "note": "Free experimental tier. Phone verification may be required.",
+    },
+    "Hugging Face": {
+        "models": "A huge catalog of open-source models",
+        "note": "A small free credit limit; some models are paid.",
+    },
+    "Cloudflare Workers AI": {
+        "models": "Llama, Qwen, Mistral",
+        "note": "A daily free neuron quota. Needs a Cloudflare account.",
+    },
+}
 
 
 FREE_API_SITES: tuple[FreeApiSite, ...] = (
@@ -361,7 +592,7 @@ def merge_provider_config(settings, provider_id: str) -> dict:
     override = settings.data.get("provider_overrides", {}).get(provider_id, {}) if settings else {}
     return {
         "id": preset.id,
-        "name": preset.name,
+        "name": preset.display_name,
         "kind": override.get("kind", preset.kind),
         "base_url": (override.get("base_url") or preset.base_url).strip(),
         "model": (override.get("model") or preset.default_model).strip(),
@@ -369,14 +600,15 @@ def merge_provider_config(settings, provider_id: str) -> dict:
         "requires_key": preset.requires_key,
         "headers": {**preset.headers, **(override.get("headers") or {})},
         "group": preset.group,
-        "description": preset.description,
+        "group_label": preset.display_group,
+        "description": preset.display_description,
         "key_url": preset.key_url,
         "docs_url": preset.docs_url,
-        "note": preset.note,
+        "note": preset.display_note,
     }
 
 
-def short_provider_name(name: object, fallback: str = "ИИ") -> str:
+def short_provider_name(name: object, fallback: str = "") -> str:
     """Return a compact provider name for chrome and chat headers.
 
     Catalog labels may include an access hint in parentheses, for example
@@ -384,16 +616,16 @@ def short_provider_name(name: object, fallback: str = "ИИ") -> str:
     label; headers use the part before the hint and keep the full value in a
     tooltip.
     """
-    text = str(name or fallback)
+    text = str(name or fallback or tr("AI", "ИИ"))
     short = text.split("(", 1)[0].strip()
     return short or text
 
 
 def config_status(config: dict) -> tuple[bool, str]:
     if not config.get("base_url"):
-        return False, "Укажите Base URL"
+        return False, tr("Set the Base URL", "Укажите Base URL")
     if not config.get("model"):
-        return False, "Укажите модель"
+        return False, tr("Set the model", "Укажите модель")
     if config.get("requires_key") and not config.get("api_key"):
-        return False, "Нужен API-ключ"
-    return True, "Готово"
+        return False, tr("An API key is required", "Нужен API-ключ")
+    return True, tr("Ready", "Готово")

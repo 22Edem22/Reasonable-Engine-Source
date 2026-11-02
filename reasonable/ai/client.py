@@ -18,6 +18,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from reasonable.core.i18n import tr as _tr
+
 
 class AIError(RuntimeError):
     def __init__(self, message: str, *, status: int | None = None, detail: str = "") -> None:
@@ -83,7 +85,7 @@ def parse_tool_arguments(raw: str) -> dict[str, Any]:
 def _join_url(base: str, suffix: str) -> str:
     base = (base or "").strip().rstrip("/")
     if not base:
-        raise AIError("Не задан Base URL.")
+        raise AIError(_tr("The Base URL is not set.", "Не задан Base URL."))
     if base.endswith(suffix):
         return base
     return base + suffix
@@ -126,7 +128,7 @@ class HTTPTransport:
                         return {"data": parsed}
                     except ValueError:
                         raise AIError(
-                            "Сервер вернул не JSON. Возможно, endpoint указан неверно.",
+                            _tr("The server returned non-JSON. The endpoint may be wrong.", "Сервер вернул не JSON. Возможно, endpoint указан неверно."),
                             detail=raw[:800],
                         )
             except urllib.error.HTTPError as error:
@@ -143,14 +145,16 @@ class HTTPTransport:
             except urllib.error.URLError as error:
                 reason = error.reason
                 if isinstance(reason, (TimeoutError, socket.timeout)):
-                    message = "Таймаут соединения с ИИ-сервером. Попробуйте ещё раз или другую модель."
+                    message = _tr("Connection to the AI server timed out. Try again or pick another model.", "Таймаут соединения с ИИ-сервером. Попробуйте ещё раз или другую модель.")
                 elif isinstance(reason, ConnectionRefusedError) or "refused" in str(reason).lower():
-                    message = (
+                    message = _tr(
+                        "Could not connect to the local AI server. "
+                        "Check that Ollama/LM Studio is running and the port matches.",
                         "Не удалось подключиться к локальному ИИ-серверу. "
-                        "Проверьте, что Ollama/LM Studio запущен и порт совпадает."
+                        "Проверьте, что Ollama/LM Studio запущен и порт совпадает.",
                     )
                 else:
-                    message = f"Сетевая ошибка: {reason}"
+                    message = _tr("Network error: {reason}", "Сетевая ошибка: {reason}", reason=reason)
                 last_error = AIError(message, detail=str(reason))
                 if attempt < self.retries:
                     time.sleep(1.5)
@@ -158,19 +162,22 @@ class HTTPTransport:
                 raise last_error
             except (TimeoutError, socket.timeout):
                 last_error = AIError(
-                    "ИИ-сервер не ответил вовремя. Бесплатные модели иногда перегружены — попробуйте позже."
+                    _tr(
+                        "The AI server did not respond in time. Free models are sometimes overloaded — try again later.",
+                        "ИИ-сервер не ответил вовремя. Бесплатные модели иногда перегружены — попробуйте позже.",
+                    )
                 )
                 if attempt < self.retries:
                     time.sleep(1.5)
                     continue
                 raise last_error
             except OSError as error:
-                last_error = AIError(f"Ошибка сети: {error}", detail=str(error))
+                last_error = AIError(_tr("Network error: {error}", "Ошибка сети: {error}", error=error), detail=str(error))
                 if attempt < self.retries:
                     time.sleep(1.5)
                     continue
                 raise last_error
-        raise last_error or AIError("Неизвестная ошибка сети")
+        raise last_error or AIError(_tr("Unknown network error", "Неизвестная ошибка сети"))
 
     @staticmethod
     def _friendly_http_error(code: int, body: str) -> str:
@@ -186,20 +193,20 @@ class HTTPTransport:
         except Exception:
             detail = body[:300]
         hints = {
-            400: "Сервер отклонил запрос (400). Проверьте модель и поддержку инструментов.",
-            401: "Ключ API не принят (401). Проверьте ключ в настройках.",
-            402: "На счету провайдера закончились средства (402) или лимит бесплатных кредитов.",
-            403: "Доступ запрещён (403). Возможно, ключ не имеет доступа к этой модели или региону.",
-            404: "Endpoint или модель не найдены (404). Проверьте Base URL и название модели.",
-            413: "Слишком большой запрос (413). Уменьшите контекст.",
-            422: "Провайдер не понял запрос (422). Попробуйте другую модель.",
-            429: "Лимит запросов исчерпан (429). Подождите или выберите другой провайдер/модель.",
-            500: "Ошибка на стороне ИИ-провайдера (500).",
-            502: "Плохой ответ шлюза ИИ (502).",
-            503: "ИИ-сервис временно недоступен (503).",
-            504: "Шлюз ИИ не ответил вовремя (504).",
+            400: _tr("The server rejected the request (400). Check the model and tool support.", "Сервер отклонил запрос (400). Проверьте модель и поддержку инструментов."),
+            401: _tr("The API key was rejected (401). Check the key in the settings.", "Ключ API не принят (401). Проверьте ключ в настройках."),
+            402: _tr("The provider account is out of funds (402) or the free credit limit is used up.", "На счету провайдера закончились средства (402) или лимит бесплатных кредитов."),
+            403: _tr("Access denied (403). The key may not have access to this model or region.", "Доступ запрещён (403). Возможно, ключ не имеет доступа к этой модели или региону."),
+            404: _tr("Endpoint or model not found (404). Check the Base URL and the model name.", "Endpoint или модель не найдены (404). Проверьте Base URL и название модели."),
+            413: _tr("The request is too large (413). Reduce the context.", "Слишком большой запрос (413). Уменьшите контекст."),
+            422: _tr("The provider did not understand the request (422). Try another model.", "Провайдер не понял запрос (422). Попробуйте другую модель."),
+            429: _tr("Request limit exhausted (429). Wait or pick another provider/model.", "Лимит запросов исчерпан (429). Подождите или выберите другой провайдер/модель."),
+            500: _tr("Error on the AI provider side (500).", "Ошибка на стороне ИИ-провайдера (500)."),
+            502: _tr("Bad AI gateway response (502).", "Плохой ответ шлюза ИИ (502)."),
+            503: _tr("The AI service is temporarily unavailable (503).", "ИИ-сервис временно недоступен (503)."),
+            504: _tr("The AI gateway did not respond in time (504).", "Шлюз ИИ не ответил вовремя (504)."),
         }
-        base = hints.get(code, f"HTTP {code} от ИИ-сервера.")
+        base = hints.get(code, _tr("HTTP {code} from the AI server.", "HTTP {code} от ИИ-сервера.", code=code))
         return f"{base} {detail}".strip()
 
 
@@ -254,9 +261,9 @@ class AIClient:
         max_tokens: int = 8192,
     ) -> ChatResult:
         if not self.base_url:
-            raise AIError("Не задан Base URL провайдера.")
+            raise AIError(_tr("The provider Base URL is not set.", "Не задан Base URL провайдера."))
         if not self.model:
-            raise AIError("Не выбрана модель ИИ.")
+            raise AIError(_tr("No AI model is selected.", "Не выбрана модель ИИ."))
         if self.kind == "anthropic":
             return self._chat_anthropic(messages, tools, temperature, max_tokens)
         return self._chat_openai(messages, tools, temperature, max_tokens)
@@ -309,7 +316,7 @@ class AIClient:
                 raise
         choices = data.get("choices") or []
         if not choices:
-            message = "Провайдер вернул пустой ответ."
+            message = _tr("The provider returned an empty response.", "Провайдер вернул пустой ответ.")
             if data.get("error"):
                 message += f" {data['error']}"
             raise AIError(message, detail=json.dumps(data, ensure_ascii=False)[:1500])
@@ -462,20 +469,21 @@ class AIClient:
             models = self.list_models()
             if models:
                 sample = ", ".join(models[:3])
-                return f"Соединение работает. Доступно моделей: {len(models)} ({sample}…)"
+                return _tr("Connection works. Available models: {count} ({sample}…)", "Соединение работает. Доступно моделей: {count} ({sample}…)", count=len(models), sample=sample)
         except AIError:
             # Listing models is optional on some OpenAI-compatible servers.
             pass
         result = self.chat(
             [
-                {"role": "system", "content": "Отвечай предельно кратко."},
-                {"role": "user", "content": "Ответь одним словом: работает"},
+                # Probe messages sent to the model: English-only AI material.
+                {"role": "system", "content": "Reply extremely briefly."},
+                {"role": "user", "content": "Answer in one word: works"},
             ],
             temperature=0,
             max_tokens=20,
         )
-        text = result.content or "пустой ответ"
-        return f"Соединение работает. Ответ модели: {text[:80]}"
+        text = result.content or _tr("empty reply", "пустой ответ")
+        return _tr("Connection works. Model reply: {reply}", "Соединение работает. Ответ модели: {reply}", reply=text[:80])
 
 
 def fetch_models(config: dict[str, Any]) -> list[str]:

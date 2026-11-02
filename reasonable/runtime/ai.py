@@ -39,12 +39,22 @@ from .ui import (
 )
 
 
+try:
+    from reasonable.core.i18n import tr as _tr
+except Exception:  # exported builds may run without the bundled core package
+    def _tr(en: str, ru: str, **values) -> str:
+        template = en
+        return template.format(**values) if values else template
+
+
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+# AI-facing material ships English-only; the "user's language" rule below is
+# what makes the assistant answer in the language the end user actually types.
 DEFAULT_SYSTEM_PROMPT = (
-    "Ты — встроенный ИИ-ассистент приложения, созданного в Reasonable Engine. "
-    "Отвечай кратко, по делу и на языке пользователя. Если тебе не хватает данных, "
-    "задай один уточняющий вопрос."
+    "You are the built-in AI assistant of an app built with Reasonable Engine. "
+    "Reply briefly, to the point and in the language the user writes in. "
+    "If you lack data, ask one clarifying question."
 )
 
 
@@ -66,7 +76,7 @@ class AIConfig:
     api_key: str = ""
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     temperature: float = 0.6
-    title: str = "ИИ-ассистент"
+    title: str = ""
     _local_path: Path | None = None
 
     @classmethod
@@ -134,7 +144,7 @@ class AIClient:
     def _url(self) -> str:
         base = self.config.base_url.strip().rstrip("/")
         if not base:
-            raise RuntimeError("Не задан адрес ИИ-сервера.")
+            raise RuntimeError(_tr("The AI server address is not set.", "Не задан адрес ИИ-сервера."))
         if base.endswith("/chat/completions"):
             return base
         return base + "/chat/completions"
@@ -161,21 +171,21 @@ class AIClient:
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
             if error.code == 401:
-                raise RuntimeError("Ключ API не принят. Проверьте настройки ИИ.") from error
+                raise RuntimeError(_tr("The API key was rejected. Check the AI settings.", "Ключ API не принят. Проверьте настройки ИИ.")) from error
             if error.code == 429:
-                raise RuntimeError("Лимит бесплатных запросов исчерпан. Подождите или укажите свой ключ.") from error
-            raise RuntimeError(f"ИИ-сервер вернул ошибку {error.code}. {detail[:220]}") from error
+                raise RuntimeError(_tr("The free request limit is used up. Wait or add your own key.", "Лимит бесплатных запросов исчерпан. Подождите или укажите свой ключ.")) from error
+            raise RuntimeError(_tr("The AI server returned error {code}. {detail}", "ИИ-сервер вернул ошибку {code}. {detail}", code=error.code, detail=detail[:220])) from error
         except urllib.error.URLError as error:
             if isinstance(error.reason, (TimeoutError, socket.timeout)):
-                raise RuntimeError("ИИ-сервер не ответил вовремя.") from error
-            raise RuntimeError(f"Нет соединения с ИИ-сервером: {error.reason}") from error
+                raise RuntimeError(_tr("The AI server did not respond in time.", "ИИ-сервер не ответил вовремя.")) from error
+            raise RuntimeError(_tr("No connection to the AI server: {reason}", "Нет соединения с ИИ-сервером: {reason}", reason=error.reason)) from error
         except (TimeoutError, socket.timeout) as error:
-            raise RuntimeError("ИИ-сервер не ответил вовремя.") from error
+            raise RuntimeError(_tr("The AI server did not respond in time.", "ИИ-сервер не ответил вовремя.")) from error
         try:
             parsed = json.loads(body)
             content = parsed["choices"][0]["message"]["content"]
         except Exception as error:
-            raise RuntimeError("Не удалось разобрать ответ ИИ-сервера.") from error
+            raise RuntimeError(_tr("Could not parse the AI server response.", "Не удалось разобрать ответ ИИ-сервера.")) from error
         if isinstance(content, list):
             content = "".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
         return str(content or "").strip()
@@ -282,8 +292,8 @@ class AIChatPanel(Panel):
                 spacing=1,
                 align_x="left",
             )
-            .add(Label(self.config.title, size=16, bold=True))
-            .add(Label("Онлайн-помощник", size=11, color_value=self.theme.muted)),
+            .add(Label(self.config.title or _tr("AI assistant", "ИИ-ассистент"), size=16, bold=True))
+            .add(Label(_tr("Online helper", "Онлайн-помощник"), size=11, color_value=self.theme.muted)),
         )
         spacer = Widget(expand_x=True)
         header.add(spacer)
@@ -297,7 +307,7 @@ class AIChatPanel(Panel):
         self.scroll = ScrollView(self.messages_stack, expand_y=True, stick_to_bottom=True)
         self.add(self.scroll)
 
-        self.entry = Entry("Спросите ИИ…", on_submit=lambda _value=None: self.send())
+        self.entry = Entry(_tr("Ask the AI…", "Спросите ИИ…"), on_submit=lambda _value=None: self.send())
         self.entry.expand_x = True
         self.send_button = IconButton("send", self.send, size=44, variant="primary")
         self.input_row = HStack(spacing=8, align_y="center").add(self.entry, self.send_button)
@@ -315,26 +325,33 @@ class AIChatPanel(Panel):
     def _build_setup(self) -> Panel:
         panel = Panel(padding=16, spacing=10)
         panel.add(
-            Label("Подключение ИИ", size=16, bold=True),
+            Label(_tr("AI connection", "Подключение ИИ"), size=16, bold=True),
             Label(
-                "Укажите OpenAI-совместимый сервис (OpenRouter, Groq, Gemini, OpenAI) "
-                "или локальную модель Ollama/LM Studio.",
+                _tr(
+                    "Point to an OpenAI-compatible service (OpenRouter, Groq, Gemini, OpenAI) "
+                    "or a local Ollama/LM Studio model.",
+                    "Укажите OpenAI-совместимый сервис (OpenRouter, Groq, Gemini, OpenAI) "
+                    "или локальную модель Ollama/LM Studio.",
+                ),
                 size=12,
                 color_value=self.theme.muted,
             ),
         )
         self.setup_url = Entry("Base URL", value=self.config.base_url)
-        self.setup_model = Entry("Модель", value=self.config.model)
-        self.setup_key = Entry("API-ключ (необязательно)", value=self.config.api_key, password=True)
+        self.setup_model = Entry(_tr("Model", "Модель"), value=self.config.model)
+        self.setup_key = Entry(_tr("API key (optional)", "API-ключ (необязательно)"), value=self.config.api_key, password=True)
         panel.add(self.setup_url, self.setup_model, self.setup_key)
         buttons = HStack(spacing=8, align_y="center")
         buttons.add(SpacerWidget(expand_x=True))
-        buttons.add(Button("Отмена", self._close_setup, variant="ghost", height=38))
-        buttons.add(Button("Сохранить", self._save_setup, variant="primary", height=38))
+        buttons.add(Button(_tr("Cancel", "Отмена"), self._close_setup, variant="ghost", height=38))
+        buttons.add(Button(_tr("Save", "Сохранить"), self._save_setup, variant="primary", height=38))
         panel.add(buttons)
         panel.add(
             Label(
-                "Ключ сохраняется только на этом компьютере. Бесплатные лимиты зависят от сервиса.",
+                _tr(
+                    "The key is stored only on this computer. Free limits depend on the service.",
+                    "Ключ сохраняется только на этом компьютере. Бесплатные лимиты зависят от сервиса.",
+                ),
                 size=10,
                 color_value=self.theme.faint,
             )
@@ -343,7 +360,7 @@ class AIChatPanel(Panel):
 
     def _refresh_status(self) -> None:
         if self._busy:
-            self.status_label.text = "думает…"
+            self.status_label.text = _tr("thinking…", "думает…")
             self.status_label.color_value = color(self.theme.accent_2)
         else:
             self.status_label.text = self.config.model
@@ -376,7 +393,7 @@ class AIChatPanel(Panel):
         config.save_local()
         self._close_setup()
         self._refresh_status()
-        self.add_message("system", "Настройки ИИ сохранены.")
+        self.add_message("system", _tr("AI settings saved.", "Настройки ИИ сохранены."))
         if self._on_config_saved:
             try:
                 self._on_config_saved(config)

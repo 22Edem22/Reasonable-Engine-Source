@@ -21,6 +21,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from .core.i18n import current_language, tr as _tr
 from .core.paths import atomic_write_text, now_iso, read_json, slugify
 from .core.project import Project
 
@@ -121,10 +122,11 @@ def _copy_project(
     destination: Path,
     *,
     progress: ProgressCB | None = None,
-    stage: str = "Копирую файлы проекта",
+    stage: str = "",
     span: tuple[float, float] = (4, 34),
 ) -> None:
     """Copy the project with incremental progress (never silently hangs)."""
+    stage = stage or _tr("Copying project files", "Копирую файлы проекта")
     source = project.root
     files: list[tuple[Path, Path]] = []
     for path in source.rglob("*"):
@@ -182,17 +184,70 @@ set "PYTHONPATH=%~dp0_engine;%~dp0;%PYTHONPATH%"
 python main.py
 if errorlevel 1 (
   echo.
-  echo Не удалось запустить проект. Установите Python 3.10+ с python.org
-  echo и повторите запуск. Подробности в README_WINDOWS.txt
+  echo {error1}
+  echo {error2}
   pause
 )
-""".format(title=project.name),
+""".format(
+            title=project.name,
+            error1=_tr("Could not run the project. Install Python 3.10+ from python.org", "Не удалось запустить проект. Установите Python 3.10+ с python.org"),
+            error2=_tr("and try again. Details in README_WINDOWS.txt", "и повторите запуск. Подробности в README_WINDOWS.txt"),
+        ),
     )
     return launcher
 
 
 def _windows_readme(project: Project, destination: Path, icon: Path | None) -> None:
-    text = f"""# {project.name} — Windows
+    if current_language() == "en":
+        text = f"""# {project.name} — Windows
+
+Ready-made export from **Reasonable Engine**. All code, assets and the bundled
+copy of the engine are already inside. The Reasonable Engine splash plays
+before every launch.
+
+## Run
+
+1. Install **Python 3.10+** from <https://www.python.org/downloads/windows/>
+   (tick "Add Python to PATH" during setup).
+2. Double-click **Play.bat**.
+   Or in a terminal:
+
+   ```bat
+   cd /d "{destination}"
+   set PYTHONPATH=%CD%\\_engine;%CD%
+   python main.py
+   ```
+
+If the window closes immediately — run `Play.bat` and read the message.
+
+## Contents
+
+```
+Play.bat            launcher
+main.py             project code
+assets/             sprites, backgrounds, icon
+_engine/            bundled Reasonable Engine
+progress/           development history
+AGENT_GUIDE.md      documentation for the AI agent
+```
+
+## Android
+
+In the editor: **File → Export → Android package**. The APK is built on
+Linux/WSL because buildozer does not support Windows directly.
+
+## For developers
+
+```bat
+re.bat status
+re.bat validate
+re.bat run --headless
+```
+
+Exported: {now_iso()}.
+"""
+    else:
+        text = f"""# {project.name} — Windows
 
 Готовый экспорт из **Reasonable Engine**. Внутри уже лежит весь код, ассеты и
 встроенная копия движка. Перед запуском игры всегда проигрывается заставка
@@ -240,7 +295,7 @@ re.bat run --headless
 Экспортировано: {now_iso()}.
 """
     if icon is not None:
-        text += "\nИконка приложения: `app.ico`.\n"
+        text += _tr("\nApp icon: `app.ico`.\n", "\nИконка приложения: `app.ico`.\n")
     atomic_write_text(destination / "README_WINDOWS.txt", text)
 
 
@@ -264,11 +319,11 @@ def export_windows(
             progress=progress,
         )
 
-    _report(progress, "Подготовка", 0, 0)
+    _report(progress, _tr("Preparing", "Подготовка"), 0, 0)
     destination.mkdir(parents=True, exist_ok=True)
-    _report(progress, "Подготовка", 100, 4)
+    _report(progress, _tr("Preparing", "Подготовка"), 100, 4)
     _copy_project(project, destination, progress=progress, span=(4, 40))
-    _report(progress, "Иконка и лаунчер", 10, 62)
+    _report(progress, _tr("Icon and launcher", "Иконка и лаунчер"), 10, 62)
     atomic_write_text(destination / EXPORT_MARKER, f"Reasonable Engine export {now_iso()}\n")
     icon = _make_ico(project, destination)
     launcher = _windows_launcher(project, destination)
@@ -283,7 +338,7 @@ def export_windows(
 """
         % now_iso(),
     )
-    _report(progress, "Финализация", 100, 100)
+    _report(progress, _tr("Finalizing", "Финализация"), 100, 100)
     return {
         "ok": True,
         "target": "windows",
@@ -291,7 +346,7 @@ def export_windows(
         "path": str(destination),
         "launcher": str(launcher),
         "icon": str(icon) if icon else "",
-        "message": "Папка Windows готова. Запускайте Play.bat.",
+        "message": _tr("Windows folder is ready. Run Play.bat.", "Папка Windows готова. Запускайте Play.bat."),
     }
 
 
@@ -315,25 +370,29 @@ def _export_windows_pyinstaller(
     python = _find_pyinstaller()
     if python is None:
         raise RuntimeError(
-            "PyInstaller не установлен. Установите его командой "
-            "`python -m pip install pyinstaller` или выберите режим «Папка Windows»."
+            _tr(
+                "PyInstaller is not installed. Install it with "
+                "`python -m pip install pyinstaller` or choose the “Windows folder” mode.",
+                "PyInstaller не установлен. Установите его командой "
+                "`python -m pip install pyinstaller` или выберите режим «Папка Windows».",
+            )
         )
     work = destination.parent / (destination.name + "-build")
     if work.exists():
         shutil.rmtree(work)
     work.mkdir(parents=True, exist_ok=True)
     source = work / "source"
-    _report(progress, "Подготовка", 0, 0)
+    _report(progress, _tr("Preparing", "Подготовка"), 0, 0)
     _copy_project(project, source, progress=progress, span=(4, 34))
     from .core.scaffold import vendor_engine
 
     # The exported executable embeds the runtime into PyInstaller's archive, so
     # it needs importable source at build time and exposes no .py files anyway.
-    _report(progress, "Встраиваю движок", 60, 40)
+    _report(progress, _tr("Embedding the engine", "Встраиваю движок"), 60, 40)
     vendor_engine(source, protected=False)
-    _report(progress, "Встраиваю движок", 100, 48)
+    _report(progress, _tr("Embedding the engine", "Встраиваю движок"), 100, 48)
     icon = _make_ico(project, work)
-    _report(progress, "Иконка и конфигурация", 100, 58)
+    _report(progress, _tr("Icon and configuration", "Иконка и конфигурация"), 100, 58)
 
     binary_name = exe_file_name(exe_name, project)
     command = [
@@ -393,18 +452,18 @@ def _export_windows_pyinstaller(
         if len(log_lines) % 12 == 0:
             # Forward motion while PyInstaller works; exact percent is unknowable.
             local = min(100.0, len(log_lines) * 0.35)
-            _report(progress, "Сборка exe (PyInstaller)", local, 58 + local * 0.36)
+            _report(progress, _tr("Building the exe (PyInstaller)", "Сборка exe (PyInstaller)"), local, 58 + local * 0.36)
     code = process.wait()
     if code != 0:
         log = "".join(log_lines)
         atomic_write_text(work / "pyinstaller.log", log)
-        raise RuntimeError(f"PyInstaller завершился с ошибкой. Лог: {work / 'pyinstaller.log'}")
+        raise RuntimeError(_tr("PyInstaller failed. Log: {log}", "PyInstaller завершился с ошибкой. Лог: {log}", log=work / "pyinstaller.log"))
     exe = destination / (binary_name + ".exe")
     if not exe.exists():
         found = sorted(destination.glob("*.exe"))
         if not found:
             atomic_write_text(work / "pyinstaller.log", "".join(log_lines))
-            raise RuntimeError("PyInstaller не создал .exe. Лог: " + str(work / "pyinstaller.log"))
+            raise RuntimeError(_tr("PyInstaller produced no .exe. Log: {log}", "PyInstaller не создал .exe. Лог: {log}", log=work / "pyinstaller.log"))
         exe = found[0]
     # Frozen templates read the manifest next to the executable.
     try:
@@ -412,14 +471,14 @@ def _export_windows_pyinstaller(
     except OSError:
         pass
     atomic_write_text(destination / EXPORT_MARKER, f"Reasonable Engine PyInstaller export {now_iso()}\n")
-    _report(progress, "Финализация", 100, 100)
+    _report(progress, _tr("Finalizing", "Финализация"), 100, 100)
     return {
         "ok": True,
         "target": "windows",
         "mode": "pyinstaller",
         "path": str(destination),
         "exe": str(exe) if exe.exists() else "",
-        "message": f"Windows .exe собран: {exe.name}.",
+        "message": _tr("Windows .exe built: {name}.", "Windows .exe собран: {name}.", name=exe.name),
     }
 
 
@@ -440,6 +499,11 @@ def _android_spec(project: Project) -> str:
     else:
         domain, pkg = "org.reasonable", package_name
     version = str(android.get("version") or "1.0.0")
+    p4a_hint = _tr(
+        "pygame-ce is often faster; if your p4a version supports the recipe:",
+        "pygame-ce часто быстрее; если ваша версия p4a поддерживает рецепт:",
+    )
+    signing_hint = _tr("Release signing (fill in before publishing):", "Подпись release (заполните перед публикацией):")
     return f"""[app]
 
 # Reasonable Engine / pygame-ce Android package
@@ -454,7 +518,7 @@ source.exclude_patterns = *.pyc,*.spec,data.json,ai_config.json
 
 version = {version}
 requirements = python3,pygame
-# pygame-ce часто быстрее; если ваша версия p4a поддерживает рецепт:
+# {p4a_hint}
 # requirements = python3,pygame-ce
 
 orientation = {orientation}
@@ -472,7 +536,7 @@ icon.filename = %(source.dir)s/assets/icon.png
 presplash.filename = %(source.dir)s/assets/presplash.png
 presplash.color = #080C14
 
-# Подпись release (заполните перед публикацией):
+# {signing_hint}
 # android.release_artifact = aab
 # android.signing = True
 # android.keystore = release.keystore
@@ -487,8 +551,90 @@ warn_on_root = 1
 
 
 def _android_readme(project: Project, destination: Path, zip_path: Path | None = None) -> None:
-    zip_line = f"\nГотовый архив: `{zip_path.name}`\n" if zip_path else ""
-    text = f"""# {project.name} — Android-пакет
+    if current_language() == "en":
+        zip_line = f"\nReady-made archive: `{zip_path.name}`\n" if zip_path else ""
+        text = f"""# {project.name} — Android package
+
+This package was created by **Reasonable Engine** and is ready to build with
+[python-for-android](https://github.com/kivy/python-for-android) / buildozer.
+{zip_line}
+## Important
+
+Buildozer runs on **Linux** (or **WSL2** on Windows) because it needs the
+Android SDK/NDK and build tools. On Windows install WSL:
+
+```powershell
+wsl --install
+```
+
+## Build (Ubuntu 22.04+ / WSL)
+
+```bash
+sudo apt update
+sudo apt install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool \\
+  pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo6 cmake \\
+  libffi-dev libssl-dev
+pip install --user buildozer cython
+export PATH="$HOME/.local/bin:$PATH"
+
+cd {destination.name}
+buildozer -v android debug
+```
+
+The APK will appear in `bin/`. Install on a device:
+
+```bash
+adb install -r bin/*.apk
+```
+
+The first build downloads the Android SDK/NDK and takes 15–40 minutes.
+
+## GitHub Actions
+
+The package includes `.github/workflows/android.yml`. Push the project to a
+GitHub repository — the APK builds automatically on the **Actions** tab
+(`apk` artifact).
+
+## What is inside
+
+```
+main.py                 launcher
+buildozer.spec          build configuration
+assets/                 icon, presplash, sprites
+_engine/reasonable/     engine (pygame-only)
+progress/               development history
+README_ANDROID.md       this guide
+```
+
+## Controls
+
+The game/app uses touches and an on-screen joystick if one is added in code.
+The Reasonable Engine splash plays before the launch automatically.
+Screen orientation: **{project.manifest.get('orientation', 'landscape')}**.
+
+## Release signing
+
+1. Create a keystore:
+   ```bash
+   keytool -genkey -v -keystore release.keystore -alias reasonable \\
+     -keyalg RSA -keysize 2048 -validity 10000
+   ```
+2. Uncomment the signing block in `buildozer.spec` and set the passwords.
+3. `buildozer android release`.
+
+## Debugging
+
+- Logs: `adb logcat | grep -i python`
+- Quick headless run on a PC:
+  `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy RE_FRAMES=5 python main.py`
+- If p4a cannot find pygame, replace `requirements = python3,pygame` in
+  `buildozer.spec` with the line your p4a version supports.
+
+Exported: {now_iso()}.
+"""
+    else:
+        zip_line = f"\nГотовый архив: `{zip_path.name}`\n" if zip_path else ""
+        text = f"""# {project.name} — Android-пакет
 
 Этот пакет создан **Reasonable Engine** и готов к сборке через
 [python-for-android](https://github.com/kivy/python-for-android) / buildozer.
@@ -623,17 +769,17 @@ def export_android(
             archive_override = out_path.resolve()
             output = archive_override.with_suffix("")
     destination = _pick_output(project, output, name)
-    _report(progress, "Подготовка", 0, 0)
+    _report(progress, _tr("Preparing", "Подготовка"), 0, 0)
     destination.mkdir(parents=True, exist_ok=True)
-    _report(progress, "Подготовка", 100, 5)
-    _copy_project(project, destination, progress=progress, stage="Копирую файлы проекта", span=(5, 35))
+    _report(progress, _tr("Preparing", "Подготовка"), 100, 5)
+    _copy_project(project, destination, progress=progress, span=(5, 35))
     from .core.scaffold import vendor_engine
 
     # python-for-android rebuilds the runtime for the device, so an Android
     # package always gets importable source rather than host-specific .pyc.
-    _report(progress, "Встраиваю движок", 60, 42)
+    _report(progress, _tr("Embedding the engine", "Встраиваю движок"), 60, 42)
     vendor_engine(destination, protected=False)
-    _report(progress, "Встраиваю движок", 100, 50)
+    _report(progress, _tr("Embedding the engine", "Встраиваю движок"), 100, 50)
     # The entry point must be main.py for buildozer.
     if project.entry.name != "main.py":
         shutil.copy2(project.entry, destination / "main.py")
@@ -651,7 +797,7 @@ def export_android(
         if brand.exists():
             shutil.copy2(brand, presplash)
     atomic_write_text(destination / "buildozer.spec", _android_spec(project))
-    _report(progress, "Конфиги и инструкции", 100, 62)
+    _report(progress, _tr("Configs and instructions", "Конфиги и инструкции"), 100, 62)
     workflow_dir = destination / ".github" / "workflows"
     workflow_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_text(workflow_dir / "android.yml", _android_workflow())
@@ -660,7 +806,7 @@ def export_android(
         "ok": True,
         "target": "android",
         "path": str(destination),
-        "message": "Android-проект готов. Собирайте buildozer на Linux/WSL.",
+        "message": _tr("Android project is ready. Build with buildozer on Linux/WSL.", "Android-проект готов. Собирайте buildozer на Linux/WSL."),
     }
     if zip_result:
         archive_path = archive_override or Path(str(destination) + ".zip")
@@ -674,8 +820,12 @@ def export_android(
                 archive.write(path, Path(destination.name) / path.relative_to(destination))
                 if index % 20 == 0 or index == total:
                     fraction = index / total
-                    _report(progress, f"Упаковка ZIP · {index}/{total}", fraction * 100, 62 + fraction * 35)
+                    _report(progress, _tr("Packing ZIP · {index}/{total}", "Упаковка ZIP · {index}/{total}", index=index, total=total), fraction * 100, 62 + fraction * 35)
         result["zip"] = str(archive_path)
-        result["message"] = f"Android-пакет готов: {archive_path.name}. Собирайте buildozer на Linux/WSL."
-    _report(progress, "Финализация", 100, 100)
+        result["message"] = _tr(
+            "Android package is ready: {name}. Build with buildozer on Linux/WSL.",
+            "Android-пакет готов: {name}. Собирайте buildozer на Linux/WSL.",
+            name=archive_path.name,
+        )
+    _report(progress, _tr("Finalizing", "Финализация"), 100, 100)
     return result

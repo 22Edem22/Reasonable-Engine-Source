@@ -115,7 +115,7 @@ class GenerateImageDialog(QDialog):
         size_row.addLayout(self._field(t("assets.size_label"), self.size_combo))
         self.provider_combo = QComboBox()
         for provider in IMAGE_PROVIDERS:
-            self.provider_combo.addItem(provider.name, provider.id)
+            self.provider_combo.addItem(provider.display_name, provider.id)
         size_row.addLayout(self._field(t("assets.provider_label"), self.provider_combo))
         card.layout().addLayout(size_row)
 

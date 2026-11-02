@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from reasonable.core import i18n
 from reasonable.core.history import create_snapshot, update_snapshot
+from reasonable.core.i18n import tr as _tr
 from reasonable.core.progress import record_event, set_progress, set_status
 from reasonable.core.settings import Settings
 
@@ -118,7 +119,7 @@ class Agent:
 
     def _check_cancel(self) -> None:
         if self.cancel.is_set():
-            raise AgentCancelled("Работа агента остановлена пользователем.")
+            raise AgentCancelled(_tr("The agent was stopped by the user.", "Работа агента остановлена пользователем."))
 
     def _trim_history(self) -> None:
         try:
@@ -136,13 +137,14 @@ class Agent:
         self.messages = [system] + recent
 
     def _continuation_nudge(self, readiness: dict[str, Any]) -> str:
+        # Sent to the model: AI-facing material stays English-only.
         missing = "; ".join(readiness.get("missing") or [])
         return (
-            "Работа ещё не завершена. Не заканчивай и не пиши итоговый отчёт. "
-            f"Не выполнено: {missing}. "
-            "Продолжай менять файлы проекта, затем вызови validate_project, исправь "
-            "все ошибки и вызови run_project. Только после успешного запуска вызывай finish. "
-            "Установка библиотеки через pip или чтение файлов не является результатом."
+            "The work is not finished yet. Do not stop and do not write a final report. "
+            f"Not done: {missing}. "
+            "Keep editing the project files, then call validate_project, fix "
+            "all errors and call run_project. Only after a successful launch call finish. "
+            "Installing a library with pip or reading files is not a result."
         )
 
     # ------------------------------------------------------------------
@@ -184,12 +186,13 @@ class Agent:
         if not seed:
             return
         # Keep the real system prompt first; the fresh user message stays last.
+        # Sent to the model: AI-facing material stays English-only.
         history_note = {
             "role": "user",
             "content": (
-                "История предыдущих сессий этого проекта (для контекста, не отвечай на неё):\n"
+                "Previous sessions of this project (context only, do not reply to it):\n"
                 + "\n".join(
-                    f"{'Пользователь' if m['role'] == 'user' else 'Агент'}: {m['content'][:600]}"
+                    f"{'User' if m['role'] == 'user' else 'Agent'}: {m['content'][:600]}"
                     for m in seed
                 )
             ),
@@ -216,7 +219,7 @@ class Agent:
     def _snapshot_label(self, user_message: str | None) -> str:
         text = " ".join(str(user_message or self.project.goal or "").split())
         if not text:
-            return "Перед запуском ИИ-агента"
+            return _tr("Before the AI agent run", "Перед запуском ИИ-агента")
         return text[:110]
 
     def _create_snapshot(self, user_message: str | None) -> None:
@@ -229,14 +232,14 @@ class Agent:
             )
             self.emit(
                 "snapshot",
-                "Создан снимок проекта",
+                _tr("Project snapshot created", "Создан снимок проекта"),
                 snapshot=self.snapshot,
             )
         except Exception as exc:
             self.snapshot = None
             self.emit(
                 "snapshot_error",
-                f"Не удалось создать снимок проекта: {exc}",
+                _tr("Could not create the project snapshot: {error}", "Не удалось создать снимок проекта: {error}", error=exc),
             )
 
     def _sync_history(self) -> None:
@@ -267,23 +270,29 @@ class Agent:
             except Exception:
                 pass
         if self.changes:
-            labels = {"create": "создан", "edit": "изменён", "delete": "удалён", "generate": "сгенерирован"}
+            labels = {
+                "create": _tr("created", "создан"),
+                "edit": _tr("modified", "изменён"),
+                "delete": _tr("deleted", "удалён"),
+                "generate": _tr("generated", "сгенерирован"),
+            }
+            fallback_label = _tr("modified", "изменён")
             preview = ", ".join(
-                f"{item.get('path')} ({labels.get(str(item.get('action')), 'изменён')})"
+                f"{item.get('path')} ({labels.get(str(item.get('action')), fallback_label)})"
                 for item in self.changes[:6]
             )
             try:
                 record_event(
                     self.project.root,
                     "changes",
-                    f"Агент изменил файлов: {len(self.changes)} — {preview}",
+                    _tr("The agent changed {count} files — {preview}", "Агент изменил файлов: {count} — {preview}", count=len(self.changes), preview=preview),
                     {"files": self.changes, "outcome": outcome},
                 )
             except Exception:
                 pass
         self.emit(
             "changes",
-            f"Изменено файлов: {len(self.changes)}" if self.changes else "Файлы проекта не изменились",
+            _tr("Files changed: {count}", "Изменено файлов: {count}", count=len(self.changes)) if self.changes else _tr("No project files changed", "Файлы проекта не изменились"),
             files=self.changes,
             snapshot=self.snapshot,
             outcome=outcome,
@@ -324,17 +333,17 @@ class Agent:
         # Restore the conversation from previous sessions so the agent
         # remembers what the user already asked and what was answered.
         self._seed_chat_history()
-        set_status(self.project.root, "running", "Агент изучает проект…", event_type="agent")
-        record_event(self.project.root, "agent", "Встроенный агент начал работу.")
-        self.emit("status", "Агент изучает проект…")
+        set_status(self.project.root, "running", _tr("The agent is studying the project…", "Агент изучает проект…"), event_type="agent")
+        record_event(self.project.root, "agent", _tr("The built-in agent started working.", "Встроенный агент начал работу."))
+        self.emit("status", _tr("The agent is studying the project…", "Агент изучает проект…"))
 
         try:
             step = 0
             while True:
                 step += 1
                 self._check_cancel()
-                limit_label = f" из {max_steps}" if max_steps else ""
-                self.emit("step", f"Шаг {step}{limit_label}", step=step, max_steps=max_steps)
+                limit_label = _tr(" of {max}", " из {max}", max=max_steps) if max_steps else ""
+                self.emit("step", _tr("Step {step}", "Шаг {step}", step=step) + limit_label, step=step, max_steps=max_steps)
                 self._trim_history()
                 try:
                     result = self.client.chat(
@@ -347,7 +356,7 @@ class Agent:
                     # tools field but still answer, and the fallback JSON protocol
                     # in the system prompt can keep the agent productive.
                     if step == 1 and exc.status in {400, 404, 422}:
-                        self.emit("status", "Провайдер не принял инструменты — пробую текстовый режим…")
+                        self.emit("status", _tr("The provider rejected the tools — trying the text mode…", "Провайдер не принял инструменты — пробую текстовый режим…"))
                         result = self.client.chat(self.messages, None, temperature=temperature)
                     else:
                         raise
@@ -377,7 +386,7 @@ class Agent:
                 if not calls:
                     readiness = self.tools.readiness()
                     if readiness["ready"]:
-                        message = result.content.strip() or "Готово."
+                        message = result.content.strip() or _tr("Done.", "Готово.")
                         # Finalize the shared progress state even when the model
                         # ends with plain text instead of calling finish.
                         self.tools.tool_finish(message)
@@ -389,12 +398,14 @@ class Agent:
                     # Nudge it back to real edits instead of accepting the text.
                     if self._nudges < 3:
                         self._nudges += 1
-                        self.emit("status", "Работа не завершена — продолжаю и прошу агента доделать…")
+                        self.emit("status", _tr("The work is not finished — continuing and asking the agent to complete it…", "Работа не завершена — продолжаю и прошу агента доделать…"))
                         self.messages.append({"role": "user", "content": self._continuation_nudge(readiness)})
                         continue
-                    self.incomplete_reason = (
+                    self.incomplete_reason = _tr(
+                        "The agent stopped without changing the project or passing validation. "
+                        "Clarify the task or run it again.",
                         "Агент остановился, не изменив проект и не пройдя проверку. "
-                        "Уточните задачу или запустите его снова."
+                        "Уточните задачу или запустите его снова.",
                     )
                     break
 
@@ -406,7 +417,7 @@ class Agent:
                     set_status(
                         self.project.root,
                         "running",
-                        f"Инструмент: {call.name}",
+                        _tr("Tool: {name}", "Инструмент: {name}", name=call.name),
                         event_type="tool",
                     )
                     output = self.tools.call(call.name, call.arguments)
@@ -414,9 +425,11 @@ class Agent:
                     # over and over means the model is stuck.
                     self._track_tool_call(call.name, output)
                     if self._stuck_after_repeats():
-                        self.incomplete_reason = (
+                        self.incomplete_reason = _tr(
+                            "The agent repeated the same action without any result, so it was stopped. "
+                            "Describe the task differently or continue from this point.",
                             "Агент повторял одно и то же действие без результата, поэтому был остановлен. "
-                            "Опишите задачу по-другому или продолжите с этого места."
+                            "Опишите задачу по-другому или продолжите с этого места.",
                         )
                         set_status(
                             self.project.root,
@@ -457,7 +470,7 @@ class Agent:
                     )
                     if call.name == "finish" and parsed.get("ok"):
                         self.finished = True
-                        self.final_text = call.arguments.get("message", "Проект готов.")
+                        self.final_text = call.arguments.get("message") or _tr("Project finished.", "Проект готов.")
                         break
                 if self.finished:
                     break
@@ -468,14 +481,15 @@ class Agent:
                     and not self._install_nudged
                 ):
                     self._install_nudged = True
-                    self.emit("status", "Установка библиотеки — не результат. Прошу агента продолжить работу…")
+                    self.emit("status", _tr("Installing a library is not a result. Asking the agent to continue working…", "Установка библиотеки — не результат. Прошу агента продолжить работу…"))
                     self.messages.append(
                         {
                             "role": "user",
                             "content": (
-                                "Установка библиотеки или пакета не является выполненной задачей. "
-                                "Теперь напиши или измени файлы проекта, реализуй задачу, затем "
-                                "вызови validate_project и run_project. Finish до этого запрещён."
+                                # Sent to the model: AI-facing material is English-only.
+                                "Installing a library or a package is not a completed task. "
+                                "Now write or edit the project files, implement the task, then "
+                                "call validate_project and run_project. finish is forbidden before that."
                             ),
                         }
                     )
@@ -484,15 +498,17 @@ class Agent:
                 readiness = self.tools.readiness()
                 if not self.incomplete_reason:
                     if readiness["ready"]:
-                        self.incomplete_reason = (
+                        self.incomplete_reason = _tr(
+                            "The agent stopped, but the project already passes validation. "
+                            "You can run the agent again for polishing.",
                             "Агент остановился, но проект уже проходит проверку. "
-                            "Можно запустить агента ещё раз для полировки."
+                            "Можно запустить агента ещё раз для полировки.",
                         )
                     else:
-                        self.incomplete_reason = (
-                            "Агент остановился раньше времени. Не выполнено: "
-                            + "; ".join(readiness["missing"])
-                        )
+                        self.incomplete_reason = _tr(
+                            "The agent stopped early. Not done: ",
+                            "Агент остановился раньше времени. Не выполнено: ",
+                        ) + "; ".join(readiness["missing"])
                 set_status(
                     self.project.root,
                     "idle",
@@ -501,11 +517,11 @@ class Agent:
                 )
                 self.emit("incomplete", self.incomplete_reason)
             if self.finished:
-                self.emit("done", self.final_text or "Готово.")
+                self.emit("done", self.final_text or _tr("Done.", "Готово."))
             return self.final_text
         except AgentCancelled as exc:
             self.emit("cancelled", str(exc))
-            set_status(self.project.root, "idle", "Работа остановлена пользователем.", event_type="agent")
+            set_status(self.project.root, "idle", _tr("The work was stopped by the user.", "Работа остановлена пользователем."), event_type="agent")
             return ""
         except AIError as exc:
             self.last_error = exc.message
@@ -521,7 +537,7 @@ class Agent:
             self._persist_chat(user_message)
             self._sync_history()
             if self.cancel.is_set():
-                set_status(self.project.root, "idle", "Работа остановлена пользователем.", event_type="agent")
+                set_status(self.project.root, "idle", _tr("The work was stopped by the user.", "Работа остановлена пользователем."), event_type="agent")
 
 
 def run_agent_in_thread(

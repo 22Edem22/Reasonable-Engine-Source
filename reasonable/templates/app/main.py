@@ -34,6 +34,12 @@ def _project_file(relative: str) -> Path:
 
 import pygame
 
+try:
+    from reasonable.core.i18n import tr as _tr
+except Exception:  # exported builds may run without the bundled core package
+    def _tr(en: str, ru: str, **values) -> str:
+        return en
+
 from reasonable.runtime import (
     AIChatPanel,
     AIConfig,
@@ -261,16 +267,22 @@ class PlannerApp(UIApp):
     def build_assistant(self) -> Panel:
         wrapper = Panel(padding=0, spacing=0, background=(19, 21, 26), border=None, radius=0, shadow=False, width=370)
         config = AIConfig.load(APP_NAME, PROJECT_DIR)
+        # AI-facing material is English-only; the "user's language" rule makes
+        # the assistant answer in the language the end user types in.
         config.system_prompt = (
-            "Ты — ИИ-ассистент внутри приложения-планировщика, созданного в Reasonable Engine. "
-            "Помогай пользователю планировать день, формулировать задачи и разбивать большие цели на шаги. "
-            "Отвечай по-русски, кратко и практично. При необходимости предлагай список задач."
+            "You are the AI assistant inside a planner app built with Reasonable Engine. "
+            "Help the user plan the day, phrase tasks and break big goals into steps. "
+            "Reply in the language the user writes in, briefly and practically. "
+            "Offer a task list when useful."
         )
-        config.title = "Помощник"
+        config.title = _tr("Assistant", "Помощник")
         self.ai_panel = AIChatPanel(
             config,
             app_name=APP_NAME,
-            greeting="Привет! Помогу спланировать день и разбить большие задачи на маленькие шаги. С чего начнём?",
+            greeting=_tr(
+                "Hi! I will help you plan the day and break big tasks into small steps. Where do we start?",
+                "Привет! Помогу спланировать день и разбить большие задачи на маленькие шаги. С чего начнём?",
+            ),
             padding=18,
             spacing=12,
         )

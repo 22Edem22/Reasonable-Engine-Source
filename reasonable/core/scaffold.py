@@ -15,6 +15,7 @@ from typing import Any
 
 from reasonable.version import VERSION_LABEL
 
+from .i18n import current_language, tr
 from .paths import atomic_write_text, now_iso, slugify
 from .progress import ensure_state, record_event, set_plan, set_status
 
@@ -151,6 +152,105 @@ def _generate_assets(project) -> None:
 
 
 def _write_readme(project) -> None:
+    if current_language() == "en":
+        goal = project.goal or "The goal is not described yet — add it in the project settings."
+        notes = project.notes or "The first task for the agent is written after the project is created — in the “AI agent” section."
+        project_type = "game" if project.project_type == "game" else "app"
+        from .project import UI_LEVEL_LABELS
+
+        levels_text = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in project.ui_levels)
+        readme = f"""# {project.name}
+
+{goal}
+
+> A {project_type} built with **Reasonable Engine {VERSION_LABEL}**.
+> Development mode: **{'built-in AI agent' if project.mode == 'builtin' else 'external AI agent'}**.
+> Interface level: **{levels_text}**.
+
+## Quick start
+
+```bat
+run.bat
+```
+
+or
+
+```bash
+python main.py
+```
+
+The Reasonable Engine splash always plays before the project — it is part of
+the engine and cannot be disabled.
+
+## First task for the agent
+
+The project is created, but the first prompt is not written in advance. Open
+the project in the Reasonable Engine editor → the **“AI agent”** section and
+describe the first task in plain words. An external agent receives the same
+text via the copy button in the connection panel. This lets you see the project
+first and then decide where to start.
+
+## Window
+
+The AI agent picks the window size and mode for the project's task — no special
+settings are required. `F11` toggles fullscreen at any moment.
+
+## Notes and requirements
+
+{notes}
+
+## Structure
+
+```
+{project.name}/
+├─ main.py              entry point
+├─ project.json         project settings
+├─ assets/              sprites, backgrounds, icon, sounds
+├─ progress/            shared progress for the editor and agents
+├─ _engine/reasonable/  bundled copy of the engine
+├─ AGENT_GUIDE.md       instructions for the AI agent
+├─ skills/              agent skills
+├─ re.bat / re.sh       CLI for the external agent
+└─ README.md
+```
+
+## Development with AI
+
+- Built-in agent: open the project in Reasonable Engine → “AI agent”.
+- External agent: read `AGENT_GUIDE.md`, connect Claude Code, Codex, Cursor,
+  Cline, Windsurf or another agent to the project folder. Progress appears
+  in the editor automatically.
+
+Useful commands:
+
+```bat
+re.bat status
+re.bat plan "Build the menu" "Add levels" "Check the build"
+re.bat task t1 in_progress
+re.bat event "Menu screen is done"
+re.bat validate
+re.bat sprite "magic crystal" assets/sprites/crystal.png
+re.bat export android
+```
+
+## Controls
+
+- Mouse / touches — interface.
+- `F11` — fullscreen.
+- `Esc` — pause or exit the menu.
+
+## Export
+
+In the editor: **Export**. Available: a Windows folder, a self-contained `.exe`
+(PyInstaller) and an Android package (python-for-android/buildozer + guide).
+Android builds run on Linux/WSL because buildozer does not work on Windows
+directly.
+
+The Reasonable Engine editor itself can also be built into an `.exe` from the
+engine root: `build_exe.bat` or `python tools/build_editor_exe.py`.
+"""
+        atomic_write_text(project.root / "README.md", readme)
+        return
     goal = project.goal or "Цель пока не описана — добавьте её в настройках проекта."
     notes = project.notes or "Первая задача агенту пишется уже после создания проекта — в разделе «ИИ-агент»."
     project_type = "игра" if project.project_type == "game" else "приложение"
@@ -347,17 +447,17 @@ data.json
 ai_config.json
 """,
     )
+    ai_title = tr("AI assistant", "ИИ-ассистент")
     atomic_write_text(
         project.root / "ai_config.example.json",
-        """{
-  "base_url": "https://openrouter.ai/api/v1",
-  "model": "meta-llama/llama-3.3-70b-instruct:free",
-  "api_key": "",
-  "system_prompt": "Ты — ИИ-ассистент приложения, созданного в Reasonable Engine.",
-  "temperature": 0.6,
-  "title": "ИИ-ассистент"
-}
-""",
+        "{\n"
+        '  "base_url": "https://openrouter.ai/api/v1",\n'
+        '  "model": "meta-llama/llama-3.3-70b-instruct:free",\n'
+        '  "api_key": "",\n'
+        '  "system_prompt": "You are the AI assistant of an app built with Reasonable Engine. Reply in the language the user writes in.",\n'
+        '  "temperature": 0.6,\n'
+        f'  "title": "{ai_title}"\n'
+        "}\n",
     )
     try:
         window = project.manifest.get("window") or {}
@@ -373,11 +473,11 @@ ai_config.json
 
 def _initial_plan(project) -> None:
     plan = [
-        {"id": "t1", "title": "Изучить AGENT_GUIDE.md и структуру проекта", "status": "pending"},
-        {"id": "t2", "title": "Спроектировать экраны и основной игровой цикл", "status": "pending"},
-        {"id": "t3", "title": "Собрать рабочий вертикальный срез", "status": "pending"},
-        {"id": "t4", "title": "Добавить контент, ассеты и полировку", "status": "pending"},
-        {"id": "t5", "title": "Проверить запуск, сохранить прогресс и экспортировать", "status": "pending"},
+        {"id": "t1", "title": tr("Read AGENT_GUIDE.md and the project structure", "Изучить AGENT_GUIDE.md и структуру проекта"), "status": "pending"},
+        {"id": "t2", "title": tr("Design the screens and the main game loop", "Спроектировать экраны и основной игровой цикл"), "status": "pending"},
+        {"id": "t3", "title": tr("Build a working vertical slice", "Собрать рабочий вертикальный срез"), "status": "pending"},
+        {"id": "t4", "title": tr("Add content, assets and polish", "Добавить контент, ассеты и полировку"), "status": "pending"},
+        {"id": "t5", "title": tr("Check the launch, save progress and export", "Проверить запуск, сохранить прогресс и экспортировать"), "status": "pending"},
     ]
     set_plan(project.root, plan)
 
@@ -423,8 +523,8 @@ def scaffold_project(project) -> None:
 
     ensure_state(project.root, project.mode)
     _initial_plan(project)
-    set_status(project.root, "idle", "Проект создан. Опишите задачу агенту.")
-    record_event(project.root, "created", f"Проект «{project.name}» создан в Reasonable Engine.", {"mode": project.mode})
+    set_status(project.root, "idle", tr("The project is created. Describe the task for the agent.", "Проект создан. Опишите задачу агенту."))
+    record_event(project.root, "created", tr("Project “{name}” created in Reasonable Engine.", "Проект «{name}» создан в Reasonable Engine.", name=project.name), {"mode": project.mode})
 
     try:
         from reasonable.ai.external import generate_agent_pack
@@ -434,7 +534,7 @@ def scaffold_project(project) -> None:
         try:
             atomic_write_text(
                 project.root / "AGENT_GUIDE.md",
-                f"# AGENT_GUIDE\n\nНе удалось сгенерировать расширенную инструкцию: {exc}\n",
+                "# AGENT_GUIDE\n\n" + tr("Could not generate the extended guide: {error}", "Не удалось сгенерировать расширенную инструкцию: {error}", error=exc) + "\n",
             )
         except OSError:
             pass
@@ -442,4 +542,4 @@ def scaffold_project(project) -> None:
     try:
         vendor_engine(project.root)
     except Exception as exc:
-        print(f"[Reasonable] Не удалось встроить движок в проект: {exc}", file=sys.stderr)
+        print(tr("[Reasonable] Failed to vendor the engine into the project: {error}", "[Reasonable] Не удалось встроить движок в проект: {error}", error=exc), file=sys.stderr)

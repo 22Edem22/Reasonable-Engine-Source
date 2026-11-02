@@ -6,6 +6,12 @@ from pathlib import Path
 
 import pygame
 
+try:
+    from reasonable.core.i18n import tr as _tr
+except Exception:  # exported builds may run without the bundled core package
+    def _tr(en: str, ru: str, **values) -> str:
+        return en
+
 
 class Audio:
     _initialized = False
@@ -32,7 +38,7 @@ class Audio:
             sound.play()
             return True
         except Exception as exc:
-            print(f"[Reasonable] Звук не воспроизведён: {exc}")
+            print(_tr("[Reasonable] Sound was not played: {error}", "[Reasonable] Звук не воспроизведён: {error}", error=exc))
             return False
 
     @classmethod
@@ -46,7 +52,7 @@ class Audio:
             pygame.mixer.music.play(-1 if loop else 0)
             return True
         except Exception as exc:
-            print(f"[Reasonable] Музыка не запущена: {exc}")
+            print(_tr("[Reasonable] Music was not started: {error}", "[Reasonable] Музыка не запущена: {error}", error=exc))
             return False
 
     @classmethod

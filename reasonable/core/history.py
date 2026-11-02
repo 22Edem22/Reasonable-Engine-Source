@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .i18n import t as _t
+from .i18n import t as _t, tr
 from .paths import atomic_write_json, now_iso, read_json
 
 HISTORY_DIR = ".reasonable/history"
@@ -142,7 +142,7 @@ def create_snapshot(
     """Create a full snapshot and return its metadata."""
     root = project_root(project).resolve()
     if not root.is_dir():
-        raise ValueError(f"Папка проекта не найдена: {root}")
+        raise ValueError(tr("Project folder not found: {root}", "Папка проекта не найдена: {root}", root=root))
     target_root = history_root(root)
     target_root.mkdir(parents=True, exist_ok=True)
     snapshot_id = _new_id()
@@ -167,7 +167,7 @@ def create_snapshot(
         try:
             from .progress import record_event
 
-            record_event(root, "history", f"Снимок проекта: {meta['label']}", {"snapshot": snapshot_id})
+            record_event(root, "history", tr("Project snapshot: {label}", "Снимок проекта: {label}", label=meta["label"]), {"snapshot": snapshot_id})
         except Exception:
             pass
     meta["path"] = str(directory)
@@ -301,10 +301,10 @@ def restore_snapshot(
     root = project_root(project).resolve()
     meta = get_snapshot(root, snapshot_id)
     if meta is None:
-        raise ValueError(f"Снимок не найден: {snapshot_id}")
+        raise ValueError(tr("Snapshot not found: {snapshot}", "Снимок не найден: {snapshot}", snapshot=snapshot_id))
     files_dir = history_root(root) / str(snapshot_id) / FILES_DIR
     if not files_dir.is_dir():
-        raise ValueError("В снимке нет файлов.")
+        raise ValueError(tr("The snapshot has no files.", "В снимке нет файлов."))
 
     safety_meta = (
         create_snapshot(root, label=_t("history.before_restore_label"), reason="before-restore")
@@ -381,7 +381,7 @@ def restore_snapshot(
         record_event(
             root,
             "history",
-            f"Восстановлена версия «{meta.get('label')}»",
+            tr("Restored version “{label}”", "Восстановлена версия «{label}»", label=meta.get("label")),
             {
                 "snapshot": snapshot_id,
                 "restored": restored,

@@ -17,6 +17,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
+from .i18n import tr
 from .paths import atomic_write_json, now_iso, read_json
 
 
@@ -47,7 +48,7 @@ def empty_state(mode: str = "builtin") -> dict[str, Any]:
         "mode": mode,
         "status": "idle",
         "percent": 0,
-        "stage": "Ожидание",
+        "stage": tr("Waiting", "Ожидание"),
         "message": "",
         "tasks": [],
         "started_at": stamp,
@@ -172,14 +173,13 @@ def record_event(
         return event
 
 
-def heartbeat(project_dir: Path, message: str = "Агент работает") -> None:
+def heartbeat(project_dir: Path, message: str = "") -> None:
     with _LOCK:
         ensure_state(project_dir)
         state = read_state(project_dir)
         state["last_event_at"] = now_iso()
         state["status"] = "running"
-        if message:
-            state["message"] = message
+        state["message"] = message or tr("The agent is working", "Агент работает")
         _write_state(project_dir, state)
 
 
@@ -239,7 +239,7 @@ def set_plan(project_dir: Path, tasks: Iterable[str | dict]) -> dict[str, Any]:
             normalized.append(
                 {
                     "id": str(task.get("id") or f"t{index}"),
-                    "title": str(task.get("title") or task.get("name") or f"Задача {index}"),
+                    "title": str(task.get("title") or task.get("name") or tr("Task {index}", "Задача {index}", index=index)),
                     "status": str(task.get("status") or "pending"),
                 }
             )
@@ -250,7 +250,7 @@ def set_plan(project_dir: Path, tasks: Iterable[str | dict]) -> dict[str, Any]:
         state["last_event_at"] = now_iso()
         _auto_percent(state)
         _write_state(project_dir, state)
-        record_event(project_dir, "plan", "План работ обновлён", {"tasks": normalized})
+        record_event(project_dir, "plan", tr("Work plan updated", "План работ обновлён"), {"tasks": normalized})
         return state
 
 
@@ -274,7 +274,7 @@ def update_task(project_dir: Path, task_ref: str | int, status: str) -> dict[str
                 found = task
                 break
         if found is None:
-            raise ValueError(f"Задача не найдена: {task_ref}")
+            raise ValueError(tr("Task not found: {task}", "Задача не найдена: {task}", task=task_ref))
         found["status"] = status
         state["last_event_at"] = now_iso()
         _auto_percent(state)
@@ -282,19 +282,20 @@ def update_task(project_dir: Path, task_ref: str | int, status: str) -> dict[str
         record_event(
             project_dir,
             "task",
-            f"Задача «{found.get('title')}»: {status}",
+            tr("Task “{title}”: {status}", "Задача «{title}»: {status}", title=found.get("title"), status=status),
             {"id": found.get("id"), "status": status},
         )
         return state
 
 
-def finish_progress(project_dir: Path, message: str = "Проект готов") -> dict[str, Any]:
+def finish_progress(project_dir: Path, message: str = "") -> dict[str, Any]:
+    message = message or tr("Project finished", "Проект готов")
     with _LOCK:
         ensure_state(project_dir)
         state = read_state(project_dir)
         state["percent"] = 100.0
         state["status"] = "done"
-        state["stage"] = "Готово"
+        state["stage"] = tr("Done", "Готово")
         state["message"] = message
         state["last_event_at"] = now_iso()
         for task in state.get("tasks", []):

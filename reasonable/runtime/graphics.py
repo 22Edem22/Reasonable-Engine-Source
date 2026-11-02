@@ -10,6 +10,12 @@ from typing import Any, Callable, Iterable, Sequence
 
 import pygame
 
+try:
+    from reasonable.core.i18n import tr as _tr
+except Exception:  # exported builds may run without the bundled core package
+    def _tr(en: str, ru: str, **values) -> str:
+        return en
+
 from .utils import (
     EASINGS,
     color,
@@ -615,7 +621,7 @@ class TweenManager:
                 try:
                     timer["callback"]()
                 except Exception as exc:
-                    print(f"[Reasonable] Ошибка таймера: {exc}")
+                    print(_tr("[Reasonable] Timer error: {error}", "[Reasonable] Ошибка таймера: {error}", error=exc))
             else:
                 remaining_timers.append(timer)
         self._timers = remaining_timers

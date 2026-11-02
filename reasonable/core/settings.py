@@ -190,11 +190,11 @@ class Settings:
         base_url = user_base if user_base and user_base not in default_bases else preset.base_url
         data.update(
             {
-                "provider_name": preset.name,
+                "provider_name": preset.display_name,
                 "base_url": base_url or preset.base_url,
                 "model": data.get("model") or preset.default_model,
                 "requires_key": preset.requires_key,
-                "description": preset.description,
+                "description": preset.display_description,
             }
         )
         return data

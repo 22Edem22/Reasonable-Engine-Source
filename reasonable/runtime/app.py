@@ -9,6 +9,12 @@ from pathlib import Path
 
 import pygame
 
+try:
+    from reasonable.core.i18n import tr as _tr
+except Exception:  # exported builds may run without the bundled core package
+    def _tr(en: str, ru: str, **values) -> str:
+        return en
+
 from reasonable.core.paths import resource_path
 from .input import Input
 from .scene import Scene
@@ -117,7 +123,7 @@ class App:
 
     def capture(self, path: str | Path = "screenshot.png") -> Path:
         if not pygame.display.get_surface():
-            raise RuntimeError("Окно ещё не создано")
+            raise RuntimeError(_tr("The window is not created yet", "Окно ещё не создано"))
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         pygame.image.save(pygame.display.get_surface(), str(path))
@@ -194,7 +200,7 @@ class App:
                         traceback_line = traceback.format_exc()
                         if traceback_line != last_event_error:
                             last_event_error = traceback_line
-                            print(f"[Reasonable] Ошибка обработки события: {exc}", file=sys.stderr)
+                            print(_tr("[Reasonable] Event handling error: {error}", "[Reasonable] Ошибка обработки события: {error}", error=exc), file=sys.stderr)
                             print(traceback_line, file=sys.stderr)
                 if not self.running:
                     break
@@ -300,7 +306,7 @@ class Game(App):
     def on_draw(self, surface: pygame.Surface) -> None:
         if self.scene is None:
             surface.fill(self.background)
-            message = "Сцена не создана"
+            message = _tr("No scene created", "Сцена не создана")
             image = render_text(message, 22, (200, 210, 230))
             surface.blit(image, image.get_rect(center=(surface.get_width() // 2, surface.get_height() // 2)))
             return

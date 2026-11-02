@@ -10,6 +10,12 @@ from typing import Iterable, Sequence
 
 import pygame
 
+try:
+    from reasonable.core.i18n import tr as _tr
+except Exception:  # exported builds may run without the bundled core package
+    def _tr(en: str, ru: str, **values) -> str:
+        return en
+
 from reasonable.core.paths import resource_path
 
 try:
@@ -409,7 +415,7 @@ def load_image(path, *, alpha: bool = True) -> pygame.Surface:
         image = pygame.image.load(str(path_obj))
         return image.convert_alpha() if alpha else image.convert()
     except Exception as exc:
-        print(f"[Reasonable] Не удалось загрузить изображение {path}: {exc}")
+        print(_tr("[Reasonable] Could not load the image {path}: {error}", "[Reasonable] Не удалось загрузить изображение {path}: {error}", path=path, error=exc))
         return placeholder_surface(Path(str(path)).suffix.replace(".", "") or "?")
 
 

@@ -24,6 +24,7 @@ from typing import Any
 from reasonable.version import VERSION_LABEL
 
 from . import i18n
+from .i18n import tr
 from .paths import atomic_write_text, is_relative_to, now_iso, slugify, unique_directory
 from .progress import ensure_state, record_event, set_plan, set_status
 from .project import ENGINE_DIR_NAME, UI_LEVEL_LABELS, Project, normalise_ui_levels
@@ -94,7 +95,7 @@ def _choice(value: Any, current: str, allowed: dict[str, str], label: str) -> st
         return current
     text = str(value).strip().lower()
     if text not in allowed:
-        raise ValueError(f"Неизвестная {label}: {value}")
+        raise ValueError(tr("Unknown {label}: {value}", "Неизвестная {label}: {value}", label=label, value=value))
     return text
 
 
@@ -104,7 +105,7 @@ def _normalise_size(value: Any, current: int, minimum: int) -> int:
     try:
         return max(minimum, int(value))
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"Некорректный размер: {value}") from exc
+        raise ValueError(tr("Invalid size: {value}", "Некорректный размер: {value}", value=value)) from exc
 
 
 def _normalise_resizable(value: Any, current: bool) -> bool:
@@ -116,7 +117,7 @@ def _normalise_resizable(value: Any, current: bool) -> bool:
             return True
         if lowered in {"no", "false", "0", "нет"}:
             return False
-        raise ValueError(f"Некорректное значение изменения размера: {value}")
+        raise ValueError(tr("Invalid resizable value: {value}", "Некорректное значение изменения размера: {value}", value=value))
     return bool(value)
 
 
@@ -126,9 +127,15 @@ def _default_package(name: str) -> str:
 
 def _path_error(project: Project, target_root: Path) -> str | None:
     if target_root == project.root:
-        return "Новый проект не может находиться в той же папке, что и исходный."
+        return tr(
+            "The new project cannot be in the same folder as the source one.",
+            "Новый проект не может находиться в той же папке, что и исходный.",
+        )
     if is_relative_to(target_root, project.root):
-        return "Новую папку нельзя создавать внутри исходного проекта."
+        return tr(
+            "The new folder cannot be created inside the source project.",
+            "Новую папку нельзя создавать внутри исходного проекта.",
+        )
     return None
 
 
@@ -154,16 +161,16 @@ def conversion_plan(
     """
     target_platform = str(target or "").strip().lower()
     if target_platform not in PLATFORM_NAMES:
-        raise ValueError("Платформа должна быть windows или android.")
+        raise ValueError(tr("The platform must be windows or android.", "Платформа должна быть windows или android."))
 
     current_orientation = project.orientation
     new_name = (name if name is not None else project.name).strip()
     if not new_name:
-        raise ValueError("Название нового проекта не может быть пустым.")
+        raise ValueError(tr("The new project name cannot be empty.", "Название нового проекта не может быть пустым."))
 
-    new_orientation = _choice(orientation, current_orientation, ORIENTATION_NAMES, "ориентация")
-    new_mode = _choice(mode, project.mode, AGENT_MODE_NAMES, "режим агента")
-    new_window_mode = _choice(window_mode, project.window_mode, WINDOW_MODE_NAMES, "режим окна")
+    new_orientation = _choice(orientation, current_orientation, ORIENTATION_NAMES, tr("orientation", "ориентация"))
+    new_mode = _choice(mode, project.mode, AGENT_MODE_NAMES, tr("agent mode", "режим агента"))
+    new_window_mode = _choice(window_mode, project.window_mode, WINDOW_MODE_NAMES, tr("window mode", "режим окна"))
     new_resizable = _normalise_resizable(resizable, project.resizable)
 
     old_ui_levels = list(project.ui_levels)
@@ -189,7 +196,7 @@ def conversion_plan(
 
     parent = Path(output).expanduser().resolve() if output else project.root.parent
     if parent.exists() and not parent.is_dir():
-        raise ValueError(f"Путь для нового проекта не является папкой: {parent}")
+        raise ValueError(tr("The new project path is not a folder: {path}", "Путь для нового проекта не является папкой: {path}", path=parent))
     target_root = unique_directory(parent, slugify(new_name, "project"))
     path_error = _path_error(project, target_root)
     if path_error:
@@ -316,17 +323,63 @@ def _rename_sources(root: Path, old_name: str, new_name: str) -> None:
 def _conversion_tasks(plan: dict[str, Any]) -> list[str]:
     platform = PLATFORM_NAMES[plan["target"]]
     return [
-        "Изучить проект после конвертации",
-        f"Проверить окно, управление и компоновку под платформу {platform}",
-        "Запустить проект и исправить найденные ошибки",
-        "Обновить README и проверить экспорт",
+        tr("Review the project after the conversion", "Изучить проект после конвертации"),
+        tr("Check the window, controls and layout for the {platform} platform", "Проверить окно, управление и компоновку под платформу {platform}", platform=platform),
+        tr("Run the project and fix the found issues", "Запустить проект и исправить найденные ошибки"),
+        tr("Update the README and check the export", "Обновить README и проверить экспорт"),
     ]
 
 
 def _write_conversion_doc(project: Project, plan: dict[str, Any], record: dict[str, Any]) -> None:
-    changes = "\n".join(f"- {change}" for change in plan["changes"]) or "- Изменений нет."
     source = plan["source"]
-    text = f"""# Конвертация проекта
+    if i18n.current_language() == "en":
+        changes = "\n".join(f"- {change}" for change in plan["changes"]) or "- No changes."
+        text = f"""# Project conversion
+
+The project **{project.name}** was created from **{plan['source_name']}**.
+
+- Source platform: **{PLATFORM_NAMES[plan['source_platform']]}**
+- New platform: **{PLATFORM_NAMES[plan['target']]}**
+- Date: {record['at']}
+- Source folder: `{source}`
+- Engine version: Reasonable Engine {VERSION_LABEL}
+
+The source project was not modified. This is a separate folder with its own
+copy of the code, assets and the bundled engine.
+
+## What changed
+
+{changes}
+
+## What the conversion does not do
+
+- It does not rewrite the game logic and does not adapt the interface to a
+  small screen automatically. After the conversion ask the AI agent to check
+  the layout, touch sizes and safe margins.
+- It does not swap the game template for an app one or back: that changes the
+  meaning of the project and requires a manual decision.
+- It does not import projects from third-party engines.
+- It does not build an APK. The Android package is still built with buildozer
+  on Linux/WSL2: `re.bat export android`, then `buildozer -v android debug`.
+
+## Useful commands
+
+```bat
+re.bat status
+re.bat validate
+re.bat run
+re.bat export windows
+re.bat export android
+re.bat convert --to windows --dir ".."
+```
+
+You can convert not only the platform but also the orientation, agent mode,
+window mode, base resolution and progress. Open **Project Settings** or the
+**Convert** item in the editor.
+"""
+    else:
+        changes = "\n".join(f"- {change}" for change in plan["changes"]) or "- Изменений нет."
+        text = f"""# Конвертация проекта
 
 Проект **{project.name}** создан из **{plan['source_name']}**.
 
@@ -385,7 +438,7 @@ def _update_progress(project: Project, plan: dict[str, Any]) -> None:
         set_status(
             project.root,
             "idle",
-            "Проект сконвертирован. Опишите первую задачу агенту.",
+            tr("The project is converted. Describe the first task for the agent.", "Проект сконвертирован. Опишите первую задачу агенту."),
         )
     else:
         ensure_state(project.root, plan["mode"])
@@ -393,8 +446,14 @@ def _update_progress(project: Project, plan: dict[str, Any]) -> None:
     record_event(
         project.root,
         "conversion",
-        f"Проект сконвертирован: {plan['source_name']} ({PLATFORM_NAMES[plan['source_platform']]}) "
-        f"→ {project.name} ({PLATFORM_NAMES[plan['target']]}).",
+        tr(
+            "Project converted: {old} ({old_platform}) → {new} ({new_platform}).",
+            "Проект сконвертирован: {old} ({old_platform}) → {new} ({new_platform}).",
+            old=plan["source_name"],
+            old_platform=PLATFORM_NAMES[plan["source_platform"]],
+            new=project.name,
+            new_platform=PLATFORM_NAMES[plan["target"]],
+        ),
         {
             "source": plan["source"],
             "from": plan["source_platform"],
@@ -437,8 +496,12 @@ def convert_project(
     )
     if not plan["has_changes"]:
         raise ValueError(
-            "Все выбранные параметры совпадают с исходным проектом. "
-            "Измените платформу, имя, ориентацию, окно, интерфейс, режим агента или сбросьте прогресс."
+            tr(
+                "All selected options match the source project. Change the platform, name, "
+                "orientation, window, interface, agent mode or reset the progress.",
+                "Все выбранные параметры совпадают с исходным проектом. "
+                "Измените платформу, имя, ориентацию, окно, интерфейс, режим агента или сбросьте прогресс.",
+            )
         )
 
     target_root: Path = plan["target_root"]
@@ -524,7 +587,12 @@ def convert_project(
         "reset_progress": plan["reset_progress"],
         "changes": plan["changes"],
         "message": (
-            f"Новый проект создан: {target_root}. "
-            f"{PLATFORM_NAMES[plan['source_platform']]} → {PLATFORM_NAMES[plan['target']]}."
+            tr(
+                "New project created: {path}. {old} → {new}.",
+                "Новый проект создан: {path}. {old} → {new}.",
+                path=target_root,
+                old=PLATFORM_NAMES[plan["source_platform"]],
+                new=PLATFORM_NAMES[plan["target"]],
+            )
         ),
     }

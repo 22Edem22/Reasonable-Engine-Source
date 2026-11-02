@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from .i18n import tr
 from .paths import (
     atomic_write_json,
     atomic_write_text,
@@ -102,7 +103,7 @@ def default_manifest(
     project_type = project_type if project_type in {"game", "app"} else "game"
     return {
         "format": PROJECT_FORMAT,
-        "name": name.strip() or "Новый проект",
+        "name": name.strip() or tr("New project", "Новый проект"),
         "slug": slugify(name, "project"),
         "type": project_type,
         "platform": platform if platform in {"windows", "android"} else "windows",
@@ -170,7 +171,7 @@ class Project:
         root = Path(root).expanduser().resolve()
         data = read_json(root / MANIFEST_NAME, None)
         if not isinstance(data, dict):
-            raise ValueError(f"В папке нет корректного {MANIFEST_NAME}: {root}")
+            raise ValueError(tr("No valid {manifest} in the folder: {root}", "В папке нет корректного {manifest}: {root}", manifest=MANIFEST_NAME, root=root))
         return cls(root=root, manifest=data)
 
     @classmethod
@@ -277,7 +278,7 @@ class Project:
     def ensure_inside(self, relative: str | Path) -> Path:
         path = self.path(relative)
         if not is_relative_to(path, self.root):
-            raise ValueError("Нельзя выйти за пределы папки проекта.")
+            raise ValueError(tr("You cannot leave the project folder.", "Нельзя выйти за пределы папки проекта."))
         return path
 
     def rel(self, path: str | Path) -> str:
@@ -330,7 +331,7 @@ class Project:
     def read_text(self, relative: str | Path, *, max_bytes: int = 2_000_000) -> str:
         path = self.ensure_inside(relative)
         if path.stat().st_size > max_bytes:
-            raise ValueError("Файл слишком большой для чтения.")
+            raise ValueError(tr("The file is too large to read.", "Файл слишком большой для чтения."))
         return path.read_text(encoding="utf-8", errors="replace")
 
     def write_text(self, relative: str | Path, content: str) -> Path:
@@ -341,7 +342,7 @@ class Project:
     def delete_path(self, relative: str | Path) -> None:
         path = self.ensure_inside(relative)
         if path == self.root:
-            raise ValueError("Нельзя удалить корень проекта.")
+            raise ValueError(tr("You cannot delete the project root.", "Нельзя удалить корень проекта."))
         if path.is_dir():
             shutil.rmtree(path)
         elif path.exists():
@@ -371,7 +372,7 @@ class Project:
 
     def launch(self) -> subprocess.Popen:
         if not self.entry.exists():
-            raise FileNotFoundError(f"Точка входа не найдена: {self.entry}")
+            raise FileNotFoundError(tr("Entry point not found: {entry}", "Точка входа не найдена: {entry}", entry=self.entry))
         creationflags = 0
         if sys.platform == "win32":
             creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -391,10 +392,10 @@ class Project:
     def validate(self) -> list[ValidationIssue]:
         issues: list[ValidationIssue] = []
         if not self.entry.exists():
-            issues.append(ValidationIssue("error", f"Нет точки входа {self.entry.name}", "main.py"))
+            issues.append(ValidationIssue("error", tr("No entry point {name}", "Нет точки входа {name}", name=self.entry.name), "main.py"))
         for relative in ("assets", "progress"):
             if not (self.root / relative).is_dir():
-                issues.append(ValidationIssue("warning", f"Отсутствует папка {relative}/", relative))
+                issues.append(ValidationIssue("warning", tr("Missing folder {folder}/", "Отсутствует папка {folder}/", folder=relative), relative))
         for path in self.root.rglob("*.py"):
             parts = path.relative_to(self.root).parts
             if any(part in IGNORED_DIRS for part in parts):
@@ -406,7 +407,7 @@ class Project:
                 issues.append(
                     ValidationIssue(
                         "error",
-                        f"Синтаксис: {exc.msg} (строка {exc.lineno})",
+                        tr("Syntax: {message} (line {line})", "Синтаксис: {message} (строка {line})", message=exc.msg, line=exc.lineno),
                         self.rel(path),
                     )
                 )
@@ -414,22 +415,23 @@ class Project:
                 continue
         manifest = self.manifest
         if not str(manifest.get("goal", "")).strip():
-            issues.append(ValidationIssue("warning", "Не заполнена главная цель проекта.", MANIFEST_NAME))
+            issues.append(ValidationIssue("warning", tr("The main goal of the project is not filled in.", "Не заполнена главная цель проекта."), MANIFEST_NAME))
         if not self.entry.exists() and self.entry.suffix != ".py":
-            issues.append(ValidationIssue("warning", "Точка входа не является Python-файлом.", "project.json"))
+            issues.append(ValidationIssue("warning", tr("The entry point is not a Python file.", "Точка входа не является Python-файлом."), "project.json"))
         progress_state = read_json(self.root / "progress" / "state.json", {})
         if not progress_state:
-            issues.append(ValidationIssue("warning", "Агент ещё не создал progress/state.json.", "progress/state.json"))
+            issues.append(ValidationIssue("warning", tr("The agent has not created progress/state.json yet.", "Агент ещё не создал progress/state.json."), "progress/state.json"))
         if not issues:
-            issues.append(ValidationIssue("ok", "Проект выглядит корректно: синтаксис и структура в порядке."))
+            issues.append(ValidationIssue("ok", tr("The project looks correct: syntax and structure are fine.", "Проект выглядит корректно: синтаксис и структура в порядке.")))
         return issues
 
     def summary(self) -> str:
         platform = "Android" if self.platform == "android" else "Windows"
         levels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in self.ui_levels)
+        kind = tr("game", "игра") if self.project_type == "game" else tr("app", "приложение")
         return (
-            f"{self.name} — {'игра' if self.project_type == 'game' else 'приложение'}, "
-            f"{platform}, интерфейс: {levels}, режим {self.mode}."
+            f"{self.name} — {kind}, "
+            f"{platform}, {tr('interface:', 'интерфейс:')} {levels}, {tr('mode', 'режим')} {self.mode}."
         )
 
     # -- engine sync ------------------------------------------------------

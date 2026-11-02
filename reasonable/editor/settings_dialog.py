@@ -35,6 +35,7 @@ from reasonable.ai.providers import (
     ProviderPreset,
     get_image_provider,
     get_provider,
+    provider_group_label,
 )
 from reasonable.core import i18n
 from reasonable.core.i18n import t
@@ -478,16 +479,16 @@ class SettingsDialog(QDialog):
         for provider in PROVIDERS:
             groups.setdefault(provider.group, []).append(provider)
         for group, items in groups.items():
-            header = QListWidgetItem(group.upper())
+            header = QListWidgetItem(provider_group_label(group).upper())
             header.setFlags(Qt.ItemFlag.NoItemFlags)
             font = QFont(theme.ui_font(8, 700))
             header.setFont(font)
             header.setForeground(QBrush(QColor("#6F7680")))
             self.provider_list.addItem(header)
             for provider in items:
-                item = QListWidgetItem(_list_name(provider.name))
+                item = QListWidgetItem(_list_name(provider.display_name))
                 item.setData(Qt.ItemDataRole.UserRole, provider.id)
-                item.setToolTip(f"{provider.name}\n{provider.description}")
+                item.setToolTip(f"{provider.display_name}\n{provider.display_description}")
                 self.provider_list.addItem(item)
 
     def _label(self, text: str) -> QLabel:
@@ -536,11 +537,11 @@ class SettingsDialog(QDialog):
         preset = get_provider(provider_id)
         config = self.settings.get_provider_config(provider_id)
 
-        self.provider_name.setText(preset.name)
+        self.provider_name.setText(preset.display_name)
         self.provider_active_badge.setVisible(self.settings.active_provider == preset.id)
-        self.provider_description.setText(preset.description)
-        self.provider_note.setText(preset.note)
-        self.provider_note.setVisible(bool(preset.note))
+        self.provider_description.setText(preset.display_description)
+        self.provider_note.setText(preset.display_note)
+        self.provider_note.setVisible(bool(preset.display_note))
         if preset.requires_key:
             self.provider_key_badge.setText(t("settings.key_required_badge"))
             self.provider_key_badge.set_tone("gold")
@@ -719,13 +720,13 @@ class SettingsDialog(QDialog):
             name.setFont(theme.display_font(11, 700))
             top.addWidget(name)
             top.addStretch(1)
-            top.addWidget(Badge(site.badge, "default"))
+            top.addWidget(Badge(site.display_badge, "default"))
             card.layout().addLayout(top)
-            models = QLabel(site.models)
+            models = QLabel(site.display_models)
             models.setObjectName("muted")
             models.setFont(theme.ui_font(9, 600))
             card.layout().addWidget(models)
-            card.layout().addWidget(muted(site.note, size=9))
+            card.layout().addWidget(muted(site.display_note, size=9))
             buttons = QHBoxLayout()
             buttons.addStretch(1)
             provider_id = SITE_PROVIDER_MAP.get(site.name)
@@ -773,7 +774,7 @@ class SettingsDialog(QDialog):
         form.setSpacing(10)
         self.image_provider = QComboBox()
         for provider in IMAGE_PROVIDERS:
-            self.image_provider.addItem(provider.name, provider.id)
+            self.image_provider.addItem(provider.display_name, provider.id)
         self.image_provider.currentIndexChanged.connect(self._image_provider_changed)
         form.addRow(self._label(t("settings.label_provider")), self.image_provider)
 
@@ -821,7 +822,7 @@ class SettingsDialog(QDialog):
 
     def _image_provider_changed(self) -> None:
         provider = get_image_provider(self.image_provider.currentData() or "procedural")
-        self.image_description.setText(provider.description)
+        self.image_description.setText(provider.display_description)
         self.image_base.setText(provider.base_url)
         self.image_model.clear()
         self.image_model.addItem(provider.default_model)

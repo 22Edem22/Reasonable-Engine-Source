@@ -23,6 +23,12 @@ from typing import Any, Callable, Iterable, Sequence
 
 import pygame
 
+try:
+    from reasonable.core.i18n import tr as _tr
+except Exception:  # exported builds may run without the bundled core package
+    def _tr(en: str, ru: str, **values) -> str:
+        return en
+
 from .utils import (
     color,
     draw_gradient,
@@ -878,7 +884,7 @@ class Button(Widget):
             try:
                 self.on_click()
             except Exception as exc:
-                print(f"[Reasonable UI] Ошибка кнопки «{self.text}»: {exc}")
+                print(_tr("[Reasonable UI] Button error “{button}”: {error}", "[Reasonable UI] Ошибка кнопки «{button}»: {error}", button=self.text, error=exc))
 
     def _blend_factor(self) -> float:
         if not self.enabled:
@@ -1090,7 +1096,7 @@ class Entry(Widget):
                     self.caret += len(text)
                     self._changed()
         except Exception as exc:
-            print(f"[Reasonable UI] Буфер обмена недоступен: {exc}")
+            print(_tr("[Reasonable UI] Clipboard is unavailable: {error}", "[Reasonable UI] Буфер обмена недоступен: {error}", error=exc))
 
     def update(self, dt: float) -> None:
         self._blink += dt
