@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from reasonable.core.i18n import t
 from reasonable.core.project import TEXT_SUFFIXES
 
 from . import theme
@@ -302,14 +303,14 @@ class CodePage(QWidget):
         row.setSpacing(8)
         heading = QVBoxLayout()
         heading.setSpacing(0)
-        heading.addWidget(title_label("Код проекта", 15))
-        heading.addWidget(muted("Полноценный редактор: правьте файлы вручную или вместе с агентом.", size=9))
+        heading.addWidget(title_label(t("code.page_title"), 15))
+        heading.addWidget(muted(t("code.page_subtitle"), size=9))
         row.addLayout(heading)
         row.addStretch(1)
-        validate = QPushButton("Проверить")
+        validate = QPushButton(t("code.validate_button"))
         validate.clicked.connect(self.validate_project)
         row.addWidget(validate)
-        self.run_button = QPushButton("▶  Запустить")
+        self.run_button = QPushButton("▶  " + t("code.run_button"))
         self.run_button.setObjectName("primary")
         self.run_button.clicked.connect(self._run)
         row.addWidget(self.run_button)
@@ -324,18 +325,18 @@ class CodePage(QWidget):
         layout.setSpacing(8)
 
         top = QHBoxLayout()
-        top.addWidget(title_label("Файлы", 10))
+        top.addWidget(title_label(t("code.files_title"), 10))
         top.addStretch(1)
-        refresh = QPushButton("Обновить")
+        refresh = QPushButton(t("code.refresh_button"))
         refresh.setObjectName("ghost")
-        refresh.setToolTip("Обновить дерево файлов")
+        refresh.setToolTip(t("code.refresh_tip"))
         refresh.clicked.connect(self.refresh_tree)
         top.addWidget(refresh)
         layout.addLayout(top)
 
         self.search = QLineEdit()
         self.search.setObjectName("search")
-        self.search.setPlaceholderText("Поиск файла…")
+        self.search.setPlaceholderText(t("code.search_placeholder"))
         self.search.textChanged.connect(self._filter_tree)
         layout.addWidget(self.search)
 
@@ -350,11 +351,11 @@ class CodePage(QWidget):
         layout.addWidget(self.tree, 1)
 
         buttons = QHBoxLayout()
-        new_file = QPushButton("+ Файл")
+        new_file = QPushButton(t("code.new_file_button"))
         new_file.setObjectName("ghost")
         new_file.clicked.connect(self.new_file)
         buttons.addWidget(new_file)
-        new_folder = QPushButton("+ Папка")
+        new_folder = QPushButton(t("code.new_folder_button"))
         new_folder.setObjectName("ghost")
         new_folder.clicked.connect(self.new_folder)
         buttons.addWidget(new_folder)
@@ -373,14 +374,14 @@ class CodePage(QWidget):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(14, 9, 12, 9)
         header_layout.setSpacing(8)
-        self.file_label = QLabel("Файл не выбран")
+        self.file_label = QLabel(t("code.no_file_selected"))
         self.file_label.setFont(theme.ui_font(10, 700))
         header_layout.addWidget(self.file_label)
-        self.dirty_badge = Badge("ИЗМЕНЁН", "gold")
+        self.dirty_badge = Badge(t("code.badge_modified"), "gold")
         self.dirty_badge.hide()
         header_layout.addWidget(self.dirty_badge)
         header_layout.addStretch(1)
-        self.save_button = QPushButton("Сохранить")
+        self.save_button = QPushButton(t("code.save_button"))
         self.save_button.setObjectName("teal")
         self.save_button.setMinimumWidth(104)
         self.save_button.setShortcut(QKeySequence.StandardKey.Save)
@@ -391,8 +392,8 @@ class CodePage(QWidget):
         self.stack = QStackedWidget()
         self.placeholder = EmptyState(
             "{}",
-            "Выберите файл",
-            "Слева — дерево проекта. Кликните по файлу, чтобы открыть его. Ctrl+S сохраняет.",
+            t("code.empty_title"),
+            t("code.empty_text"),
         )
         self.stack.addWidget(self.placeholder)
         self.editor = CodeEditor()
@@ -403,7 +404,7 @@ class CodePage(QWidget):
         self.stack.addWidget(self.image_view)
         layout.addWidget(self.stack, 1)
 
-        self.status = QLabel("Готово")
+        self.status = QLabel(t("code.status_ready"))
         self.status.setObjectName("dim")
         self.status.setFont(theme.ui_font(9))
         self.status.setStyleSheet("padding: 5px 12px; background: #101216; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;")
@@ -468,7 +469,7 @@ class CodePage(QWidget):
                 expanded.add(item.data(0, Qt.ItemDataRole.UserRole))
         selected = self.current_path
         self.tree.clear()
-        root = QTreeWidgetItem(["Проект"])
+        root = QTreeWidgetItem([t("code.tree_root")])
         root.setIcon(0, self._icon_for("", True))
         root.setData(0, Qt.ItemDataRole.UserRole, "")
         root.setFont(0, theme.ui_font(9, 700))
@@ -552,7 +553,7 @@ class CodePage(QWidget):
             return
         absolute = self.project.root / path
         if not absolute.exists():
-            self.status_message.emit(f"Файл не найден: {path}")
+            self.status_message.emit(t("code.file_not_found", path=path))
             return
         self.current_path = path
         self.file_label.setText(path)
@@ -563,12 +564,12 @@ class CodePage(QWidget):
             return
         if suffix in BINARY_SUFFIXES:
             self.stack.setCurrentIndex(0)
-            self.status.setText("Бинарный файл — предпросмотр недоступен.")
+            self.status.setText(t("code.binary_file"))
             return
         try:
             text = absolute.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
-            QMessageBox.critical(self, "Ошибка чтения", str(exc))
+            QMessageBox.critical(self, t("code.read_error_title"), str(exc))
             return
         self.stack.setCurrentIndex(1)
         self.editor.blockSignals(True)
@@ -595,13 +596,19 @@ class CodePage(QWidget):
         pixmap = QPixmap(str(absolute))
         if pixmap.isNull():
             self.stack.setCurrentIndex(0)
-            self.status.setText("Не удалось открыть изображение.")
+            self.status.setText(t("code.image_open_failed"))
             return
         self.stack.setCurrentIndex(2)
         self._source_image = pixmap
         self._resize_image()
         self.image_caption.setText(
-            f"{self.current_path}  ·  {pixmap.width()} × {pixmap.height()} px  ·  {absolute.stat().st_size // 1024} КБ"
+            t(
+                "code.image_caption",
+                path=self.current_path,
+                width=pixmap.width(),
+                height=pixmap.height(),
+                kb=absolute.stat().st_size // 1024,
+            )
         )
         self._update_status()
 
@@ -637,11 +644,15 @@ class CodePage(QWidget):
         cursor = self.editor.textCursor()
         if self.stack.currentIndex() == 1:
             self.status.setText(
-                f"Строка {cursor.blockNumber() + 1}, столбец {cursor.columnNumber() + 1}   ·   "
-                f"{len(self.editor.toPlainText())} символов   ·   UTF-8"
+                t(
+                    "code.cursor_status",
+                    line=cursor.blockNumber() + 1,
+                    column=cursor.columnNumber() + 1,
+                    count=len(self.editor.toPlainText()),
+                )
             )
         elif self.stack.currentIndex() == 2:
-            self.status.setText("Предпросмотр изображения")
+            self.status.setText(t("code.image_preview_status"))
         elif self.current_path:
             self.status.setText(self.current_path)
 
@@ -653,8 +664,8 @@ class CodePage(QWidget):
             return True
         answer = QMessageBox.question(
             self,
-            "Несохранённые изменения",
-            f"Сохранить изменения в {self.current_path}?",
+            t("code.unsaved_title"),
+            t("code.unsaved_text", path=self.current_path),
             QMessageBox.StandardButton.Save
             | QMessageBox.StandardButton.Discard
             | QMessageBox.StandardButton.Cancel,
@@ -674,11 +685,11 @@ class CodePage(QWidget):
             self.current_saved_text = self.editor.toPlainText()
             self._disk_mtime = (self.project.root / self.current_path).stat().st_mtime
             self.dirty_badge.hide()
-            self.status_message.emit(f"Сохранено: {self.current_path}")
+            self.status_message.emit(t("code.saved_status", path=self.current_path))
             self._update_status()
             return True
         except Exception as exc:
-            QMessageBox.critical(self, "Ошибка сохранения", str(exc))
+            QMessageBox.critical(self, t("code.save_error_title"), str(exc))
             return False
 
     def _check_disk(self) -> None:
@@ -702,36 +713,36 @@ class CodePage(QWidget):
                 self.current_saved_text = text
                 self._disk_mtime = mtime
                 self.editor.moveCursor(QTextCursor.MoveOperation.Start)
-                self.status_message.emit(f"Файл обновлён агентом: {self.current_path}")
+                self.status_message.emit(t("code.agent_updated_file", path=self.current_path))
 
     # ------------------------------------------------------------------
     def new_file(self) -> None:
-        name, ok = QInputDialog.getText(self, "Новый файл", "Путь внутри проекта:", text="new_file.py")
+        name, ok = QInputDialog.getText(self, t("code.new_file_title"), t("code.new_file_label"), text="new_file.py")
         if not ok or not name.strip():
             return
         relative = name.strip().replace("\\", "/")
         try:
             path = self.project.ensure_inside(relative)
             if path.exists():
-                QMessageBox.warning(self, "Файл существует", "Такой файл уже есть.")
+                QMessageBox.warning(self, t("code.file_exists_title"), t("code.file_exists_text"))
                 return
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("", encoding="utf-8")
         except Exception as exc:
-            QMessageBox.critical(self, "Не удалось создать файл", str(exc))
+            QMessageBox.critical(self, t("code.create_file_error"), str(exc))
             return
         self.refresh_tree()
         self.open_file(relative)
 
     def new_folder(self) -> None:
-        name, ok = QInputDialog.getText(self, "Новая папка", "Путь внутри проекта:", text="assets/new")
+        name, ok = QInputDialog.getText(self, t("code.new_folder_title"), t("code.new_file_label"), text="assets/new")
         if not ok or not name.strip():
             return
         try:
             path = self.project.ensure_inside(name.strip())
             path.mkdir(parents=True, exist_ok=True)
         except Exception as exc:
-            QMessageBox.critical(self, "Не удалось создать папку", str(exc))
+            QMessageBox.critical(self, t("code.create_folder_error"), str(exc))
             return
         self.refresh_tree()
 
@@ -743,9 +754,9 @@ class CodePage(QWidget):
         if not path:
             return
         menu = QMenu(self)
-        open_action = menu.addAction("Открыть")
-        rename_action = menu.addAction("Переименовать…")
-        delete_action = menu.addAction("Удалить")
+        open_action = menu.addAction(t("code.menu_open"))
+        rename_action = menu.addAction(t("code.menu_rename"))
+        delete_action = menu.addAction(t("code.menu_delete"))
         selected = menu.exec(self.tree.viewport().mapToGlobal(position))
         if selected == open_action:
             self.open_file(path)
@@ -755,31 +766,31 @@ class CodePage(QWidget):
             self._delete(path)
 
     def _rename(self, path: str, is_dir: bool) -> None:
-        new_name, ok = QInputDialog.getText(self, "Переименовать", "Новый путь:", text=path)
+        new_name, ok = QInputDialog.getText(self, t("code.rename_title"), t("code.rename_label"), text=path)
         if not ok or not new_name.strip() or new_name.strip() == path:
             return
         try:
             source = self.project.ensure_inside(path)
             target = self.project.ensure_inside(new_name.strip())
             if target.exists():
-                QMessageBox.warning(self, "Уже существует", "Файл или папка с таким именем уже есть.")
+                QMessageBox.warning(self, t("code.rename_exists_title"), t("code.rename_exists_text"))
                 return
             target.parent.mkdir(parents=True, exist_ok=True)
             source.rename(target)
         except Exception as exc:
-            QMessageBox.critical(self, "Ошибка переименования", str(exc))
+            QMessageBox.critical(self, t("code.rename_error_title"), str(exc))
             return
         if self.current_path == path or self.current_path.startswith(path + "/"):
             self.current_path = ""
             self.stack.setCurrentIndex(0)
-            self.file_label.setText("Файл не выбран")
+            self.file_label.setText(t("code.no_file_selected"))
         self.refresh_tree()
 
     def _delete(self, path: str) -> None:
         answer = QMessageBox.question(
             self,
-            "Удалить",
-            f"Удалить {path}? Действие нельзя отменить.",
+            t("code.menu_delete"),
+            t("code.delete_text", path=path),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -788,12 +799,12 @@ class CodePage(QWidget):
         try:
             self.project.delete_path(path)
         except Exception as exc:
-            QMessageBox.critical(self, "Ошибка удаления", str(exc))
+            QMessageBox.critical(self, t("code.delete_error_title"), str(exc))
             return
         if self.current_path == path:
             self.current_path = ""
             self.stack.setCurrentIndex(0)
-            self.file_label.setText("Файл не выбран")
+            self.file_label.setText(t("code.no_file_selected"))
         self.refresh_tree()
 
     # ------------------------------------------------------------------
@@ -802,8 +813,8 @@ class CodePage(QWidget):
         errors = [issue for issue in issues if issue.level == "error"]
         warnings = [issue for issue in issues if issue.level == "warning"]
         if not errors and not warnings:
-            QMessageBox.information(self, "Проверка", "Всё в порядке: структура и синтаксис корректны.")
-            self.status_message.emit("Проверка пройдена.")
+            QMessageBox.information(self, t("code.validate_ok_title"), t("code.validate_ok_text"))
+            self.status_message.emit(t("code.validate_passed"))
             return
         lines = []
         for issue in issues:
@@ -812,10 +823,10 @@ class CodePage(QWidget):
             lines.append(f"{icon} {issue.message}{suffix}")
         text = "\n".join(lines)
         if errors:
-            QMessageBox.warning(self, "Найдены ошибки", text)
+            QMessageBox.warning(self, t("code.validate_errors_title"), text)
         else:
-            QMessageBox.information(self, "Проверка", text)
-        self.status_message.emit(f"Проверка: ошибок {len(errors)}, предупреждений {len(warnings)}.")
+            QMessageBox.information(self, t("code.validate_ok_title"), text)
+        self.status_message.emit(t("code.validate_summary", errors=len(errors), warnings=len(warnings)))
 
     def _run(self) -> None:
         if not self._maybe_save():

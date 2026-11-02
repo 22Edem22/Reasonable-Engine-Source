@@ -14,13 +14,26 @@ def _run() -> int:
     try:
         from reasonable.editor import main
     except ImportError as exc:
-        print(
-            "Reasonable Engine: не удалось загрузить редактор.\n"
-            f"Причина: {exc}\n\n"
-            "Установите зависимости:\n"
-            "  python -m pip install -r requirements.txt\n",
-            file=sys.stderr,
-        )
+        try:
+            from reasonable.core.i18n import tr as _tr
+        except Exception:  # i18n itself failed to import — English fallback
+            _tr = None
+        if _tr is not None:
+            text = (
+                _tr("Reasonable Engine: could not load the editor.\n",
+                   "Reasonable Engine: не удалось загрузить редактор.\n")
+                + _tr("Cause: ", "Причина: ") + f"{exc}\n\n"
+                + _tr("Install the dependencies:\n", "Установите зависимости:\n")
+                + "  python -m pip install -r requirements.txt\n"
+            )
+        else:
+            text = (
+                "Reasonable Engine: could not load the editor.\n"
+                f"Cause: {exc}\n\n"
+                "Install the dependencies:\n"
+                "  python -m pip install -r requirements.txt\n"
+            )
+        print(text, file=sys.stderr)
         return 1
     return main()
 

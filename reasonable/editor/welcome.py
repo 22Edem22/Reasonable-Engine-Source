@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from reasonable import branding
+from reasonable.core.i18n import tagline as i18n_tagline, t
 from reasonable.core.paths import DOCS_DIR
 from reasonable.core.settings import Settings
 from reasonable.version import VERSION_LABEL
@@ -73,14 +74,14 @@ class WelcomePage(QWidget):
         name.setObjectName("title")
         name.setFont(theme.display_font(13, 700))
         names.addWidget(name)
-        sub = QLabel(f"версия {VERSION_LABEL} · {branding.TAGLINE_RU}")
+        sub = QLabel(t("welcome.version_line", version=VERSION_LABEL, tagline=i18n_tagline()))
         sub.setObjectName("dim")
         sub.setFont(theme.ui_font(9))
         names.addWidget(sub)
         row.addLayout(names)
         row.addStretch(1)
 
-        settings_button = QPushButton("Настройки")
+        settings_button = QPushButton(t("welcome.settings"))
         settings_button.setObjectName("ghost")
         settings_button.clicked.connect(self.open_settings)
         row.addWidget(settings_button)
@@ -94,21 +95,19 @@ class WelcomePage(QWidget):
 
         left = QVBoxLayout()
         left.setSpacing(11)
-        eyebrow = QLabel("РЕДАКТОР ИГР И ПРИЛОЖЕНИЙ")
+        eyebrow = QLabel(t("welcome.eyebrow"))
         eyebrow.setObjectName("dim")
         eyebrow.setFont(theme.ui_font(8, 700))
         left.addWidget(eyebrow)
 
-        heading = QLabel("Создайте игру\nиз одной идеи")
+        heading = QLabel(t("welcome.heading"))
         heading.setObjectName("title")
         heading.setFont(theme.display_font(25, 700))
         heading.setWordWrap(True)
         left.addWidget(heading)
 
         caption = muted(
-            "Три пути — без анкеты и без обязательной настройки ИИ. Создайте проект "
-            "с агентом, откройте готовый или начните с пустого файла вручную. "
-            "Провайдера и модель спросим только тогда, когда они действительно понадобятся.",
+            t("welcome.intro"),
             size=10,
         )
         caption.setMaximumWidth(660)
@@ -117,29 +116,29 @@ class WelcomePage(QWidget):
 
         buttons = QHBoxLayout()
         buttons.setSpacing(9)
-        self.create_button = QPushButton("Создать с ИИ")
+        self.create_button = QPushButton(t("welcome.create_ai"))
         self.create_button.setObjectName("primary")
         self.create_button.setMinimumHeight(42)
         self.create_button.setMinimumWidth(150)
         self.create_button.setFont(theme.ui_font(10, 700))
-        self.create_button.setToolTip("Опишите идею — агент соберёт игру или приложение.")
+        self.create_button.setToolTip(t("welcome.create_ai_tip"))
         self.create_button.clicked.connect(self.new_project)
         buttons.addWidget(self.create_button)
 
-        self.open_button = QPushButton("Открыть проект")
+        self.open_button = QPushButton(t("welcome.open_project"))
         self.open_button.setMinimumHeight(42)
         self.open_button.setMinimumWidth(150)
         self.open_button.setFont(theme.ui_font(10, 700))
-        self.open_button.setToolTip("Выбрать существующую папку проекта.")
+        self.open_button.setToolTip(t("welcome.open_project_tip"))
         self.open_button.clicked.connect(self.open_project)
         buttons.addWidget(self.open_button)
 
-        self.blank_button = QPushButton("Пустой проект")
+        self.blank_button = QPushButton(t("welcome.blank_project"))
         self.blank_button.setObjectName("ghost")
         self.blank_button.setMinimumHeight(42)
         self.blank_button.setMinimumWidth(150)
         self.blank_button.setFont(theme.ui_font(10, 700))
-        self.blank_button.setToolTip("Минимальный main.py и сразу редактор кода.")
+        self.blank_button.setToolTip(t("welcome.blank_project_tip"))
         self.blank_button.clicked.connect(self.new_blank_project)
         buttons.addWidget(self.blank_button)
         buttons.addStretch(1)
@@ -147,7 +146,7 @@ class WelcomePage(QWidget):
 
         links = QHBoxLayout()
         links.setSpacing(9)
-        external = QPushButton("Как подключить внешнего агента")
+        external = QPushButton(t("welcome.external_guide"))
         external.setObjectName("ghost")
         external.clicked.connect(self._open_external_guide)
         links.addWidget(external)
@@ -158,11 +157,11 @@ class WelcomePage(QWidget):
 
         steps = QVBoxLayout()
         steps.setSpacing(9)
-        steps.addWidget(self._eyebrow("ЧТО БУДЕТ ДАЛЬШЕ"))
+        steps.addWidget(self._eyebrow(t("welcome.what_next")))
         for number, title, text in (
-            ("1", "Сразу к результату", "Проект создаётся без выбора провайдера и длинной анкеты."),
-            ("2", "Прозрачный агент", "Видно, какие файлы он меняет, что получилось и что сломалось."),
-            ("3", "История и откат", "Перед каждым запуском агента сохраняется рабочая версия."),
+            ("1", t("welcome.step1_title"), t("welcome.step1_text")),
+            ("2", t("welcome.step2_title"), t("welcome.step2_text")),
+            ("3", t("welcome.step3_title"), t("welcome.step3_text")),
         ):
             row = QHBoxLayout()
             row.setSpacing(11)
@@ -197,13 +196,13 @@ class WelcomePage(QWidget):
         recent_card = Card()
         recent_card.setMinimumHeight(230)
         header = QHBoxLayout()
-        header.addWidget(title_label("Недавние проекты", 12))
+        header.addWidget(title_label(t("welcome.recent_projects"), 12))
         header.addStretch(1)
         self.recent_count = Badge("0", "default")
         header.addWidget(self.recent_count)
         recent_card.layout().addLayout(header)
         recent_card.layout().addWidget(
-            muted("Продолжите с того места, где остановились.", size=9)
+            muted(t("welcome.recent_hint"), size=9)
         )
         self.recent_box = QVBoxLayout()
         self.recent_box.setSpacing(9)
@@ -215,19 +214,18 @@ class WelcomePage(QWidget):
         right.setSpacing(16)
         ai_card = Card(soft=True)
         ai_header = QHBoxLayout()
-        ai_header.addWidget(title_label("ИИ-помощник", 11))
+        ai_header.addWidget(title_label(t("welcome.ai_helper"), 11))
         ai_header.addStretch(1)
-        self.ai_status = Badge("Проверка", "default")
+        self.ai_status = Badge(t("welcome.ai_checking"), "default")
         ai_header.addWidget(self.ai_status)
         ai_card.layout().addLayout(ai_header)
         self.ai_text = muted(
-            "Провайдер и модель понадобятся только для встроенного агента. "
-            "Можно создать проект и сначала посмотреть его.",
+            t("welcome.ai_hint"),
             size=9,
         )
         self.ai_text.setWordWrap(True)
         ai_card.layout().addWidget(self.ai_text)
-        self.ai_button = QPushButton("Настроить ИИ")
+        self.ai_button = QPushButton(t("welcome.configure_ai"))
         self.ai_button.setObjectName("teal")
         self.ai_button.clicked.connect(self.configure_ai)
         ai_card.layout().addWidget(self.ai_button)
@@ -238,15 +236,15 @@ class WelcomePage(QWidget):
 
     def _build_footer(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        hint = QLabel("Заставка Reasonable Engine всегда играет перед запуском проекта.")
+        hint = QLabel(t("welcome.footer_splash"))
         hint.setObjectName("dim")
         hint.setFont(theme.ui_font(9))
         row.addWidget(hint)
         row.addStretch(1)
-        folder = QLabel(f"Проекты: {self.settings.projects_dir()}")
+        folder = QLabel(t("welcome.projects_folder", path=self.settings.projects_dir()))
         folder.setObjectName("dim")
         folder.setFont(theme.ui_font(9))
-        folder.setToolTip("Папка по умолчанию для новых проектов. Меняется в настройках.")
+        folder.setToolTip(t("welcome.projects_folder_tip"))
         row.addWidget(folder)
         return row
 
@@ -261,9 +259,8 @@ class WelcomePage(QWidget):
             return
         QMessageBox.information(
             self,
-            "Внешний агент",
-            "Выберите «Внешний агент» при создании проекта. Редактор создаст "
-            "AGENT_GUIDE.md, skills/, re.bat и покажет прогресс агента в разделе «ИИ-агент».",
+            t("welcome.external_title"),
+            t("welcome.external_text"),
         )
 
     def refresh(self) -> None:
@@ -278,7 +275,7 @@ class WelcomePage(QWidget):
         recents = self.settings.recent_projects()
         self.recent_count.setText(str(len(recents)))
         if not recents:
-            empty = QLabel("Пока пусто. Создайте первый проект — это займёт минуту.")
+            empty = QLabel(t("welcome.recent_empty"))
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setObjectName("muted")
             empty.setWordWrap(True)
@@ -289,40 +286,40 @@ class WelcomePage(QWidget):
             grid.setSpacing(9)
             for index, entry in enumerate(recents[:4]):
                 card = ProjectCard(
-                    entry.get("name", "Проект"),
+                    entry.get("name", t("welcome.default_project_name")),
                     entry.get("goal", ""),
                     entry.get("type", "game"),
                     entry.get("path", ""),
                 )
                 card.clicked.connect(lambda path=entry.get("path", ""): self.open_recent.emit(path))
                 card.delete_requested.connect(
-                    lambda path=entry.get("path", ""), name=entry.get("name", "Проект"): self.delete_project.emit(path)
+                    lambda path=entry.get("path", ""), name=entry.get("name", t("welcome.default_project_name")): self.delete_project.emit(path)
                 )
                 grid.addWidget(card, index // 2, index % 2)
             self.recent_box.addLayout(grid)
 
         config = self.settings.get_provider_config()
-        name = config.get("name") or config.get("id") or "Не выбран"
-        model = config.get("model") or "модель не указана"
+        name = config.get("name") or config.get("id") or t("welcome.ai_not_selected")
+        model = config.get("model") or t("welcome.ai_model_unspecified")
         requires_key = config.get("requires_key") and not config.get("api_key")
         if requires_key:
-            self.ai_status.setText("Нужен ключ")
+            self.ai_status.setText(t("welcome.ai_need_key"))
             self.ai_status.set_tone("gold")
             self.ai_text.setText(
-                f"{name} · {model}\n"
-                "Встроенный агент попросит ключ, когда вы впервые попросите его изменить проект. "
-                "Создание проекта и ручная работа доступны без него."
+                f"{name} · {model}\n{t('welcome.ai_need_key_text')}"
             )
-            self.ai_button.setText("Добавить ключ")
+            self.ai_button.setText(t("welcome.ai_add_key"))
         else:
-            self.ai_status.setText("Готов")
+            self.ai_status.setText(t("welcome.ai_ready"))
             self.ai_status.set_tone("default")
             self.ai_text.setText(
                 f"{name} · {model}\n"
-                f"{'Ключ сохранён' if config.get('api_key') else 'Работает без ключа'}. "
-                "Настройка не обязательна: её можно открыть из проекта, когда понадобится."
+                + t(
+                    "welcome.ai_ready_text",
+                    key_state=t("welcome.ai_key_saved") if config.get("api_key") else t("welcome.ai_no_key_needed"),
+                )
             )
-            self.ai_button.setText("Проверить настройки")
+            self.ai_button.setText(t("welcome.ai_check_settings"))
 
     def _clear_layout(self, layout) -> None:
         while layout.count():

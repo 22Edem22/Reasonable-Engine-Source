@@ -193,14 +193,32 @@ def t(key: str, **values: Any) -> str:
         if key.startswith("tools.") and _CYRILLIC_RE.search(key):
             raise KeyError(f"Unknown translation key: {key}")
         return key
+    table = _resolve(table)
     template = table.get(current_language())
     if template is None:
         template = table[DEFAULT_LANGUAGE]
     if values:
         try:
             return template.format(**values)
-        except (KeyError, IndexError, ValueError):
+        except (KeyError, IndexError):
+            # A placeholder in the template is missing from ``values`` — e.g.
+            # a translated variant of an agent prompt uses different braces.
+            # Fall back to the Russian base template, which always matches the
+            # call-site arguments, so the text stays interpolable.
+            if isinstance(TRANSLATIONS.get(key), dict):
+                try:
+                    return TRANSLATIONS[key][DEFAULT_LANGUAGE].format(**values)
+                except (KeyError, IndexError, ValueError):
+                    return template
             return template
+        except ValueError:
+            return template
+    # No interpolation requested: strip single-brace placeholders so raw
+    # templates (e.g. extpanel.agent_prompt with {name}/{root}) never show
+    # braces to the user.  Keys listed in _RAW_TEMPLATE_KEYS are returned
+    # untouched because their callers interpolate them explicitly.
+    if key not in _RAW_TEMPLATE_KEYS and "{" in template and "}" in template and _CYRILLIC_RE.search(template):
+        return re.sub(r"\{[^{}]*\}", "", template)
     return template
 
 
@@ -226,10 +244,27 @@ def _pair(russian: str, english: str) -> dict[str, str]:
     return {"ru": russian, "en": english}
 
 
-TRANSLATIONS: dict[str, dict[str, str]] = {
+def _resolve(entry: dict[str, str] | tuple[str]) -> dict[str, str]:
+    if isinstance(entry, tuple):
+        return TRANSLATIONS[entry[0]]
+    return entry
+
+
+# Keys whose templates are interpolated by callers other than t() (e.g. the
+# external agent prompt is filled via ``agent_prompt()``); t() must return
+# them raw instead of stripping their placeholders.
+_RAW_TEMPLATE_KEYS = {"extpanel.agent_prompt"}
+
+
+TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     # -- brand ---------------------------------------------------------
     "app.tagline": _pair("Разумный движок для смелых идей", "A reasonable way to make games"),
     "app.title": _pair("Reasonable Engine — {tagline}", "Reasonable Engine — {tagline}"),
+    # -- relative time (core/paths.human_time) --------------------------
+    "time.just_now": _pair("только что", "just now"),
+    "time.seconds_ago": _pair("{count} сек. назад", "{count} s ago"),
+    "time.minutes_ago": _pair("{count} мин. назад", "{count} min ago"),
+    "time.hours_ago": _pair("{count} ч. назад", "{count} h ago"),
     # -- main window: menus -------------------------------------------
     "menu.file": _pair("Файл", "&File"),
     "menu.project": _pair("Проект", "&Project"),
@@ -408,6 +443,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "welcome.ai_not_selected": _pair("Не выбран", "Not selected"),
     "welcome.ai_model_unspecified": _pair("модель не указана", "no model set"),
     "welcome.default_project_name": _pair("Проект", "Project"),
+    "welcome.ai_ready_text": _pair(
+        "{key_state}. Настройка не обязательна: её можно открыть из проекта, когда понадобится.",
+        "{key_state}. Setup is optional: you can open it from the project when needed.",
+    ),
     # -- shared / generic ------------------------------------------------
     "common.cancel": _pair("Отмена", "Cancel"),
     "common.close": _pair("Закрыть", "Close"),
@@ -1371,4 +1410,840 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "external.check_engine": _pair("Встроенный движок", "Vendored engine"),
     "external.check_engine_hint": _pair("Проект самодостаточен", "The project is self-contained"),
     "external.readme_header": _pair("Внешний агент · {name}", "External agent · {name}"),
+    # --- Project settings dialog (editor/project_settings.py) ---
+    "projset.title": _pair("Настройки проекта", "Project settings"),
+    "projset.advanced": _pair("Расширенные параметры", "Advanced options"),
+    "projset.advanced_hint": _pair("Версия Android и служебные параметры.", "Android version and service settings."),
+    "projset.badge_builtin": _pair("ВСТРОЕННЫЙ", "BUILT-IN"),
+    "projset.badge_external": _pair("ВНЕШНИЙ", "EXTERNAL"),
+    "projset.intro": _pair(
+        "Меняйте название, цель и заметки в любой момент. Расширенные параметры — "
+        "под переключателем. Папка проекта остаётся на месте.",
+        "Change the name, goal and notes at any time. Advanced options are under "
+        "the toggle. The project folder stays where it is.",
+    ),
+    "projset.author": _pair("Автор", "Author"),
+    "projset.goal": _pair("Главная цель", "Main goal"),
+    "projset.notes_placeholder": _pair(
+        "Необязательные требования и пожелания. Первую задачу агенту пишите в разделе «ИИ-агент».",
+        "Optional requirements and wishes. Write the first task for the agent in the \"AI agent\" section.",
+    ),
+    "projset.notes": _pair("Заметки и требования", "Notes and requirements"),
+    "projset.android_version": _pair("Версия Android", "Android version"),
+    "projset.advanced_note": _pair(
+        "Параметры окна агент настраивает сам — пользователь их не видит. "
+        "Ориентация экрана для Android применяется при следующем экспорте. "
+        "Платформа проекта меняется через «Конвертировать…» — создаётся новый "
+        "проект, эта папка остаётся как есть.",
+        "The agent configures window options itself — the user does not see them. "
+        "Android screen orientation applies on the next export. The project platform "
+        "changes via \"Convert…\" — a new project is created and this folder stays as is.",
+    ),
+    "projset.save": _pair("Сохранить", "Save"),
+    "projset.empty_name": _pair("Название проекта не может быть пустым.", "The project name cannot be empty."),
+    "projset.save_error": _pair("Ошибка сохранения", "Save error"),
+    # --- Background workers (editor/workers.py) ---
+    "workers.scaffold_structure": _pair("Создаю структуру проекта…", "Creating the project structure…"),
+    "workers.scaffold_assets": _pair(
+        "Генерирую иконку, фон и стартовые спрайты…",
+        "Generating the icon, background and starter sprites…",
+    ),
+    "workers.sprite_image": _pair("Генерирую изображение…", "Generating the image…"),
+    "workers.convert_copy": _pair(
+        "Копирую проект без кэшей и старых экспортов…",
+        "Copying the project without caches and old exports…",
+    ),
+    "workers.convert_engine": _pair(
+        "Применяю настройки и встраиваю движок…",
+        "Applying settings and embedding the engine…",
+    ),
+    "workers.convert_progress": _pair(
+        "Обновляю инструкции агента и прогресс…",
+        "Updating agent instructions and progress…",
+    ),
+    "workers.provider_test_prompt": _pair(
+        "Ответь ровно одним словом: работает",
+        "Answer with exactly one word: works",
+    ),
+    "workers.provider_test_ok": _pair(
+        "Модель ответила пустым сообщением, но соединение работает.",
+        "The model returned an empty message, but the connection works.",
+    ),
+    # --- Chat panel (editor/chat.py) ---
+    "chat.role_user": _pair("Вы", "You"),
+    "chat.role_tool": _pair("Инструмент", "Tool"),
+    "chat.role_system": _pair("Система", "System"),
+    "chat.show_full": _pair("Показать полностью", "Show full text"),
+    "chat.collapse": _pair("Свернуть", "Collapse"),
+    "chat.action_create": _pair("создан", "created"),
+    "chat.action_edit": _pair("изменён", "edited"),
+    "chat.action_delete": _pair("удалён", "deleted"),
+    "chat.action_generate": _pair("сгенерирован", "generated"),
+    "chat.changes_heading": _pair("Что изменил агент", "What the agent changed"),
+    "chat.file_count": _pair("{count} файл(ов)", "{count} file(s)"),
+    "chat.no_changes": _pair(
+        "Агент не изменил файлы проекта. Проверьте план и формулировку задачи.",
+        "The agent did not change any project files. Check the plan and the task wording.",
+    ),
+    "chat.open_in_code": _pair("Клик — открыть в редакторе кода", "Click to open in the code editor"),
+    "chat.more_files": _pair(
+        "Ещё {count} файл(ов) — полный список в истории.",
+        "{count} more file(s) — the full list is in the history.",
+    ),
+    "chat.snapshot_note": _pair(
+        "Рабочая версия сохранена перед запуском: «{label}». "
+        "Если результат хуже — верните её одним кликом.",
+        "A working version was saved before the run: “{label}”. "
+        "If the result is worse, restore it with a single click.",
+    ),
+    "chat.undo_button": _pair("↶ Отменить эти изменения", "↶ Undo these changes"),
+    "chat.undo_tip": _pair(
+        "Восстановить файлы из снимка, созданного перед запуском агента",
+        "Restore files from the snapshot created before the agent run",
+    ),
+    "chat.history_button": _pair("История версий", "Version history"),
+    "chat.title": _pair("ИИ-агент", "AI agent"),
+    "chat.model_none": _pair("модель не выбрана", "no model selected"),
+    "chat.ai_fallback": _pair("ИИ", "AI"),
+    "chat.status_ready_badge": _pair("ГОТОВ", "READY"),
+    "chat.stop_button": _pair("■  Остановить", "■  Stop"),
+    "chat.clear_button": _pair("Очистить", "Clear"),
+    "chat.intro_heading": _pair("Опишите первую задачу", "Describe the first task"),
+    "chat.intro_text": _pair(
+        "Агент прочитает проект, составит план, изменит файлы и проверит запуск.",
+        "The agent will read the project, build a plan, change files and check that it runs.",
+    ),
+    "chat.suggest_vertical_slice": _pair("Собери вертикальный срез", "Build a vertical slice"),
+    "chat.suggest_vertical_slice_prompt": _pair(
+        "Собери рабочий вертикальный срез проекта и проверь запуск.",
+        "Build a working vertical slice of the project and check that it runs.",
+    ),
+    "chat.suggest_visual": _pair("Улучши визуал", "Improve the visuals"),
+    "chat.suggest_visual_prompt": _pair(
+        "Улучши визуал: фон, спрайты, частицы, анимации и переходы.",
+        "Improve the visuals: background, sprites, particles, animations and transitions.",
+    ),
+    "chat.suggest_menu": _pair("Добавь меню и сохранение", "Add a menu and saving"),
+    "chat.suggest_menu_prompt": _pair(
+        "Добавь главное меню, экран настроек и сохранение прогресса.",
+        "Add a main menu, a settings screen and progress saving.",
+    ),
+    "chat.suggest_fix": _pair("Проверь и исправь", "Check and fix"),
+    "chat.suggest_fix_prompt": _pair(
+        "Проверь проект, исправь ошибки и доведи его до стабильного запуска.",
+        "Check the project, fix the errors and bring it to a stable launch.",
+    ),
+    "chat.plan_heading": _pair("Текущий план", "Current plan"),
+    "chat.plan_hint": _pair(
+        "План появится после первой задачи: агент разобьёт работу на шаги и будет отмечать их здесь.",
+        "The plan appears after the first task: the agent will break the work into steps and mark them here.",
+    ),
+    "chat.plan_more_tasks": _pair(
+        "+{count} задач — во вкладке «Обзор».",
+        "+{count} tasks — on the \"Overview\" tab.",
+    ),
+    "chat.input_placeholder": _pair(
+        "Напишите задачу агенту…  Ctrl+Enter — отправить",
+        "Write a task for the agent…  Ctrl+Enter to send",
+    ),
+    "chat.input_hint": _pair(
+        "Агент меняет файлы в проекте и показывает прогресс.",
+        "The agent changes project files and shows progress.",
+    ),
+    "chat.send_button": _pair("Отправить", "Send"),
+    "chat.prefill_note": _pair(
+        "Задача подготовлена — проверьте текст и отправьте агенту.",
+        "Task prepared — check the text and send it to the agent.",
+    ),
+    "chat.step_progress_total": _pair(
+        "Шаг {step} из {total} · агент работает…",
+        "Step {step} of {total} · the agent is working…",
+    ),
+    "chat.step_progress": _pair("Шаг {step} · агент работает…", "Step {step} · the agent is working…"),
+    "chat.tool_label": _pair("Инструмент: {name}", "Tool: {name}"),
+    "chat.token_count": _pair("{count} токенов", "{count} tokens"),
+    "chat.snapshot_saved": _pair(
+        "Снимок рабочей версии сохранён — изменения можно отменить.",
+        "Working version snapshot saved — changes can be undone.",
+    ),
+    "chat.snapshot_failed": _pair(
+        "Не удалось сохранить снимок проекта.",
+        "Could not save the project snapshot.",
+    ),
+    "chat.done_short": _pair("Готово.", "Done."),
+    "chat.incomplete_prefix": _pair("Работа не завершена: ", "Work not finished: "),
+    "chat.incomplete_default": _pair(
+        "агент остановился раньше времени.",
+        "the agent stopped too early.",
+    ),
+    "chat.badge_done": _pair("ГОТОВО", "DONE"),
+    "chat.badge_error": _pair("ОШИБКА", "ERROR"),
+    "chat.badge_working": _pair("РАБОТАЕТ", "WORKING"),
+    "chat.badge_incomplete": _pair("НЕ ЗАВЕРШЕНО", "INCOMPLETE"),
+    "chat.badge_stopped": _pair("ОСТАНОВЛЕН", "STOPPED"),
+    "chat.finish_done": _pair(
+        "Агент завершил работу. Файлы проекта изменены, проверка и запуск пройдены.",
+        "The agent finished. Project files changed; checks and the test run passed.",
+    ),
+    "chat.finish_incomplete": _pair(
+        "Агент остановился, не доведя работу до проверки и запуска.",
+        "The agent stopped before finishing the checks and the test run.",
+    ),
+    "chat.finish_failed": _pair("Ошибка: {message}", "Error: {message}"),
+    "chat.finish_cancelled": _pair("Работа остановлена.", "Work stopped."),
+    "chat.stopping": _pair("Останавливаю…", "Stopping…"),
+    "chat.stopping_step": _pair(
+        "Останавливаю агента после текущего шага…",
+        "Stopping the agent after the current step…",
+    ),
+    "chat.studying": _pair("Агент изучает проект…", "The agent is studying the project…"),
+    "chat.not_configured_title": _pair("ИИ не настроен", "AI is not configured"),
+    "chat.not_configured_text": _pair(
+        "{reason}.\n\nОткройте настройки и выберите провайдера или добавьте ключ.",
+        "{reason}.\n\nOpen the settings and choose a provider or add a key.",
+    ),
+    "chat.agent_running_title": _pair("Агент работает", "The agent is running"),
+    "chat.agent_running_text": _pair(
+        "Сначала остановите агента.",
+        "Stop the agent first.",
+    ),
+    "chat.step_tasks": _pair("{stage}  ·  задачи {done}/{total}", "{stage}  ·  tasks {done}/{total}"),
+    # --- Reusable widgets (editor/widgets.py) ---
+    "widgets.kind_game": _pair("Игра", "Game"),
+    "widgets.kind_app": _pair("Приложение", "App"),
+    "widgets.delete_project": _pair("Удалить проект", "Delete project"),
+    # --- Export dialog (editor/export_dialog.py) ---
+    "exportdlg.android_help": _pair(
+        "Сборка APK выполняется на Linux или в WSL2:\n"
+        "\n"
+        "1. Установите WSL: wsl --install\n"
+        "2. В Ubuntu выполните:\n"
+        "   sudo apt update && sudo apt install -y git zip unzip openjdk-17-jdk \\\\\n"
+        "     autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \\\\\n"
+        "     libtinfo6 cmake libffi-dev libssl-dev\n"
+        "   pip install --user buildozer cython\n"
+        "3. cd <папка-экспорта>\n"
+        "4. buildozer -v android debug\n"
+        "5. APK появится в bin/ — установите через adb install -r bin/*.apk\n"
+        "\n"
+        "В экспортированном пакете есть README_ANDROID.md и готовый GitHub Actions\n"
+        "workflow: загрузите проект в GitHub и получите APK во вкладке Actions.",
+        "The APK is built on Linux or inside WSL2:\n"
+        "\n"
+        "1. Install WSL: wsl --install\n"
+        "2. In Ubuntu run:\n"
+        "   sudo apt update && sudo apt install -y git zip unzip openjdk-17-jdk \\\n"
+        "     autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \\\n"
+        "     libtinfo6 cmake libffi-dev libssl-dev\n"
+        "   pip install --user buildozer cython\n"
+        "3. cd <export folder>\n"
+        "4. buildozer -v android debug\n"
+        "5. The APK appears in bin/ — install it with adb install -r bin/*.apk\n"
+        "\n"
+        "The exported package contains README_ANDROID.md and a ready GitHub Actions\n"
+        "workflow: push the project to GitHub and get the APK in the Actions tab.",
+    ),
+    "exportdlg.window_title": _pair("Экспорт — Reasonable Engine", "Export — Reasonable Engine"),
+    "exportdlg.header": _pair("Экспорт проекта", "Project export"),
+    "exportdlg.subtitle": _pair(
+        "Windows — папка или .exe. Android — готовый buildozer-пакет.",
+        "Windows — folder or .exe. Android — ready-to-build buildozer package.",
+    ),
+    "exportdlg.choice_windows": _pair("WINDOWS · ПАПКА", "WINDOWS · FOLDER"),
+    "exportdlg.choice_windows_hint": _pair("Play.bat и файлы проекта.", "Play.bat and the project files."),
+    "exportdlg.choice_exe": _pair("WINDOWS · .EXE", "WINDOWS · .EXE"),
+    "exportdlg.choice_exe_hint": _pair("Один файл через PyInstaller.", "A single file via PyInstaller."),
+    "exportdlg.choice_android": _pair("ANDROID · ПАКЕТ", "ANDROID · PACKAGE"),
+    "exportdlg.choice_android_hint": _pair("buildozer.spec, ZIP и инструкция.", "buildozer.spec, a ZIP and instructions."),
+    "exportdlg.explain_windows": _pair("Папка Windows", "Windows folder"),
+    "exportdlg.explain_windows_text": _pair(
+        "Самодостаточная папка: main.py, assets/, встроенный движок и Play.bat. "
+        "Запускается на Windows с Python 3.10+. Заставка Reasonable Engine играет всегда.",
+        "A self-contained folder: main.py, assets/, the bundled engine and Play.bat. "
+        "Runs on Windows with Python 3.10+. The Reasonable Engine splash always plays.",
+    ),
+    "exportdlg.output_title": _pair("Куда сохранить", "Where to save"),
+    "exportdlg.browse": _pair("Изменить…", "Change…"),
+    "exportdlg.output_hint_windows": _pair(
+        "По умолчанию — Рабочий стол. Если папка уже есть, новая получит суффикс -2.",
+        "Defaults to the Desktop. If the folder already exists, the new one gets a -2 suffix.",
+    ),
+    "exportdlg.contents_title": _pair("Что внутри", "What is inside"),
+    "exportdlg.contents_windows": _pair(
+        "main.py · project.json · assets/ · _engine/ · progress/ · AGENT_GUIDE.md · "
+        "Play.bat · README_WINDOWS.txt · app.ico",
+        "main.py · project.json · assets/ · _engine/ · progress/ · AGENT_GUIDE.md · "
+        "Play.bat · README_WINDOWS.txt · app.ico",
+    ),
+    "exportdlg.exe_label": _pair("Имя файла .exe:", ".exe file name:"),
+    "exportdlg.exe_placeholder": _pair("например, MyGame", "for example, MyGame"),
+    "exportdlg.exe_hint": _pair(
+        "Латиницей — это имя получит готовый файл программы.",
+        "Latin letters only — this becomes the name of the finished program file.",
+    ),
+    "exportdlg.one_file": _pair(
+        "Собрать один .exe (медленнее, но удобнее для отправки)",
+        "Build a single .exe (slower, but easier to share)",
+    ),
+    "exportdlg.overall_progress": _pair("Общий прогресс", "Overall progress"),
+    "exportdlg.stage": _pair("Этап", "Stage"),
+    "exportdlg.ready": _pair("Готово", "Done"),
+    "exportdlg.open_folder": _pair("Открыть папку", "Open folder"),
+    "exportdlg.android_instructions": _pair("Инструкция Android", "Android instructions"),
+    "exportdlg.close": _pair("Закрыть", "Close"),
+    "exportdlg.export": _pair("Экспортировать", "Export"),
+    "exportdlg.explain_exe": _pair("Windows .exe через PyInstaller", "Windows .exe via PyInstaller"),
+    "exportdlg.explain_exe_text": _pair(
+        "Соберёт автономный .exe с иконкой. Первая сборка занимает несколько минут. "
+        "Если PyInstaller не установлен, установите его командой python -m pip install pyinstaller.",
+        "Builds a standalone .exe with an icon. The first build takes a few minutes. "
+        "If PyInstaller is missing, install it with: python -m pip install pyinstaller.",
+    ),
+    "exportdlg.output_hint_exe": _pair(
+        "Папка на Рабочем столе. Внутри появится .exe и вспомогательные файлы.",
+        "A folder on the Desktop. It will contain the .exe and helper files.",
+    ),
+    "exportdlg.output_hint_exe_missing": _pair(
+        "PyInstaller не найден — установите его, чтобы включить этот режим.",
+        "PyInstaller not found — install it to enable this mode.",
+    ),
+    "exportdlg.contents_exe": _pair(
+        "Исполняемый файл проекта · иконка · ассеты · встроенный движок. "
+        "Заставка и все ресурсы включены.",
+        "The project executable · icon · assets · bundled engine. "
+        "The splash screen and all resources are included.",
+    ),
+    "exportdlg.explain_android": _pair("Android-пакет", "Android package"),
+    "exportdlg.explain_android_text": _pair(
+        "Готовый проект python-for-android/buildozer с buildozer.spec, README_ANDROID.md, "
+        "иконкой, presplash и GitHub Actions. APK собирается на Linux/WSL — это ограничение buildozer, "
+        "а не движка.",
+        "A ready python-for-android/buildozer project with buildozer.spec, README_ANDROID.md, "
+        "an icon, presplash and GitHub Actions. The APK is built on Linux/WSL — that is a "
+        "buildozer limitation, not an engine one.",
+    ),
+    "exportdlg.output_hint_android": _pair(
+        "ZIP на Рабочем столе и папка проекта рядом с ним.",
+        "A ZIP on the Desktop and the project folder next to it.",
+    ),
+    "exportdlg.contents_android": _pair(
+        "main.py · buildozer.spec · assets/ · _engine/ · progress/ · README_ANDROID.md · "
+        ".github/workflows/android.yml",
+        "main.py · buildozer.spec · assets/ · _engine/ · progress/ · README_ANDROID.md · "
+        ".github/workflows/android.yml",
+    ),
+    "exportdlg.save_android": _pair("Сохранить Android-пакет", "Save the Android package"),
+    "exportdlg.pick_folder": _pair("Выберите папку для экспорта", "Choose a folder for the export"),
+    "exportdlg.apk_build_title": _pair("Сборка Android APK", "Building the Android APK"),
+    "exportdlg.apk_build_text": _pair(
+        "Android-пакет готов к сборке через buildozer.",
+        "The Android package is ready to build with buildozer.",
+    ),
+    "exportdlg.exe_name_invalid": _pair(
+        "Имя: латиница, цифры, пробел и дефис. Начинается с буквы.",
+        "Name: Latin letters, digits, spaces and hyphens. Must start with a letter.",
+    ),
+    "exportdlg.exe_ready_file": _pair("Готовый файл: {name}.exe", "Output file: {name}.exe"),
+    "exportdlg.no_path_title": _pair("Путь не задан", "No path set"),
+    "exportdlg.no_path_text": _pair(
+        "Укажите папку или файл для экспорта.",
+        "Specify a folder or file for the export.",
+    ),
+    "exportdlg.no_pyinstaller_title": _pair("PyInstaller не установлен", "PyInstaller is not installed"),
+    "exportdlg.no_pyinstaller_text": _pair(
+        "Установите PyInstaller командой:\n\npython -m pip install pyinstaller\n\n"
+        "Или выберите экспорт в папку Windows.",
+        "Install PyInstaller with:\n\npython -m pip install pyinstaller\n\n"
+        "Or choose the Windows folder export instead.",
+    ),
+    "exportdlg.exe_name_title": _pair("Имя .exe", ".exe name"),
+    "exportdlg.exe_name_text": _pair(
+        "Имя файла латиницей, начинается с буквы; допустимы цифры, пробел и дефис.",
+        "Latin file name starting with a letter; digits, spaces and hyphens are allowed.",
+    ),
+    "exportdlg.running_button": _pair("Экспортирую…", "Exporting…"),
+    "exportdlg.preparing": _pair("Подготовка…", "Preparing…"),
+    "exportdlg.again_button": _pair("Экспортировать ещё", "Export again"),
+    "exportdlg.finished_message": _pair("Экспорт завершён.", "Export finished."),
+    "exportdlg.done_prefix": _pair("Готово: ", "Done: "),
+    "exportdlg.build_time": _pair("Время сборки: {minutes} мин {seconds} с.", "Build time: {minutes} min {seconds} s."),
+    "exportdlg.splash_note": _pair(
+        "Заставка Reasonable Engine включена в сборку.",
+        "The Reasonable Engine splash screen is included in the build.",
+    ),
+    "exportdlg.next_step_android": _pair(
+        "Следующий шаг: buildozer android debug на Linux/WSL или GitHub Actions.",
+        "Next step: buildozer android debug on Linux/WSL or GitHub Actions.",
+    ),
+    "exportdlg.retry_button": _pair("Повторить экспорт", "Retry export"),
+    "exportdlg.error_prefix": _pair("Ошибка: ", "Error: "),
+    "exportdlg.failed_title": _pair("Экспорт не удался", "Export failed"),
+    "exportdlg.close_running_title": _pair("Экспорт", "Export"),
+    "exportdlg.close_running_text": _pair(
+        "Экспорт ещё выполняется. Закрыть окно?",
+        "The export is still running. Close the window?",
+    ),
+    # -- version history dialog (editor/history_dialog.py) ----------------
+    "historydlg.title": _pair("История версий — Reasonable Engine", "Version history — Reasonable Engine"),
+    "historydlg.heading": _pair("История версий", "Version history"),
+    "historydlg.subtitle": _pair(
+        "Перед каждым запуском ИИ-агента сохраняется полная рабочая версия. "
+        "Любую из них можно вернуть — текущее состояние тоже сохранится.",
+        "A full working version is saved before every AI agent run. "
+        "Any of them can be restored — the current state will be saved too.",
+    ),
+    "historydlg.create_button": _pair("＋  Создать снимок", "＋  Create snapshot"),
+    "historydlg.versions_label": _pair("Версии", "Versions"),
+    "historydlg.empty_hint": _pair(
+        "Снимков пока нет. Они появятся автоматически перед первым запуском агента "
+        "или по кнопке «Создать снимок».",
+        "No snapshots yet. They appear automatically before the first agent run "
+        "or when you press “Create snapshot”.",
+    ),
+    "historydlg.changed_suffix": _pair(" · {count} файл(ов)", " · {count} file(s)")
+    ,
+    "historydlg.files_count_tooltip": _pair("Файлов: {count}", "Files: {count}"),
+    "historydlg.saved_versions": _pair("Сохранено версий: {count}", "Saved versions: {count}"),
+    "historydlg.select_hint": _pair(
+        "Выберите версию слева, чтобы увидеть файлы и вернуть её.",
+        "Select a version on the left to see its files and restore it.",
+    ),
+    "historydlg.size_line": _pair(
+        "{time} · файлов: {count} · {kb} КБ",
+        "{time} · files: {count} · {kb} KB",
+    ),
+    "historydlg.outcome_done": _pair("Агент завершил работу", "Agent finished the work"),
+    "historydlg.outcome_incomplete": _pair("Агент не завершил работу", "Agent did not finish the work"),
+    "historydlg.outcome_cancelled": _pair("Работа остановлена", "Work cancelled"),
+    "historydlg.outcome_error": _pair("Ошибка агента", "Agent error"),
+    "historydlg.outcome_stopped": _pair("Агент остановился", "Agent stopped"),
+    "historydlg.outcome_line": _pair("Результат запуска: {outcome}", "Run outcome: {outcome}"),
+    "historydlg.changed_after_title": _pair(
+        "Файлы, изменённые после снимка", "Files changed after the snapshot"
+    ),
+    "historydlg.action_create": _pair("создан", "created"),
+    "historydlg.action_edit": _pair("изменён", "changed"),
+    "historydlg.action_delete": _pair("удалён", "deleted"),
+    "historydlg.action_generate": _pair("сгенерирован", "generated"),
+    "historydlg.snapshot_contents": _pair("Содержимое снимка", "Snapshot contents"),
+    "historydlg.restore_button": _pair("↶  Вернуть эту версию", "↶  Restore this version"),
+    "historydlg.open_folder_button": _pair("Открыть папку снимка", "Open snapshot folder"),
+    "historydlg.delete_button": _pair("Удалить снимок", "Delete snapshot"),
+    "historydlg.manual_snapshot_label": _pair(
+        "Ручной снимок рабочей версии", "Manual snapshot of the working version"
+    ),
+    "historydlg.create_failed_title": _pair("Не удалось создать снимок", "Could not create a snapshot"),
+    "historydlg.created_status": _pair(
+        "Снимок создан. Теперь его можно вернуть в любой момент.",
+        "Snapshot created. You can restore it at any time now.",
+    ),
+    "historydlg.restore_title": _pair("Вернуть версию", "Restore version"),
+    "historydlg.restore_text": _pair(
+        "Вернуть версию «{label}»?\n\n"
+        "Файлы проекта будут заменены содержимым снимка. Текущее состояние "
+        "сначала сохранится отдельным снимком, поэтому действие можно отменить.",
+        "Restore the version “{label}”?\n\n"
+        "Project files will be replaced with the snapshot contents. The current state "
+        "is saved as a separate snapshot first, so the action can be undone.",
+    ),
+    "historydlg.restore_failed_title": _pair(
+        "Не удалось вернуть версию", "Could not restore the version"
+    ),
+    "historydlg.restored_status": _pair(
+        "Версия возвращена: файлов восстановлено {restored}, "
+        "удалено {removed}. Текущее состояние сохранено отдельно.",
+        "Version restored: {restored} file(s) recovered, "
+        "{removed} deleted. The current state was saved separately.",
+    ),
+    "historydlg.delete_text": _pair(
+        "Удалить снимок «{label}»? Это освободит место, но вернуть "
+        "эту версию будет уже нельзя.",
+        "Delete the snapshot “{label}”? This frees up space, but this version "
+        "can no longer be restored.",
+    ),
+    "historydlg.deleted_status": _pair("Снимок удалён.", "Snapshot deleted."),
+    # -- convert dialog (editor/convert_dialog.py) -------------------------
+    "convdlg.title": _pair("Конвертировать проект — Reasonable Engine", "Convert project — Reasonable Engine"),
+    "convdlg.heading": _pair("Конвертировать проект", "Convert project"),
+    "convdlg.subtitle": _pair(
+        "Создаётся отдельная папка. Исходный проект остаётся без изменений.",
+        "A separate folder is created. The source project stays unchanged.",
+    ),
+    "convdlg.result_ready": _pair("Новый проект готов", "New project is ready"),
+    "convdlg.open_folder": _pair("Открыть папку", "Open folder"),
+    "convdlg.open_new": _pair("Открыть новый проект", "Open the new project"),
+    "convdlg.create_button": _pair("Создать новый проект", "Create a new project"),
+    "convdlg.platform_new": _pair("Новая платформа", "New platform"),
+    "convdlg.platform_current": _pair("Сейчас: {name}", "Now: {name}"),
+    "convdlg.platform_windows_hint": _pair("Папка, Play.bat и опционально .exe", "Folder, Play.bat and optionally .exe"),
+    "convdlg.platform_android_hint": _pair(
+        "buildozer-пакет, касания и портрет/альбом", "buildozer package, touches and portrait/landscape"
+    ),
+    "convdlg.name_folder_title": _pair("Название и папка", "Name and folder"),
+    "convdlg.name_placeholder": _pair("Название нового проекта", "New project name"),
+    "convdlg.field_name": _pair("Название", "Name"),
+    "convdlg.field_folder": _pair("Папка", "Folder"),
+    "convdlg.browse_button": _pair("Выбрать…", "Browse…"),
+    "convdlg.folder_hint": _pair(
+        "В выбранной папке появится новая подпапка. Если имя занято, добавится суффикс -2.",
+        "A new subfolder appears in the chosen folder. If the name is taken, a -2 suffix is added.",
+    ),
+    "convdlg.options_title": _pair("Что ещё можно изменить", "What else can be changed"),
+    "convdlg.keep_as_project": _pair("Как в проекте", "As in the project"),
+    "convdlg.orientation_landscape": _pair("Альбомная", "Landscape"),
+    "convdlg.orientation_portrait": _pair("Портретная", "Portrait"),
+    "convdlg.field_orientation": _pair("Ориентация", "Orientation"),
+    "convdlg.agent_builtin": _pair("Встроенный ИИ", "Built-in AI"),
+    "convdlg.agent_external": _pair("Внешний агент", "External agent"),
+    "convdlg.field_agent_mode": _pair("Режим агента", "Agent mode"),
+    "convdlg.field_ui_levels": _pair("Уровень интерфейса", "Interface level"),
+    "convdlg.reset_check": _pair(
+        "Сбросить план, прогресс и ленту событий в новом проекте",
+        "Reset the plan, progress and event feed in the new project",
+    ),
+    "convdlg.options_note": _pair(
+        "Окно, разрешение и ориентацию агент подберёт сам — здесь это не настраивается. "
+        "Код и ассеты не переписываются: после создания попросите агента адаптировать "
+        "компоновку под новую платформу. APK собирается через buildozer на Linux/WSL2.",
+        "The agent picks window, resolution and orientation itself — not configurable here. "
+        "Code and assets are not rewritten: after creation ask the agent to adapt "
+        "the layout to the new platform. The APK is built via buildozer on Linux/WSL2.",
+    ),
+    "convdlg.preview_title": _pair("Предпросмотр", "Preview"),
+    "convdlg.limits_title": _pair("Что важно знать", "What you should know"),
+    "convdlg.limits_note": _pair(
+        "Платформа — главная ось конвертации. Ориентация, агент и уровни интерфейса "
+        "применяются к копии сразу. Код и ассеты не переписываются: после создания "
+        "попросите агента адаптировать компоновку, управление и safe margins под Android. "
+        "APK по-прежнему собирается через buildozer на Linux/WSL2.",
+        "Platform is the main conversion axis. Orientation, agent and interface levels "
+        "apply to the copy immediately. Code and assets are not rewritten: after creation "
+        "ask the agent to adapt the layout, controls and safe margins for Android. "
+        "The APK is still built via buildozer on Linux/WSL2.",
+    ),
+    "convdlg.hint_android": _pair(
+        "Android: проект получит android-ориентацию и пакет. "
+        "Проверьте касания и размеры элементов; APK собирается на Linux/WSL2.",
+        "Android: the project gets android orientation and packaging. "
+        "Check touches and element sizes; the APK is built on Linux/WSL2.",
+    ),
+    "convdlg.hint_windows": _pair(
+        "Windows: проект будет ориентирован на окно Windows, папку и .exe. "
+        "Ориентация портрет тоже поддерживается, если она нужна приложению.",
+        "Windows: the project targets a Windows window, folder and .exe. "
+        "Portrait orientation is also supported if the app needs it.",
+    ),
+    "convdlg.hint_same_platform": _pair(
+        " Платформа не меняется — это будет новая версия проекта.",
+        " The platform does not change — this will be a new version of the project.",
+    ),
+    "convdlg.browse_title": _pair("Куда сохранить новый проект", "Where to save the new project"),
+    "convdlg.badge_error": _pair("Ошибка", "Error"),
+    "convdlg.badge_ready": _pair("ГОТОВО", "READY"),
+    "convdlg.badge_no_changes": _pair("БЕЗ ИЗМЕНЕНИЙ", "NO CHANGES"),
+    "convdlg.no_changes_hint": _pair(
+        "Измените платформу, имя, ориентацию, уровни интерфейса, агент или прогресс — "
+        "точную копию можно создать только с хотя бы одним отличием.",
+        "Change the platform, name, orientation, interface levels, agent or progress — "
+        "an exact copy can only be created with at least one difference.",
+    ),
+    "convdlg.new_project_path": _pair("Новый проект: {path}", "New project: {path}"),
+    "convdlg.copying_status": _pair("Копирую проект…", "Copying the project…"),
+    "convdlg.running_button": _pair("Конвертирую…", "Converting…"),
+    "convdlg.created_message": _pair("Новый проект создан.", "The new project was created."),
+    "convdlg.another_copy_button": _pair("Создать ещё одну копию", "Create another copy"),
+    "convdlg.source_unchanged": _pair("Исходный проект не изменён.", "The source project was not changed."),
+    "convdlg.error_prefix": _pair("Ошибка: ", "Error: "),
+    "convdlg.failed_title": _pair("Конвертация не удалась", "Conversion failed"),
+    "convdlg.close_running_title": _pair("Конвертация", "Conversion"),
+    "convdlg.close_running_text": _pair(
+        "Конвертация ещё выполняется. Закрыть окно?",
+        "The conversion is still running. Close the window?",
+    ),
+
+    # ---- editor/external.py — external agent panel (prefix extpanel.) ----
+    "extpanel.agent_prompt": _pair(
+        """Ты работаешь над проектом «{name}» в папке:
+{root}
+
+1. Прочитай AGENT_GUIDE.md, skills/ и progress/state.json — там полные правила и API движка.
+2. Работай автономно: меняй файлы, генерируй ассеты, проверяй запуск (re.bat validate, re.bat run --headless).
+3. Обновляй план и прогресс через re.bat (plan/task/progress/event) — пользователь видит его в Reasonable Engine.
+4. Заверши через re.bat done "итог" только когда проект запускается и задача выполнена.
+
+Не трогай папку _engine — это встроенная копия движка. Шаги не ограничены:
+работай до результата, не повторяй одно и то же действие.""",
+        """You are working on the project "{name}" in the folder:
+{root}
+
+1. Read AGENT_GUIDE.md, skills/ and progress/state.json — they contain the full rules and engine API.
+2. Work autonomously: change files, generate assets, verify the run (re.bat validate, re.bat run --headless).
+3. Update the plan and progress via re.bat (plan/task/progress/event) — the user sees it in Reasonable Engine.
+4. Finish via re.bat done "summary" only when the project runs and the task is complete.
+
+Do not touch the _engine folder — it is a built-in copy of the engine. Steps are unlimited:
+work until there is a result, do not repeat the same action.""",
+    ),
+    "extpanel.title": ("section.agent",),  # reuse: "ИИ-агент" / "AI agent"
+    "extpanel.subtitle": _pair(
+        "Внешний режим · Claude Code / Codex / Cursor / Cline — прогресс виден здесь",
+        "External mode · Claude Code / Codex / Cursor / Cline — progress shows here",
+    ),
+    "extpanel.badge_waiting": _pair("ОЖИДАНИЕ", "WAITING"),
+    "extpanel.pack_button": _pair("Обновить пакет агента", "Refresh the agent pack"),
+    "extpanel.open_folder_button": _pair("Открыть папку проекта", "Open the project folder"),
+    "extpanel.howto_title": _pair("Как подключить агента", "How to connect an agent"),
+    "extpanel.step1_title": _pair("Откройте папку проекта", "Open the project folder"),
+    "extpanel.step1_text": _pair(
+        "В Claude Code, Codex CLI, Cursor, Cline или другом агенте откройте папку проекта.",
+        "Open the project folder in Claude Code, Codex CLI, Cursor, Cline or another agent.",
+    ),
+    "extpanel.step2_title": _pair("Вставьте промпт", "Paste the prompt"),
+    "extpanel.step2_text": _pair(
+        "Скопируйте промпт ниже и вставьте его агенту — при желании сначала допишите свою задачу.",
+        "Copy the prompt below and paste it to the agent — optionally add your own task first.",
+    ),
+    "extpanel.step3_title": _pair("Смотрите прогресс здесь", "Watch the progress here"),
+    "extpanel.step3_text": _pair(
+        "Агент обновляет план и процент сам — эта панель следит за папкой проекта.",
+        "The agent updates the plan and percentage itself — this panel watches the project folder.",
+    ),
+    "extpanel.prompt_card_title": _pair("Промпт для внешнего агента", "Prompt for the external agent"),
+    "extpanel.copy_prompt_button": _pair("Скопировать промпт", "Copy the prompt"),
+    "extpanel.prompt_note": _pair(
+        "Напишите задачу своими словами. Ниже показан полный текст, который "
+        "получит агент: путь к проекту, обязательный рабочий цикл и ваша задача. "
+        "Кнопка копирует именно его.",
+        "Write the task in your own words. Below is the full text the agent "
+        "will receive: the project path, the required work loop and your task. "
+        "The button copies exactly that.",
+    ),
+    "extpanel.task_label": _pair("Ваша задача", "Your task"),
+    "extpanel.task_placeholder": _pair(
+        "Например: собери меню, первый уровень и экран паузы, затем проверь запуск.",
+        "For example: build a menu, the first level and a pause screen, then verify the run.",
+    ),
+    "extpanel.full_prompt_label": _pair("Полный промпт", "Full prompt"),
+    "extpanel.copy_task_button": _pair("Скопировать только задачу", "Copy only the task"),
+    "extpanel.pack_ready": _pair(
+        "Пакет для агента готов ✓  (AGENT_GUIDE.md, skills/, AGENTS.md, re.bat)",
+        "The agent pack is ready ✓  (AGENT_GUIDE.md, skills/, AGENTS.md, re.bat)",
+    ),
+    "extpanel.live_title": _pair("Живой прогресс", "Live progress"),
+    "extpanel.mode_badge": _pair("ВНЕШНИЙ РЕЖИМ", "EXTERNAL MODE"),
+    "extpanel.waiting_stage": _pair("Ожидание внешнего агента", "Waiting for the external agent"),
+    "extpanel.events_title": _pair("Лента событий", "Event feed"),
+    "extpanel.files_title": _pair("Недавние файлы", "Recent files"),
+    "extpanel.open_guide_button": _pair("Открыть AGENT_GUIDE.md", "Open AGENT_GUIDE.md"),
+    "extpanel.first_task": _pair("ПЕРВАЯ ЗАДАЧА", "FIRST TASK"),
+    "extpanel.first_task_default": _pair(
+        "Изучи проект, предложи план и начни с самого важного шага.",
+        "Study the project, propose a plan and start with the most important step.",
+    ),
+    "extpanel.hint_task_added": _pair("Задача добавлена в промпт · {count} символов", "Task added to the prompt · {count} characters"),
+    "extpanel.hint_no_task": _pair(
+        "Пока задача не написана — в промпте будет просьба изучить проект и предложить план.",
+        "No task written yet — the prompt will ask the agent to study the project and propose a plan.",
+    ),
+    "extpanel.no_task_title": _pair("Задача не описана", "No task described"),
+    "extpanel.no_task_copy_text": _pair(
+        "Скопировать промпт без конкретной задачи? Агент просто изучит проект "
+        "и предложит план.\n\nЛучше сначала написать задачу.",
+        "Copy the prompt without a specific task? The agent will simply study the "
+        "project and propose a plan.\n\nIt is better to write the task first.",
+    ),
+    "extpanel.no_task_only_text": _pair(
+        "Напишите задачу в поле выше, чтобы скопировать только её.",
+        "Write the task in the field above to copy only it.",
+    ),
+    "extpanel.copied_status": _pair("Скопировано в буфер обмена.", "Copied to the clipboard."),
+    "extpanel.badge_copied": _pair("СКОПИРОВАНО", "COPIED"),
+    "extpanel.file_not_created": _pair("Файл ещё не создан: {name}", "The file does not exist yet: {name}"),
+    "extpanel.pack_failed_status": _pair("Не удалось обновить пакет: {error}", "Failed to refresh the pack: {error}"),
+    "extpanel.pack_failed_text": _pair(
+        "Не удалось обновить пакет — попробуйте ещё раз.",
+        "Failed to refresh the pack — please try again.",
+    ),
+    "extpanel.pack_updated_status": _pair("Пакет агента обновлён.", "The agent pack was refreshed."),
+    "extpanel.badge_pack_updated": _pair("ПАКЕТ ОБНОВЛЁН", "PACK REFRESHED"),
+    "extpanel.badge_running": _pair("АГЕНТ РАБОТАЕТ", "AGENT RUNNING"),
+    "extpanel.badge_done": _pair("ЗАВЕРШЕНО", "DONE"),
+    "extpanel.badge_error": _pair("ОШИБКА", "ERROR"),
+    "extpanel.activity_prefix": _pair("активность: ", "activity: "),
+    "extpanel.stage_idle": ("progress.idle_stage",),
+    "extpanel.last_activity": _pair("Последняя активность: {time}", "Last activity: {time}"),
+    "extpanel.no_plan": _pair("Агент ещё не создал план.", "The agent has not created a plan yet."),
+    "extpanel.no_files": _pair("Пока нет изменённых файлов.", "No changed files yet."),
+
+    # -- assets page / generation dialog -------------------------------
+    "assets.gen_title_bg": _pair("Генерация фона", "Background generation"),
+    "assets.gen_title_sprite": _pair("Генерация спрайта", "Sprite generation"),
+    "assets.new_bg": _pair("Новый фон", "New background"),
+    "assets.new_sprite": _pair("Новый спрайт", "New sprite"),
+    "assets.badge_ai_gen": _pair("ИИ-ГЕНЕРАЦИЯ", "AI GENERATION"),
+    "assets.intro": _pair(
+        "Опишите предмет или сцену. Для спрайтов лучше короткие промпты и прозрачный фон.",
+        "Describe the object or scene. Short prompts and a transparent background work best for sprites.",
+    ),
+    "assets.filename_label": _pair("Имя файла", "File name"),
+    "assets.prompt_example_sprite": _pair(
+        "Например: золотая звезда с мягким свечением, флэт-стиль, прозрачный фон",
+        "For example: a golden star with a soft glow, flat style, transparent background",
+    ),
+    "assets.prompt_example_bg": _pair(
+        "Например: ночной лес с светлячками, мягкий туман, тёмно-синяя палитра",
+        "For example: a night forest with fireflies, soft fog, dark blue palette",
+    ),
+    "assets.style_label": _pair("Стиль", "Style"),
+    "assets.style_flat": _pair("Флэт", "Flat"),
+    "assets.style_pixel": _pair("Пиксель-арт", "Pixel art"),
+    "assets.style_painterly": _pair("Живописный", "Painterly"),
+    "assets.style_icon": _pair("Иконка", "Icon"),
+    "assets.size_label": _pair("Размер", "Size"),
+    "assets.provider_label": _pair("Провайдер", "Provider"),
+    "assets.random_button": _pair("Случайный", "Random"),
+    "assets.preview_placeholder": _pair("Здесь появится результат", "The result will appear here"),
+    "assets.generate_button": _pair("Сгенерировать", "Generate"),
+    "assets.generate_again_button": _pair("Сгенерировать ещё", "Generate another"),
+    "assets.note_procedural": _pair(
+        "Локальный процедурный генератор: быстро, без сети, стилизованные формы.",
+        "Local procedural generator: fast, offline, stylized shapes.",
+    ),
+    "assets.note_openai": _pair(
+        "OpenAI-совместимый сервер изображений. Нужны Base URL и ключ в настройках.",
+        "OpenAI-compatible image server. Requires a Base URL and key in settings.",
+    ),
+    "assets.need_prompt_title": _pair("Нужен промпт", "Prompt required"),
+    "assets.need_prompt_text": _pair(
+        "Опишите, что должно быть на изображении.",
+        "Describe what the image should show.",
+    ),
+    "assets.status_generating": _pair("Генерирую изображение…", "Generating the image…"),
+    "assets.status_done": _pair("Готово: {name} · {provider} {fallback}", "Done: {name} · {provider} {fallback}"),
+    "assets.status_done_fallback": _pair("· локальный fallback", "· local fallback"),
+    "assets.error_prefix": _pair("Ошибка: ", "Error: "),
+    "assets.failed_title": _pair("Не удалось сгенерировать", "Generation failed"),
+    "assets.close_running_title": _pair("Генерация", "Generation"),
+    "assets.close_running_text": _pair(
+        "Изображение ещё генерируется. Закрыть окно?",
+        "The image is still being generated. Close the window?",
+    ),
+    "assets.page_title": ("section.assets",),
+    "assets.page_subtitle": _pair(
+        "Спрайты, фоны и звуки проекта. Генерация встроена.",
+        "Sprites, backgrounds and sounds of the project. Generation is built in.",
+    ),
+    "assets.import_button": _pair("Импортировать", "Import"),
+    "assets.open_folder_button": _pair("Открыть папку", "Open folder"),
+    "assets.background_button": _pair("Фон", "Background"),
+    "assets.gen_sprite_button": _pair("Сгенерировать спрайт", "Generate sprite"),
+    "assets.library_title": _pair("Библиотека", "Library"),
+    "assets.search_placeholder": _pair("Поиск по имени…", "Search by name…"),
+    "assets.preview_title": _pair("Предпросмотр", "Preview"),
+    "assets.choose_asset": _pair("Выберите ассет", "Select an asset"),
+    "assets.delete_button": _pair("Удалить", "Delete"),
+    "assets.edit_button": _pair("Открыть в редакторе", "Open in editor"),
+    "assets.empty_list": _pair(
+        "Ассетов пока нет.\nСгенерируйте спрайт или импортируйте файл.",
+        "No assets yet.\nGenerate a sprite or import a file.",
+    ),
+    "assets.badge_empty": _pair("ПУСТО", "EMPTY"),
+    "assets.badge_image": _pair("ИЗОБРАЖЕНИЕ", "IMAGE"),
+    "assets.badge_sound": _pair("ЗВУК", "SOUND"),
+    "assets.badge_file": _pair("ФАЙЛ", "FILE"),
+    "assets.meta_kb": _pair("{size} КБ", "{size} KB"),
+    "assets.meta_image": _pair(
+        "{width} × {height} px  ·  {size} КБ\n{suffix}",
+        "{width} × {height} px  ·  {size} KB\n{suffix}",
+    ),
+    "assets.image_open_failed": _pair("Не удалось открыть изображение", "Could not open the image"),
+    "assets.audio_file": _pair("Аудиофайл  ·  {size} КБ", "Audio file  ·  {size} KB"),
+    "assets.no_preview": _pair("\nПредпросмотр недоступен", "\nPreview unavailable"),
+    "assets.created_status": _pair("Ассет создан: {rel}", "Asset created: {rel}"),
+    "assets.import_dialog_title": _pair("Импортировать файлы", "Import files"),
+    "assets.import_filter": _pair(
+        "Изображения и звуки (*.png *.jpg *.jpeg *.webp *.gif *.wav *.ogg *.mp3);;Все файлы (*.*)",
+        "Images and sounds (*.png *.jpg *.jpeg *.webp *.gif *.wav *.ogg *.mp3);;All files (*.*)",
+    ),
+    "assets.import_error_title": _pair("Импорт", "Import"),
+    "assets.import_error_text": _pair(
+        "Не удалось скопировать {name}: {error}",
+        "Could not copy {name}: {error}",
+    ),
+    "assets.imported_status": _pair("Импортировано файлов: {count}", "Files imported: {count}"),
+    "assets.delete_title": _pair("Удалить ассет", "Delete asset"),
+    "assets.delete_text": _pair(
+        "Удалить {rel}? Это действие нельзя отменить.",
+        "Delete {rel}? This action cannot be undone.",
+    ),
+    "assets.delete_error_title": _pair("Ошибка удаления", "Deletion error"),
+    "assets.deleted_status": _pair("Удалено: {rel}", "Deleted: {rel}"),
+
+    # -- code page (editor) ---------------------------------------------
+    "code.page_title": _pair("Код проекта", "Project code"),
+    "code.page_subtitle": _pair(
+        "Полноценный редактор: правьте файлы вручную или вместе с агентом.",
+        "A full editor: fix files by hand or together with the agent.",
+    ),
+    "code.validate_button": _pair("Проверить", "Validate"),
+    "code.run_button": ("projectpage.run_btn",),
+    "code.files_title": _pair("Файлы", "Files"),
+    "code.refresh_button": _pair("Обновить", "Refresh"),
+    "code.refresh_tip": _pair("Обновить дерево файлов", "Refresh the file tree"),
+    "code.search_placeholder": _pair("Поиск файла…", "Search for a file…"),
+    "code.new_file_button": _pair("+ Файл", "+ File"),
+    "code.new_folder_button": _pair("+ Папка", "+ Folder"),
+    "code.no_file_selected": _pair("Файл не выбран", "No file selected"),
+    "code.badge_modified": _pair("ИЗМЕНЁН", "MODIFIED"),
+    "code.save_button": _pair("Сохранить", "Save"),
+    "code.empty_title": _pair("Выберите файл", "Pick a file"),
+    "code.empty_text": _pair(
+        "Слева — дерево проекта. Кликните по файлу, чтобы открыть его. Ctrl+S сохраняет.",
+        "On the left is the project tree. Click a file to open it. Ctrl+S saves.",
+    ),
+    "code.status_ready": _pair("Готово", "Ready"),
+    "code.tree_root": _pair("Проект", "Project"),
+    "code.file_not_found": _pair("Файл не найден: {path}", "File not found: {path}"),
+    "code.binary_file": _pair("Бинарный файл — предпросмотр недоступен.", "Binary file — preview unavailable."),
+    "code.read_error_title": _pair("Ошибка чтения", "Read error"),
+    "code.image_open_failed": _pair("Не удалось открыть изображение.", "Could not open the image."),
+    "code.image_caption": _pair("{path}  ·  {width} × {height} px  ·  {kb} КБ", "{path}  ·  {width} × {height} px  ·  {kb} KB"),
+    "code.cursor_status": _pair(
+        "Строка {line}, столбец {column}   ·   {count} символов   ·   UTF-8",
+        "Line {line}, column {column}   ·   {count} characters   ·   UTF-8",
+    ),
+    "code.image_preview_status": _pair("Предпросмотр изображения", "Image preview"),
+    "code.unsaved_title": _pair("Несохранённые изменения", "Unsaved changes"),
+    "code.unsaved_text": _pair("Сохранить изменения в {path}?", "Save the changes in {path}?"),
+    "code.saved_status": _pair("Сохранено: {path}", "Saved: {path}"),
+    "code.save_error_title": _pair("Ошибка сохранения", "Save error"),
+    "code.agent_updated_file": _pair("Файл обновлён агентом: {path}", "File updated by the agent: {path}"),
+    "code.new_file_title": _pair("Новый файл", "New file"),
+    "code.new_file_label": _pair("Путь внутри проекта:", "Path inside the project:"),
+    "code.file_exists_title": _pair("Файл существует", "File exists"),
+    "code.file_exists_text": _pair("Такой файл уже есть.", "This file already exists."),
+    "code.create_file_error": _pair("Не удалось создать файл", "Could not create the file"),
+    "code.new_folder_title": _pair("Новая папка", "New folder"),
+    "code.create_folder_error": _pair("Не удалось создать папку", "Could not create the folder"),
+    "code.menu_open": _pair("Открыть", "Open"),
+    "code.menu_rename": _pair("Переименовать…", "Rename…"),
+    "code.menu_delete": ("assets.delete_button",),
+    "code.rename_title": _pair("Переименовать", "Rename"),
+    "code.rename_label": _pair("Новый путь:", "New path:"),
+    "code.rename_exists_title": _pair("Уже существует", "Already exists"),
+    "code.rename_exists_text": _pair("Файл или папка с таким именем уже есть.", "A file or folder with this name already exists."),
+    "code.rename_error_title": _pair("Ошибка переименования", "Rename error"),
+    "code.delete_text": _pair("Удалить {path}? Действие нельзя отменить.", "Delete {path}? This action cannot be undone."),
+    "code.delete_error_title": ("assets.delete_error_title",),
+    "code.validate_ok_title": _pair("Проверка", "Validation"),
+    "code.validate_ok_text": _pair(
+        "Всё в порядке: структура и синтаксис корректны.",
+        "All good: the structure and syntax are correct.",
+    ),
+    "code.validate_passed": _pair("Проверка пройдена.", "Validation passed."),
+    "code.validate_errors_title": _pair("Найдены ошибки", "Errors found"),
+    "code.validate_summary": _pair(
+        "Проверка: ошибок {errors}, предупреждений {warnings}.",
+        "Validation: {errors} errors, {warnings} warnings.",
+    ),
 }

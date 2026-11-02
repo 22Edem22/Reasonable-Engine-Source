@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from reasonable.core.i18n import t
 from reasonable.core.paths import human_time
 from reasonable.core.progress import (
     activity_is_live,
@@ -42,16 +43,8 @@ from . import theme
 from .widgets import Badge, Card, Separator, muted, title_label
 
 
-AGENT_PROMPT = """Ты работаешь над проектом «{name}» в папке:
-{root}
-
-1. Прочитай AGENT_GUIDE.md, skills/ и progress/state.json — там полные правила и API движка.
-2. Работай автономно: меняй файлы, генерируй ассеты, проверяй запуск (re.bat validate, re.bat run --headless).
-3. Обновляй план и прогресс через re.bat (plan/task/progress/event) — пользователь видит его в Reasonable Engine.
-4. Заверши через re.bat done "итог" только когда проект запускается и задача выполнена.
-
-Не трогай папку _engine — это встроенная копия движка. Шаги не ограничены:
-работай до результата, не повторяй одно и то же действие."""
+def agent_prompt(name: str, root: str) -> str:
+    return t("extpanel.agent_prompt", name=name, root=root)
 
 
 class ExternalAgentPanel(QWidget):
@@ -96,24 +89,24 @@ class ExternalAgentPanel(QWidget):
         row.addWidget(icon)
         titles = QVBoxLayout()
         titles.setSpacing(1)
-        title = QLabel("ИИ-агент")
+        title = QLabel(t("extpanel.title"))
         title.setObjectName("title")
         title.setFont(theme.display_font(12, 700))
         titles.addWidget(title)
         titles.addWidget(
-            muted("Внешний режим · Claude Code / Codex / Cursor / Cline — прогресс виден здесь", size=9)
+            muted(t("extpanel.subtitle"), size=9)
         )
         row.addLayout(titles)
         row.addStretch(1)
-        self.status_badge = Badge("ОЖИДАНИЕ", "default")
+        self.status_badge = Badge(t("extpanel.badge_waiting"), "default")
         row.addWidget(self.status_badge)
         self.activity_label = muted("", size=9)
         row.addWidget(self.activity_label)
-        pack_button = QPushButton("Обновить пакет агента")
+        pack_button = QPushButton(t("extpanel.pack_button"))
         pack_button.setObjectName("teal")
         pack_button.clicked.connect(self._regenerate_pack)
         row.addWidget(pack_button)
-        folder_button = QPushButton("Открыть папку проекта")
+        folder_button = QPushButton(t("extpanel.open_folder_button"))
         folder_button.clicked.connect(self._open_folder)
         row.addWidget(folder_button)
         card.layout().addLayout(row)
@@ -131,11 +124,11 @@ class ExternalAgentPanel(QWidget):
         scroll.setWidget(host)
 
         card = Card()
-        card.layout().addWidget(title_label("Как подключить агента", 13))
+        card.layout().addWidget(title_label(t("extpanel.howto_title"), 13))
         steps = (
-            ("1", "Откройте папку проекта", "В Claude Code, Codex CLI, Cursor, Cline или другом агенте откройте папку проекта."),
-            ("2", "Вставьте промпт", "Скопируйте промпт ниже и вставьте его агенту — при желании сначала допишите свою задачу."),
-            ("3", "Смотрите прогресс здесь", "Агент обновляет план и процент сам — эта панель следит за папкой проекта."),
+            ("1", t("extpanel.step1_title"), t("extpanel.step1_text")),
+            ("2", t("extpanel.step2_title"), t("extpanel.step2_text")),
+            ("3", t("extpanel.step3_title"), t("extpanel.step3_text")),
         )
         for number, title, text in steps:
             row = QHBoxLayout()
@@ -160,23 +153,18 @@ class ExternalAgentPanel(QWidget):
 
         prompt_card = Card(soft=True)
         top = QHBoxLayout()
-        top.addWidget(title_label("Промпт для внешнего агента", 11))
+        top.addWidget(title_label(t("extpanel.prompt_card_title"), 11))
         top.addStretch(1)
-        copy_prompt = QPushButton("Скопировать промпт")
+        copy_prompt = QPushButton(t("extpanel.copy_prompt_button"))
         copy_prompt.setObjectName("primary")
         copy_prompt.clicked.connect(self._copy_prompt)
         top.addWidget(copy_prompt)
         prompt_card.layout().addLayout(top)
         prompt_card.layout().addWidget(
-            muted(
-                "Напишите задачу своими словами. Ниже показан полный текст, который "
-                "получит агент: путь к проекту, обязательный рабочий цикл и ваша задача. "
-                "Кнопка копирует именно его.",
-                size=9,
-            )
+            muted(t("extpanel.prompt_note"), size=9)
         )
 
-        task_label = QLabel("Ваша задача")
+        task_label = QLabel(t("extpanel.task_label"))
         task_label.setFont(theme.ui_font(9, 700))
         prompt_card.layout().addWidget(task_label)
         self.first_task_edit = QTextEdit()
@@ -184,17 +172,17 @@ class ExternalAgentPanel(QWidget):
         self.first_task_edit.setMinimumHeight(92)
         self.first_task_edit.setMaximumHeight(140)
         self.first_task_edit.setPlaceholderText(
-            "Например: собери меню, первый уровень и экран паузы, затем проверь запуск."
+            t("extpanel.task_placeholder")
         )
         self.first_task_edit.textChanged.connect(self._update_prompt_preview)
         prompt_card.layout().addWidget(self.first_task_edit)
 
         preview_row = QHBoxLayout()
-        preview_label = QLabel("Полный промпт")
+        preview_label = QLabel(t("extpanel.full_prompt_label"))
         preview_label.setFont(theme.ui_font(9, 700))
         preview_row.addWidget(preview_label)
         preview_row.addStretch(1)
-        copy_task = QPushButton("Скопировать только задачу")
+        copy_task = QPushButton(t("extpanel.copy_task_button"))
         copy_task.setObjectName("ghost")
         copy_task.clicked.connect(self._copy_task_only)
         preview_row.addWidget(copy_task)
@@ -216,7 +204,7 @@ class ExternalAgentPanel(QWidget):
 
         # The agent pack contents are intentionally not enumerated here: the
         # user only needs to know the pack exists and is up to date.
-        pack_status = muted("Пакет для агента готов ✓  (AGENT_GUIDE.md, skills/, AGENTS.md, re.bat)", size=9)
+        pack_status = muted(t("extpanel.pack_ready"), size=9)
         layout.addWidget(pack_status)
         self.pack_status = pack_status
         layout.addStretch(1)
@@ -235,12 +223,12 @@ class ExternalAgentPanel(QWidget):
 
         state_card = Card()
         top = QHBoxLayout()
-        top.addWidget(title_label("Живой прогресс", 13))
+        top.addWidget(title_label(t("extpanel.live_title"), 13))
         top.addStretch(1)
-        self.mode_badge = Badge("ВНЕШНИЙ РЕЖИМ", "default")
+        self.mode_badge = Badge(t("extpanel.mode_badge"), "default")
         top.addWidget(self.mode_badge)
         state_card.layout().addLayout(top)
-        self.stage_label = muted("Ожидание внешнего агента", size=10)
+        self.stage_label = muted(t("extpanel.waiting_stage"), size=10)
         self.stage_label.setWordWrap(True)
         state_card.layout().addWidget(self.stage_label)
         self.percent_label = QLabel("0%")
@@ -259,7 +247,7 @@ class ExternalAgentPanel(QWidget):
         layout.addWidget(state_card)
 
         events_card = Card(soft=True)
-        events_card.layout().addWidget(title_label("Лента событий", 11))
+        events_card.layout().addWidget(title_label(t("extpanel.events_title"), 11))
         self.events_list = QListWidget()
         self.events_list.setObjectName("eventsList")
         self.events_list.setMaximumHeight(260)
@@ -267,13 +255,13 @@ class ExternalAgentPanel(QWidget):
         layout.addWidget(events_card)
 
         files_card = Card(soft=True)
-        files_card.layout().addWidget(title_label("Недавние файлы", 11))
+        files_card.layout().addWidget(title_label(t("extpanel.files_title"), 11))
         self.files_list = QListWidget()
         self.files_list.setMaximumHeight(180)
         files_card.layout().addWidget(self.files_list)
         layout.addWidget(files_card)
 
-        open_guide = QPushButton("Открыть AGENT_GUIDE.md")
+        open_guide = QPushButton(t("extpanel.open_guide_button"))
         open_guide.setObjectName("teal")
         open_guide.clicked.connect(lambda: self._open_file(self.project.root / "AGENT_GUIDE.md"))
         layout.addWidget(open_guide)
@@ -286,15 +274,12 @@ class ExternalAgentPanel(QWidget):
         self.first_task_edit.moveCursor(QTextCursor.MoveOperation.End)
 
     def _compose_prompt(self, task: str) -> str:
-        prompt = AGENT_PROMPT.format(name=self.project.name, root=self.project.root).rstrip()
+        prompt = agent_prompt(self.project.name, self.project.root).rstrip()
         task = task.strip()
         if task:
-            prompt += "\n\nПЕРВАЯ ЗАДАЧА:\n" + task + "\n"
+            prompt += f"\n\n{t('extpanel.first_task')}:\n" + task + "\n"
         else:
-            prompt += (
-                "\n\nПЕРВАЯ ЗАДАЧА:\n"
-                "Изучи проект, предложи план и начни с самого важного шага.\n"
-            )
+            prompt += f"\n\n{t('extpanel.first_task')}:\n{t('extpanel.first_task_default')}\n"
         return prompt
 
     def _update_prompt_preview(self) -> None:
@@ -303,20 +288,17 @@ class ExternalAgentPanel(QWidget):
         task = self.first_task_edit.toPlainText().strip()
         self.prompt_preview.setPlainText(self._compose_prompt(task))
         if task:
-            self.prompt_hint.setText(f"Задача добавлена в промпт · {len(task)} символов")
+            self.prompt_hint.setText(t("extpanel.hint_task_added", count=len(task)))
         else:
-            self.prompt_hint.setText(
-                "Пока задача не написана — в промпте будет просьба изучить проект и предложить план."
-            )
+            self.prompt_hint.setText(t("extpanel.hint_no_task"))
 
     def _copy_prompt(self) -> None:
         task = self.first_task_edit.toPlainText().strip()
         if not task:
             answer = QMessageBox.question(
                 self,
-                "Задача не описана",
-                "Скопировать промпт без конкретной задачи? Агент просто изучит проект "
-                "и предложит план.\n\nЛучше сначала написать задачу.",
+                t("extpanel.no_task_title"),
+                t("extpanel.no_task_copy_text"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -330,8 +312,8 @@ class ExternalAgentPanel(QWidget):
         if not task:
             QMessageBox.information(
                 self,
-                "Задача не описана",
-                "Напишите задачу в поле выше, чтобы скопировать только её.",
+                t("extpanel.no_task_title"),
+                t("extpanel.no_task_only_text"),
             )
             self.first_task_edit.setFocus()
             return
@@ -339,8 +321,8 @@ class ExternalAgentPanel(QWidget):
 
     def _copy(self, text: str) -> None:
         QApplication.clipboard().setText(text)
-        self.status_message.emit("Скопировано в буфер обмена.")
-        self.status_badge.setText("СКОПИРОВАНО")
+        self.status_message.emit(t("extpanel.copied_status"))
+        self.status_badge.setText(t("extpanel.badge_copied"))
         self.status_badge.set_tone("teal")
         QTimer.singleShot(1600, self.refresh)
 
@@ -351,7 +333,7 @@ class ExternalAgentPanel(QWidget):
         if path.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
         else:
-            self.status_message.emit(f"Файл ещё не создан: {path.name}")
+            self.status_message.emit(t("extpanel.file_not_created", name=path.name))
 
     def _regenerate_pack(self) -> None:
         from reasonable.ai.external import generate_agent_pack
@@ -359,12 +341,12 @@ class ExternalAgentPanel(QWidget):
         try:
             paths = generate_agent_pack(self.project)
         except Exception as exc:
-            self.status_message.emit(f"Не удалось обновить пакет: {exc}")
-            self.pack_status.setText("Не удалось обновить пакет — попробуйте ещё раз.")
+            self.status_message.emit(t("extpanel.pack_failed_status", error=exc))
+            self.pack_status.setText(t("extpanel.pack_failed_text"))
             return
-        self.pack_status.setText("Пакет для агента готов ✓  (AGENT_GUIDE.md, skills/, AGENTS.md, re.bat)")
-        self.status_message.emit("Пакет агента обновлён.")
-        self.status_badge.setText("ПАКЕТ ОБНОВЛЁН")
+        self.pack_status.setText(t("extpanel.pack_ready"))
+        self.status_message.emit(t("extpanel.pack_updated_status"))
+        self.status_badge.setText(t("extpanel.badge_pack_updated"))
         self.status_badge.set_tone("teal")
         QTimer.singleShot(1800, self.refresh)
 
@@ -379,19 +361,19 @@ class ExternalAgentPanel(QWidget):
         live = activity_is_live(self.project.root, window_seconds=300)
         status = state.get("status", "idle")
         if live and status == "running":
-            self.status_badge.setText("АГЕНТ РАБОТАЕТ")
+            self.status_badge.setText(t("extpanel.badge_running"))
             self.status_badge.set_tone("gold")
         elif status == "done":
-            self.status_badge.setText("ЗАВЕРШЕНО")
+            self.status_badge.setText(t("extpanel.badge_done"))
             self.status_badge.set_tone("teal")
         elif status == "error":
-            self.status_badge.setText("ОШИБКА")
+            self.status_badge.setText(t("extpanel.badge_error"))
             self.status_badge.set_tone("gold")
         else:
-            self.status_badge.setText("ОЖИДАНИЕ")
+            self.status_badge.setText(t("extpanel.badge_waiting"))
             self.status_badge.set_tone("default")
         self.activity_label.setText(
-            ("активность: " + human_time(state.get("last_event_at"))) if state.get("last_event_at") else ""
+            (t("extpanel.activity_prefix") + human_time(state.get("last_event_at"))) if state.get("last_event_at") else ""
         )
 
     def _render_state(self, state: dict, force: bool = False) -> None:
@@ -408,10 +390,10 @@ class ExternalAgentPanel(QWidget):
         percent = int(round(derived_percent(state)))
         self.progress.setValue(percent)
         self.percent_label.setText(f"{percent}%")
-        stage = state.get("stage") or "Ожидание"
+        stage = state.get("stage") or t("extpanel.stage_idle")
         message = state.get("message") or ""
         self.stage_label.setText(f"{stage}\n{message}" if message and message != stage else stage)
-        self.last_label.setText(f"Последняя активность: {human_time(state.get('last_event_at'))}")
+        self.last_label.setText(t("extpanel.last_activity", time=human_time(state.get("last_event_at"))))
 
     def _render_tasks(self, state: dict, force: bool = False) -> None:
         tasks = state.get("tasks") or []
@@ -425,7 +407,7 @@ class ExternalAgentPanel(QWidget):
             if widget is not None:
                 widget.deleteLater()
         if not tasks:
-            self.task_host.addWidget(muted("Агент ещё не создал план.", size=9))
+            self.task_host.addWidget(muted(t("extpanel.no_plan"), size=9))
             return
         for task in tasks:
             row = QHBoxLayout()
@@ -484,7 +466,7 @@ class ExternalAgentPanel(QWidget):
             item.setToolTip(row["path"])
             self.files_list.addItem(item)
         if not rows:
-            self.files_list.addItem("Пока нет изменённых файлов.")
+            self.files_list.addItem(t("extpanel.no_files"))
 
     def shutdown(self) -> None:
         self.timer.stop()

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from reasonable.core.convert import PLATFORM_NAMES, conversion_plan
+from reasonable.core.i18n import t
 
 from . import theme
 from .widgets import Badge, Card, muted, title_label
@@ -45,7 +46,7 @@ class ConvertDialog(QDialog):
         self._running = False
         self._plan: dict | None = None
 
-        self.setWindowTitle("Конвертировать проект — Reasonable Engine")
+        self.setWindowTitle(t("convdlg.title"))
         self.setMinimumSize(840, 700)
         self.resize(880, 790)
         self.setModal(True)
@@ -82,18 +83,18 @@ class ConvertDialog(QDialog):
 
         self.result_card = Card(soft=True)
         self.result_card.hide()
-        result_title = title_label("Новый проект готов", 11)
+        result_title = title_label(t("convdlg.result_ready"), 11)
         self.result_card.layout().addWidget(result_title)
         self.result_text = muted("", size=9)
         self.result_text.setWordWrap(True)
         self.result_card.layout().addWidget(self.result_text)
         result_buttons = QHBoxLayout()
-        self.open_folder = QPushButton("Открыть папку")
+        self.open_folder = QPushButton(t("convdlg.open_folder"))
         self.open_folder.setObjectName("ghost")
         self.open_folder.clicked.connect(self._open_folder)
         result_buttons.addWidget(self.open_folder)
         result_buttons.addStretch(1)
-        self.open_new = QPushButton("Открыть новый проект")
+        self.open_new = QPushButton(t("convdlg.open_new"))
         self.open_new.setObjectName("teal")
         self.open_new.clicked.connect(self._open_new)
         result_buttons.addWidget(self.open_new)
@@ -101,11 +102,11 @@ class ConvertDialog(QDialog):
         root.addWidget(self.result_card)
 
         footer = QHBoxLayout()
-        close = QPushButton("Закрыть")
+        close = QPushButton(t("common.close"))
         close.clicked.connect(self.reject)
         footer.addWidget(close)
         footer.addStretch(1)
-        self.convert_button = QPushButton("Создать новый проект")
+        self.convert_button = QPushButton(t("convdlg.create_button"))
         self.convert_button.setObjectName("primary")
         self.convert_button.setMinimumWidth(200)
         self.convert_button.clicked.connect(self._start)
@@ -137,13 +138,13 @@ class ConvertDialog(QDialog):
         row.addWidget(logo)
         titles = QVBoxLayout()
         titles.setSpacing(0)
-        title = QLabel("Конвертировать проект")
+        title = QLabel(t("convdlg.heading"))
         title.setObjectName("title")
         title.setFont(theme.display_font(15, 700))
         titles.addWidget(title)
         titles.addWidget(
             muted(
-                "Создаётся отдельная папка. Исходный проект остаётся без изменений.",
+                t("convdlg.subtitle"),
                 wrap=False,
                 size=9,
             )
@@ -162,11 +163,11 @@ class ConvertDialog(QDialog):
     def _build_platform_card(self) -> Card:
         card = Card()
         top = QHBoxLayout()
-        top.addWidget(title_label("Новая платформа", 11))
+        top.addWidget(title_label(t("convdlg.platform_new"), 11))
         top.addStretch(1)
         top.addWidget(
             muted(
-                f"Сейчас: {PLATFORM_NAMES[self.project.platform]}",
+                t("convdlg.platform_current", name=PLATFORM_NAMES[self.project.platform]),
                 wrap=False,
                 size=8,
             )
@@ -177,8 +178,8 @@ class ConvertDialog(QDialog):
         self.platform_group = QButtonGroup(self)
         self.platform_buttons: dict[str, QPushButton] = {}
         for key, text, hint in (
-            ("windows", "WINDOWS", "Папка, Play.bat и опционально .exe"),
-            ("android", "ANDROID", "buildozer-пакет, касания и портрет/альбом"),
+            ("windows", "WINDOWS", t("convdlg.platform_windows_hint")),
+            ("android", "ANDROID", t("convdlg.platform_android_hint")),
         ):
             button = QPushButton(f"{text}\n{hint}")
             button.setObjectName("choice")
@@ -196,23 +197,23 @@ class ConvertDialog(QDialog):
 
     def _build_target_card(self) -> Card:
         card = Card(soft=True)
-        card.layout().addWidget(title_label("Название и папка", 10))
+        card.layout().addWidget(title_label(t("convdlg.name_folder_title"), 10))
         form = QFormLayout()
         form.setSpacing(9)
         self.name_edit = QLineEdit(self.project.name)
-        self.name_edit.setPlaceholderText("Название нового проекта")
-        form.addRow("Название", self.name_edit)
+        self.name_edit.setPlaceholderText(t("convdlg.name_placeholder"))
+        form.addRow(t("convdlg.field_name"), self.name_edit)
         folder_row = QHBoxLayout()
         self.folder_edit = QLineEdit(str(self.project.root.parent))
         folder_row.addWidget(self.folder_edit, 1)
-        browse = QPushButton("Выбрать…")
+        browse = QPushButton(t("convdlg.browse_button"))
         browse.clicked.connect(self._browse)
         folder_row.addWidget(browse)
-        form.addRow("Папка", folder_row)
+        form.addRow(t("common.folder"), folder_row)
         card.layout().addLayout(form)
         card.layout().addWidget(
             muted(
-                "В выбранной папке появится новая подпапка. Если имя занято, добавится суффикс -2.",
+                t("convdlg.folder_hint"),
                 size=8,
             )
         )
@@ -220,27 +221,27 @@ class ConvertDialog(QDialog):
 
     def _build_options_card(self) -> Card:
         card = Card()
-        card.layout().addWidget(title_label("Что ещё можно изменить", 10))
+        card.layout().addWidget(title_label(t("convdlg.options_title"), 10))
         form = QFormLayout()
         form.setSpacing(9)
 
         self.orientation_combo = QComboBox()
         for label, value in (
-            ("Как в проекте", None),
-            ("Альбомная", "landscape"),
-            ("Портретная", "portrait"),
+            (t("convdlg.keep_as_project"), None),
+            (t("convdlg.orientation_landscape"), "landscape"),
+            (t("convdlg.orientation_portrait"), "portrait"),
         ):
             self.orientation_combo.addItem(label, value)
-        form.addRow("Ориентация", self.orientation_combo)
+        form.addRow(t("convdlg.field_orientation"), self.orientation_combo)
 
         self.agent_combo = QComboBox()
         for label, value in (
-            ("Как в проекте", None),
-            ("Встроенный ИИ", "builtin"),
-            ("Внешний агент", "external"),
+            (t("convdlg.keep_as_project"), None),
+            (t("convdlg.agent_builtin"), "builtin"),
+            (t("convdlg.agent_external"), "external"),
         ):
             self.agent_combo.addItem(label, value)
-        form.addRow("Режим агента", self.agent_combo)
+        form.addRow(t("convdlg.field_agent_mode"), self.agent_combo)
 
         self.level_checks: dict[str, QCheckBox] = {}
         from reasonable.core.project import UI_LEVELS, UI_LEVEL_LABELS
@@ -255,16 +256,14 @@ class ConvertDialog(QDialog):
             self.level_checks[level] = check
             levels_row.addWidget(check)
         levels_row.addStretch(1)
-        form.addRow("Уровень интерфейса", levels_row)
+        form.addRow(t("convdlg.field_ui_levels"), levels_row)
 
         card.layout().addLayout(form)
-        self.reset_check = QCheckBox("Сбросить план, прогресс и ленту событий в новом проекте")
+        self.reset_check = QCheckBox(t("convdlg.reset_check"))
         card.layout().addWidget(self.reset_check)
         card.layout().addWidget(
             muted(
-                "Окно, разрешение и ориентацию агент подберёт сам — здесь это не настраивается. "
-                "Код и ассеты не переписываются: после создания попросите агента адаптировать "
-                "компоновку под новую платформу. APK собирается через buildozer на Linux/WSL2.",
+                t("convdlg.options_note"),
                 size=8,
             )
         )
@@ -273,7 +272,7 @@ class ConvertDialog(QDialog):
     def _build_preview_card(self) -> Card:
         card = Card(soft=True)
         top = QHBoxLayout()
-        top.addWidget(title_label("Предпросмотр", 10))
+        top.addWidget(title_label(t("convdlg.preview_title"), 10))
         top.addStretch(1)
         self.preview_badge = Badge("—", "default")
         top.addWidget(self.preview_badge)
@@ -290,13 +289,10 @@ class ConvertDialog(QDialog):
 
     def _build_limits_card(self) -> Card:
         card = Card(soft=True, padding=13)
-        card.layout().addWidget(title_label("Что важно знать", 10))
+        card.layout().addWidget(title_label(t("convdlg.limits_title"), 10))
         card.layout().addWidget(
             muted(
-                "Платформа — главная ось конвертации. Ориентация, агент и уровни интерфейса "
-                "применяются к копии сразу. Код и ассеты не переписываются: после создания "
-                "попросите агента адаптировать компоновку, управление и safe margins под Android. "
-                "APK по-прежнему собирается через buildozer на Linux/WSL2.",
+                t("convdlg.limits_note"),
                 size=9,
             )
         )
@@ -323,26 +319,19 @@ class ConvertDialog(QDialog):
         self.result_card.hide()
         same = target == self.project.platform
         if target == "android":
-            self.platform_hint.setText(
-                "Android: проект получит android-ориентацию и пакет. "
-                "Проверьте касания и размеры элементов; APK собирается на Linux/WSL2."
-            )
+            self.platform_hint.setText(t("convdlg.hint_android"))
         else:
-            self.platform_hint.setText(
-                "Windows: проект будет ориентирован на окно Windows, папку и .exe. "
-                "Ориентация портрет тоже поддерживается, если она нужна приложению."
-            )
+            self.platform_hint.setText(t("convdlg.hint_windows"))
         if same:
             self.platform_hint.setText(
-                self.platform_hint.text()
-                + " Платформа не меняется — это будет новая версия проекта."
+                self.platform_hint.text() + t("convdlg.hint_same_platform")
             )
         self._refresh_preview()
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Куда сохранить новый проект",
+            t("convdlg.browse_title"),
             self.folder_edit.text() or str(self.project.root.parent),
         )
         if folder:
@@ -355,7 +344,7 @@ class ConvertDialog(QDialog):
             plan = conversion_plan(self.project, self.target, **self._target_options())
         except Exception as exc:
             self._plan = None
-            self.preview_badge.setText("Ошибка")
+            self.preview_badge.setText(t("convdlg.badge_error"))
             self.preview_badge.set_tone("gold")
             self.preview_text.setText(str(exc))
             self.preview_path.setText("")
@@ -363,17 +352,14 @@ class ConvertDialog(QDialog):
             return
         self._plan = plan
         if plan["has_changes"]:
-            self.preview_badge.setText("ГОТОВО")
+            self.preview_badge.setText(t("convdlg.badge_ready"))
             self.preview_badge.set_tone("default")
             self.preview_text.setText("\n".join(f"· {change}" for change in plan["changes"]))
         else:
-            self.preview_badge.setText("БЕЗ ИЗМЕНЕНИЙ")
+            self.preview_badge.setText(t("convdlg.badge_no_changes"))
             self.preview_badge.set_tone("gold")
-            self.preview_text.setText(
-                "Измените платформу, имя, ориентацию, уровни интерфейса, агент или прогресс — "
-                "точную копию можно создать только с хотя бы одним отличием."
-            )
-        self.preview_path.setText(f"Новый проект: {plan['target_root']}")
+            self.preview_text.setText(t("convdlg.no_changes_hint"))
+        self.preview_path.setText(t("convdlg.new_project_path", path=plan["target_root"]))
         self.convert_button.setEnabled(plan["has_changes"] and not self._running)
 
     # ------------------------------------------------------------------
@@ -387,9 +373,9 @@ class ConvertDialog(QDialog):
         self._running = True
         self.result_card.hide()
         self.progress.show()
-        self.status.setText("Копирую проект…")
+        self.status.setText(t("convdlg.copying_status"))
         self.convert_button.setEnabled(False)
-        self.convert_button.setText("Конвертирую…")
+        self.convert_button.setText(t("convdlg.running_button"))
         self.worker = ConvertWorker(self.project, self.target, options)
         self.worker.stage.connect(self.status.setText)
         self.worker.done.connect(self._done)
@@ -400,24 +386,24 @@ class ConvertDialog(QDialog):
         self._running = False
         self.result = result
         self.progress.hide()
-        self.status.setText(result.get("message", "Новый проект создан."))
-        self.convert_button.setText("Создать ещё одну копию")
+        self.status.setText(result.get("message", t("convdlg.created_message")))
+        self.convert_button.setText(t("convdlg.another_copy_button"))
         self.convert_button.setEnabled(True)
         self.result_card.show()
         lines = [str(result.get("path", ""))]
         for change in result.get("changes") or []:
             lines.append("· " + change)
-        lines.append("Исходный проект не изменён.")
+        lines.append(t("convdlg.source_unchanged"))
         self.result_text.setText("\n".join(lines))
 
     def _failed(self, message: str, trace: str) -> None:
         self._running = False
         self.progress.hide()
-        self.convert_button.setText("Создать новый проект")
+        self.convert_button.setText(t("convdlg.create_button"))
         self.convert_button.setEnabled(True)
-        self.status.setText("Ошибка: " + message)
+        self.status.setText(t("convdlg.error_prefix") + message)
         box = QMessageBox(self)
-        box.setWindowTitle("Конвертация не удалась")
+        box.setWindowTitle(t("convdlg.failed_title"))
         box.setIcon(QMessageBox.Icon.Critical)
         box.setText(message)
         box.setDetailedText(trace)
@@ -441,8 +427,8 @@ class ConvertDialog(QDialog):
         if self.worker is not None and self.worker.isRunning():
             answer = QMessageBox.question(
                 self,
-                "Конвертация",
-                "Конвертация ещё выполняется. Закрыть окно?",
+                t("convdlg.close_running_title"),
+                t("convdlg.close_running_text"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

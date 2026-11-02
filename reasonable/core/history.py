@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .i18n import t as _t
 from .paths import atomic_write_json, now_iso, read_json
 
 HISTORY_DIR = ".reasonable/history"
@@ -43,12 +44,18 @@ IGNORED_DIRS = {
 }
 IGNORED_SUFFIXES = {".pyc", ".pyo", ".tmp", ".log"}
 
-REASON_LABELS = {
-    "agent": "Запуск ИИ-агента",
-    "manual": "Ручной снимок",
-    "before-restore": "Перед восстановлением",
-    "before-run": "Перед запуском",
+# Reason keys -> i18n translation keys (labels resolve through t()).
+REASON_KEYS = {
+    "agent": "history.agent_run",
+    "manual": "history.manual",
+    "before-restore": "history.before_restore",
+    "before-run": "history.before_run",
 }
+
+
+def reason_label(reason: str) -> str:
+    """Localized label for a snapshot reason key."""
+    return _t(REASON_KEYS.get(reason, "history.snapshot"))
 
 
 def project_root(project: Any) -> Path:
@@ -144,7 +151,7 @@ def create_snapshot(
     file_count, total_bytes, skipped = _copy_tree(root, files_dir)
     meta = {
         "id": snapshot_id,
-        "label": (label or REASON_LABELS.get(reason, "Снимок"))[:120],
+        "label": (label or reason_label(reason))[:120],
         "reason": reason,
         "created_at": now_iso(),
         "file_count": file_count,
@@ -299,7 +306,11 @@ def restore_snapshot(
     if not files_dir.is_dir():
         raise ValueError("В снимке нет файлов.")
 
-    safety_meta = create_snapshot(root, label="Перед восстановлением версии", reason="before-restore") if safety else None
+    safety_meta = (
+        create_snapshot(root, label=_t("history.before_restore_label"), reason="before-restore")
+        if safety
+        else None
+    )
 
     keep_files, keep_dirs = _keep_sets(files_dir)
     removed = 0
@@ -384,7 +395,7 @@ def restore_snapshot(
 
 def describe_snapshot(snapshot: dict[str, Any]) -> str:
     """Human readable one-line description for the history list."""
-    reason = REASON_LABELS.get(str(snapshot.get("reason") or "manual"), "Снимок")
+    reason = reason_label(str(snapshot.get("reason") or "manual"))
     changed = len(snapshot.get("changed_files") or [])
-    suffix = f" · изменено {changed} файл(ов)" if changed else ""
+    suffix = _t("history.changed_files", count=changed) if changed else ""
     return f"{reason}{suffix}"

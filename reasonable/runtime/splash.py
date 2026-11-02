@@ -29,6 +29,9 @@ MUTED = pygame.Color("#6F7680")
 
 LOGO_RELATIVE = Path("assets/brand") / "logo_512.png"
 
+# Fallback caption when reasonable.core.i18n is not bundled (exported builds).
+SPLASH_CAPTIONS_FALLBACK = "СОЗДАВАЙ. ИГРАЙ. РАЗУМНО."
+
 
 # The intro splash is part of Reasonable Engine branding and always plays.
 # End users cannot disable or skip it: every project.json flag and every
@@ -99,7 +102,12 @@ class SplashAnimator:
         self.caption_font = get_font(max(18, int(base * 0.030)), bold=True)
         self.version_font = get_font(max(13, int(base * 0.020)), bold=False)
         self.caption = f"{APP_NAME.upper()} 1"
-        self.sub = "СОЗДАВАЙ. ИГРАЙ. РАЗУМНО."
+        try:  # i18n is optional in exported standalone builds
+            from reasonable.core.i18n import splash_caption
+
+            self.sub = splash_caption()
+        except Exception:
+            self.sub = SPLASH_CAPTIONS_FALLBACK
 
     # ------------------------------------------------------------------
     def draw(self, t: float) -> pygame.Surface:

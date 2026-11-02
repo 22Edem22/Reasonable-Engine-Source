@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from reasonable.ai.providers import IMAGE_PROVIDERS
 from reasonable.core.paths import slugify
+from reasonable.core.i18n import t
 from reasonable.core.settings import Settings
 
 from . import theme
@@ -50,7 +51,7 @@ class GenerateImageDialog(QDialog):
         self.background = background
         self.worker: SpriteWorker | None = None
         self.result_path = ""
-        self.setWindowTitle("Генерация фона" if background else "Генерация спрайта")
+        self.setWindowTitle(t("assets.gen_title_bg") if background else t("assets.gen_title_sprite"))
         self.setMinimumSize(660, 780)
         self.resize(700, 820)
         self.setModal(True)
@@ -60,14 +61,14 @@ class GenerateImageDialog(QDialog):
         layout.setSpacing(12)
 
         header = QHBoxLayout()
-        title = title_label("Новый фон" if background else "Новый спрайт", 16)
+        title = title_label(t("assets.new_bg") if background else t("assets.new_sprite"), 16)
         header.addWidget(title)
         header.addStretch(1)
-        header.addWidget(Badge("ИИ-ГЕНЕРАЦИЯ", "default"))
+        header.addWidget(Badge(t("assets.badge_ai_gen"), "default"))
         layout.addLayout(header)
         layout.addWidget(
             muted(
-                "Опишите предмет или сцену. Для спрайтов лучше короткие промпты и прозрачный фон.",
+                t("assets.intro"),
                 size=9,
             )
         )
@@ -77,7 +78,7 @@ class GenerateImageDialog(QDialog):
         form_top.setSpacing(10)
         name_box = QVBoxLayout()
         name_box.setSpacing(5)
-        name_box.addWidget(self._label("Имя файла"))
+        name_box.addWidget(self._label(t("assets.filename_label")))
         self.name_edit = QLineEdit("sprite" if not background else "background")
         name_box.addWidget(self.name_edit)
         form_top.addLayout(name_box, 1)
@@ -86,9 +87,9 @@ class GenerateImageDialog(QDialog):
 
         self.prompt = QTextEdit()
         self.prompt.setPlaceholderText(
-            "Например: золотая звезда с мягким свечением, флэт-стиль, прозрачный фон"
+            t("assets.prompt_example_sprite")
             if not background
-            else "Например: ночной лес с светлячками, мягкий туман, тёмно-синяя палитра"
+            else t("assets.prompt_example_bg")
         )
         self.prompt.setMinimumHeight(110)
         card.layout().addWidget(self.prompt)
@@ -97,9 +98,9 @@ class GenerateImageDialog(QDialog):
         options.setSpacing(10)
         style_box = QVBoxLayout()
         style_box.setSpacing(4)
-        style_box.addWidget(self._label("Стиль"))
+        style_box.addWidget(self._label(t("assets.style_label")))
         self.style_combo = QComboBox()
-        for key, name in (("flat", "Флэт"), ("pixel", "Пиксель-арт"), ("painterly", "Живописный"), ("icon", "Иконка")):
+        for key, name in (("flat", t("assets.style_flat")), ("pixel", t("assets.style_pixel")), ("painterly", t("assets.style_painterly")), ("icon", t("assets.style_icon"))):
             self.style_combo.addItem(name, key)
         style_box.addWidget(self.style_combo)
         options.addLayout(style_box)
@@ -111,11 +112,11 @@ class GenerateImageDialog(QDialog):
         for value in (128, 256, 512):
             self.size_combo.addItem(f"{value} × {value}", value)
         self.size_combo.setCurrentIndex(1)
-        size_row.addLayout(self._field("Размер", self.size_combo))
+        size_row.addLayout(self._field(t("assets.size_label"), self.size_combo))
         self.provider_combo = QComboBox()
         for provider in IMAGE_PROVIDERS:
             self.provider_combo.addItem(provider.name, provider.id)
-        size_row.addLayout(self._field("Провайдер", self.provider_combo))
+        size_row.addLayout(self._field(t("assets.provider_label"), self.provider_combo))
         card.layout().addLayout(size_row)
 
         seed_row = QHBoxLayout()
@@ -124,7 +125,7 @@ class GenerateImageDialog(QDialog):
         self.seed_spin.setRange(0, 2_147_483_647)
         self.seed_spin.setValue(random.randint(1, 999_999))
         seed_row.addLayout(self._field("Seed", self.seed_spin))
-        randomize = QPushButton("Случайный")
+        randomize = QPushButton(t("assets.random_button"))
         randomize.setObjectName("ghost")
         randomize.clicked.connect(lambda: self.seed_spin.setValue(random.randint(1, 999_999)))
         seed_row.addWidget(randomize, 0, Qt.AlignmentFlag.AlignBottom)
@@ -135,7 +136,7 @@ class GenerateImageDialog(QDialog):
 
         layout.addWidget(card)
 
-        self.preview = QLabel("Здесь появится результат")
+        self.preview = QLabel(t("assets.preview_placeholder"))
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setMinimumHeight(180)
         self.preview.setStyleSheet(
@@ -152,10 +153,10 @@ class GenerateImageDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        cancel = QPushButton("Закрыть")
+        cancel = QPushButton(t("common.close"))
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        self.generate_button = QPushButton("Сгенерировать")
+        self.generate_button = QPushButton(t("assets.generate_button"))
         self.generate_button.setObjectName("primary")
         self.generate_button.setMinimumWidth(160)
         self.generate_button.clicked.connect(self._generate)
@@ -185,14 +186,14 @@ class GenerateImageDialog(QDialog):
     def _provider_changed(self) -> None:
         provider = self.provider_combo.currentData()
         if provider == "procedural":
-            self.provider_note.setText("Локальный процедурный генератор: быстро, без сети, стилизованные формы.")
+            self.provider_note.setText(t("assets.note_procedural"))
         else:
-            self.provider_note.setText("OpenAI-совместимый сервер изображений. Нужны Base URL и ключ в настройках.")
+            self.provider_note.setText(t("assets.note_openai"))
 
     def _generate(self) -> None:
         prompt = self.prompt.toPlainText().strip()
         if len(prompt) < 3:
-            QMessageBox.warning(self, "Нужен промпт", "Опишите, что должно быть на изображении.")
+            QMessageBox.warning(self, t("assets.need_prompt_title"), t("assets.need_prompt_text"))
             return
         name = slugify(self.name_edit.text().strip() or prompt, "image")
         folder = "backgrounds" if self.background else "sprites"
@@ -211,7 +212,7 @@ class GenerateImageDialog(QDialog):
             config["api_key"] = ""
         self.generate_button.setEnabled(False)
         self.progress.show()
-        self.status.setText("Генерирую изображение…")
+        self.status.setText(t("assets.status_generating"))
         self.worker = SpriteWorker(
             prompt,
             target,
@@ -233,8 +234,12 @@ class GenerateImageDialog(QDialog):
         self.progress.hide()
         self.result_path = str(result.get("path") or "")
         self.status.setText(
-            f"Готово: {Path(self.result_path).name} · {result.get('provider', '')} "
-            f"{'· локальный fallback' if result.get('fallback') else ''}"
+            t(
+                "assets.status_done",
+                name=Path(self.result_path).name,
+                provider=result.get("provider", ""),
+                fallback=t("assets.status_done_fallback") if result.get("fallback") else "",
+            )
         )
         pixmap = QPixmap(self.result_path)
         if not pixmap.isNull():
@@ -247,20 +252,20 @@ class GenerateImageDialog(QDialog):
             )
             self.preview.setStyleSheet("background: #12151A; border: 1px solid #262B33; border-radius: 8px;")
         self.created.emit(self.result_path)
-        self.generate_button.setText("Сгенерировать ещё")
+        self.generate_button.setText(t("assets.generate_again_button"))
 
     def _failed(self, message: str, _trace: str) -> None:
         self.generate_button.setEnabled(True)
         self.progress.hide()
-        self.status.setText("Ошибка: " + message)
-        QMessageBox.critical(self, "Не удалось сгенерировать", message)
+        self.status.setText(t("assets.error_prefix") + message)
+        QMessageBox.critical(self, t("assets.failed_title"), message)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self.worker is not None and self.worker.isRunning():
             answer = QMessageBox.question(
                 self,
-                "Генерация",
-                "Изображение ещё генерируется. Закрыть окно?",
+                t("assets.close_running_title"),
+                t("assets.close_running_text"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -298,22 +303,22 @@ class AssetsPage(QWidget):
         row.setSpacing(8)
         heading = QVBoxLayout()
         heading.setSpacing(0)
-        heading.addWidget(title_label("Ассеты", 15))
-        heading.addWidget(muted("Спрайты, фоны и звуки проекта. Генерация встроена.", wrap=False, size=9))
+        heading.addWidget(title_label(t("assets.page_title"), 15))
+        heading.addWidget(muted(t("assets.page_subtitle"), wrap=False, size=9))
         row.addLayout(heading)
         row.addStretch(1)
-        import_button = QPushButton("Импортировать")
+        import_button = QPushButton(t("assets.import_button"))
         import_button.clicked.connect(self._import)
         row.addWidget(import_button)
-        folder_button = QPushButton("Открыть папку")
+        folder_button = QPushButton(t("assets.open_folder_button"))
         folder_button.setObjectName("ghost")
         folder_button.clicked.connect(self._open_folder)
         row.addWidget(folder_button)
-        bg_button = QPushButton("Фон")
+        bg_button = QPushButton(t("assets.background_button"))
         bg_button.setObjectName("teal")
         bg_button.clicked.connect(lambda: self._generate(background=True))
         row.addWidget(bg_button)
-        sprite_button = QPushButton("Сгенерировать спрайт")
+        sprite_button = QPushButton(t("assets.gen_sprite_button"))
         sprite_button.setObjectName("primary")
         sprite_button.clicked.connect(lambda: self._generate(background=False))
         row.addWidget(sprite_button)
@@ -326,14 +331,14 @@ class AssetsPage(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
         top = QHBoxLayout()
-        top.addWidget(title_label("Библиотека", 10))
+        top.addWidget(title_label(t("assets.library_title"), 10))
         top.addStretch(1)
         self.count_badge = Badge("0", "default")
         top.addWidget(self.count_badge)
         layout.addLayout(top)
         self.search = QLineEdit()
         self.search.setObjectName("search")
-        self.search.setPlaceholderText("Поиск по имени…")
+        self.search.setPlaceholderText(t("assets.search_placeholder"))
         self.search.textChanged.connect(self._fill_grid)
         layout.addWidget(self.search)
         self.list = QListWidget()
@@ -357,12 +362,12 @@ class AssetsPage(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
         head = QHBoxLayout()
-        head.addWidget(title_label("Предпросмотр", 11))
+        head.addWidget(title_label(t("assets.preview_title"), 11))
         head.addStretch(1)
         self.kind_badge = Badge("—", "default")
         head.addWidget(self.kind_badge)
         layout.addLayout(head)
-        self.preview = QLabel("Выберите ассет")
+        self.preview = QLabel(t("assets.choose_asset"))
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setMinimumHeight(260)
         self.preview.setStyleSheet(
@@ -378,12 +383,12 @@ class AssetsPage(QWidget):
         layout.addWidget(self.meta_label)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        self.delete_button = QPushButton("Удалить")
+        self.delete_button = QPushButton(t("assets.delete_button"))
         self.delete_button.setObjectName("danger")
         self.delete_button.clicked.connect(self._delete)
         self.delete_button.setEnabled(False)
         buttons.addWidget(self.delete_button)
-        self.edit_button = QPushButton("Открыть в редакторе")
+        self.edit_button = QPushButton(t("assets.edit_button"))
         self.edit_button.setObjectName("teal")
         self.edit_button.clicked.connect(self._open_in_editor)
         self.edit_button.setEnabled(False)
@@ -432,11 +437,11 @@ class AssetsPage(QWidget):
             self.list.setCurrentRow(0)
         else:
             self.selected = None
-            self.preview.setText("Ассетов пока нет.\nСгенерируйте спрайт или импортируйте файл.")
+            self.preview.setText(t("assets.empty_list"))
             self.preview.setPixmap(QPixmap())
             self.name_label.setText("")
             self.meta_label.setText("")
-            self.kind_badge.setText("ПУСТО")
+            self.kind_badge.setText(t("assets.badge_empty"))
             self.edit_button.setEnabled(False)
             self.delete_button.setEnabled(False)
 
@@ -480,7 +485,11 @@ class AssetsPage(QWidget):
             size_kb = path.stat().st_size / 1024
         except OSError:
             size_kb = 0
-        self.kind_badge.setText("ИЗОБРАЖЕНИЕ" if suffix in IMAGE_SUFFIXES else ("ЗВУК" if suffix in AUDIO_SUFFIXES else "ФАЙЛ"))
+        self.kind_badge.setText(
+            t("assets.badge_image")
+            if suffix in IMAGE_SUFFIXES
+            else (t("assets.badge_sound") if suffix in AUDIO_SUFFIXES else t("assets.badge_file"))
+        )
         if suffix in IMAGE_SUFFIXES:
             pixmap = QPixmap(str(path))
             if not pixmap.isNull():
@@ -492,17 +501,23 @@ class AssetsPage(QWidget):
                     )
                 )
                 self.meta_label.setText(
-                    f"{pixmap.width()} × {pixmap.height()} px  ·  {size_kb:.1f} КБ\n{suffix.lstrip('.').upper()}"
+                    t(
+                        "assets.meta_image",
+                        width=pixmap.width(),
+                        height=pixmap.height(),
+                        size=f"{size_kb:.1f}",
+                        suffix=suffix.lstrip(".").upper(),
+                    )
                 )
             else:
-                self.preview.setText("Не удалось открыть изображение")
-                self.meta_label.setText(f"{size_kb:.1f} КБ")
+                self.preview.setText(t("assets.image_open_failed"))
+                self.meta_label.setText(t("assets.meta_kb", size=f"{size_kb:.1f}"))
         elif suffix in AUDIO_SUFFIXES:
             self.preview.setPixmap(self._glyph_icon("AUD", "#A8AFB9").scaled(160, 160))
-            self.meta_label.setText(f"Аудиофайл  ·  {size_kb:.1f} КБ")
+            self.meta_label.setText(t("assets.audio_file", size=f"{size_kb:.1f}"))
         else:
-            self.preview.setText(suffix.upper() + "\nПредпросмотр недоступен")
-            self.meta_label.setText(f"{size_kb:.1f} КБ")
+            self.preview.setText(suffix.upper() + t("assets.no_preview"))
+            self.meta_label.setText(t("assets.meta_kb", size=f"{size_kb:.1f}"))
         self.edit_button.setEnabled(True)
         self.delete_button.setEnabled(True)
 
@@ -513,15 +528,15 @@ class AssetsPage(QWidget):
         dialog.exec()
         if dialog.result_path:
             self.refresh(select=self.project.rel(dialog.result_path))
-            self.status_message.emit(f"Ассет создан: {self.project.rel(dialog.result_path)}")
+            self.status_message.emit(t("assets.created_status", rel=self.project.rel(dialog.result_path)))
         self.refresh()
 
     def _import(self) -> None:
         files, _filter = QFileDialog.getOpenFileNames(
             self,
-            "Импортировать файлы",
+            t("assets.import_dialog_title"),
             str(self.project.root / "assets"),
-            "Изображения и звуки (*.png *.jpg *.jpeg *.webp *.gif *.wav *.ogg *.mp3);;Все файлы (*.*)",
+            t("assets.import_filter"),
         )
         if not files:
             return
@@ -539,10 +554,10 @@ class AssetsPage(QWidget):
                 shutil.copy2(source, target)
                 imported.append(self.project.rel(target))
             except OSError as exc:
-                QMessageBox.warning(self, "Импорт", f"Не удалось скопировать {source.name}: {exc}")
+                QMessageBox.warning(self, t("assets.import_error_title"), t("assets.import_error_text", name=source.name, error=exc))
         if imported:
             self.refresh(select=imported[-1])
-            self.status_message.emit(f"Импортировано файлов: {len(imported)}")
+            self.status_message.emit(t("assets.imported_status", count=len(imported)))
 
     def _open_folder(self) -> None:
         path = self.project.root / "assets"
@@ -564,8 +579,8 @@ class AssetsPage(QWidget):
         rel = self.project.rel(self.selected)
         answer = QMessageBox.question(
             self,
-            "Удалить ассет",
-            f"Удалить {rel}? Это действие нельзя отменить.",
+            t("assets.delete_title"),
+            t("assets.delete_text", rel=rel),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -574,7 +589,7 @@ class AssetsPage(QWidget):
         try:
             self.selected.unlink()
         except OSError as exc:
-            QMessageBox.critical(self, "Ошибка удаления", str(exc))
+            QMessageBox.critical(self, t("assets.delete_error_title"), str(exc))
             return
-        self.status_message.emit(f"Удалено: {rel}")
+        self.status_message.emit(t("assets.deleted_status", rel=rel))
         self.refresh()

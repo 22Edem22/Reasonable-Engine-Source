@@ -19,25 +19,31 @@ from PySide6.QtWidgets import (
 )
 
 from reasonable.core.history import (
-    REASON_LABELS,
     create_snapshot,
     delete_snapshot,
     describe_snapshot,
     list_snapshots,
+    reason_label,
     restore_snapshot,
     snapshot_files,
 )
+from reasonable.core.i18n import t
 from reasonable.core.paths import human_time
 
 from . import theme
 from .widgets import Badge, Card, muted, title_label
 
-ACTION_LABELS = {
-    "create": "создан",
-    "edit": "изменён",
-    "delete": "удалён",
-    "generate": "сгенерирован",
+ACTION_KEYS = {
+    "create": "historydlg.action_create",
+    "edit": "historydlg.action_edit",
+    "delete": "historydlg.action_delete",
+    "generate": "historydlg.action_generate",
 }
+
+
+def _action_label(action: str) -> str:
+    key = ACTION_KEYS.get(action)
+    return t(key) if key else action
 
 
 class HistoryDialog(QDialog):
@@ -50,7 +56,7 @@ class HistoryDialog(QDialog):
         self.snapshots: list[dict] = []
         self._current: dict | None = None
 
-        self.setWindowTitle("История версий — Reasonable Engine")
+        self.setWindowTitle(t("historydlg.title"))
         self.setMinimumSize(880, 640)
         self.resize(960, 720)
         self.setModal(True)
@@ -62,19 +68,18 @@ class HistoryDialog(QDialog):
         header = QHBoxLayout()
         titles = QVBoxLayout()
         titles.setSpacing(2)
-        title = QLabel("История версий")
+        title = QLabel(t("historydlg.heading"))
         title.setObjectName("title")
         title.setFont(theme.display_font(17, 700))
         titles.addWidget(title)
         titles.addWidget(
             muted(
-                "Перед каждым запуском ИИ-агента сохраняется полная рабочая версия. "
-                "Любую из них можно вернуть — текущее состояние тоже сохранится.",
+                t("historydlg.subtitle"),
                 size=9,
             )
         )
         header.addLayout(titles, 1)
-        create = QPushButton("＋  Создать снимок")
+        create = QPushButton(t("historydlg.create_button"))
         create.setObjectName("primary")
         create.clicked.connect(self._create)
         header.addWidget(create)
@@ -85,7 +90,7 @@ class HistoryDialog(QDialog):
 
         left = QVBoxLayout()
         left.setSpacing(6)
-        left.addWidget(title_label("Версии", 11))
+        left.addWidget(title_label(t("historydlg.versions_label"), 11))
         self.list = QListWidget()
         self.list.setObjectName("historyList")
         self.list.setTextElideMode(Qt.TextElideMode.ElideRight)
@@ -107,8 +112,7 @@ class HistoryDialog(QDialog):
         layout.addLayout(body, 1)
 
         self.empty = muted(
-            "Снимков пока нет. Они появятся автоматически перед первым запуском агента "
-            "или по кнопке «Создать снимок».",
+            t("historydlg.empty_hint"),
             size=9,
         )
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -118,7 +122,7 @@ class HistoryDialog(QDialog):
         footer = QHBoxLayout()
         self.status = muted("", size=9)
         footer.addWidget(self.status, 1)
-        close = QPushButton("Закрыть")
+        close = QPushButton(t("common.close"))
         close.clicked.connect(self.accept)
         footer.addWidget(close)
         layout.addLayout(footer)
@@ -132,14 +136,15 @@ class HistoryDialog(QDialog):
         self.list.clear()
         for snapshot in self.snapshots:
             changed = len(snapshot.get("changed_files") or [])
-            suffix = f" · {changed} файл(ов)" if changed else ""
+            suffix = t("historydlg.changed_suffix", count=changed) if changed else ""
             item = QListWidgetItem(
                 f"{human_time(snapshot.get('created_at'))}  ·  {describe_snapshot(snapshot)}{suffix}"
             )
             item.setToolTip(
                 f"{snapshot.get('label')}\n"
                 f"{snapshot.get('created_at')}\n"
-                f"Файлов: {snapshot.get('file_count', 0)} · {snapshot.get('reason')}"
+                f"{t('historydlg.files_count_tooltip', count=snapshot.get('file_count', 0))}"
+                f" · {snapshot.get('reason')}"
             )
             item.setData(Qt.ItemDataRole.UserRole, snapshot.get("id"))
             self.list.addItem(item)
@@ -155,7 +160,7 @@ class HistoryDialog(QDialog):
         else:
             self._current = None
             self._render(None)
-        self.status.setText(f"Сохранено версий: {len(self.snapshots)}")
+        self.status.setText(t("historydlg.saved_versions", count=len(self.snapshots)))
 
     def _selected(self, current: QListWidgetItem | None, _previous) -> None:
         if current is None:
@@ -192,50 +197,54 @@ class HistoryDialog(QDialog):
         self._clear_details()
         if snapshot is None:
             self.detail_layout.addWidget(
-                muted("Выберите версию слева, чтобы увидеть файлы и вернуть её.", size=9)
+                muted(t("historydlg.select_hint"), size=9)
             )
             self.detail_layout.addStretch(1)
             return
 
         card = Card()
         top = QHBoxLayout()
-        name = QLabel(str(snapshot.get("label") or "Снимок"))
+        name = QLabel(str(snapshot.get("label") or t("history.snapshot")))
         name.setObjectName("title")
         name.setFont(theme.display_font(13, 700))
         name.setWordWrap(True)
         top.addWidget(name, 1)
         reason = str(snapshot.get("reason") or "manual")
-        top.addWidget(Badge(REASON_LABELS.get(reason, "Снимок"), "default"))
+        top.addWidget(Badge(reason_label(reason), "default"))
         card.layout().addLayout(top)
         card.layout().addWidget(
             muted(
-                f"{human_time(snapshot.get('created_at'))} · файлов: {snapshot.get('file_count', 0)} · "
-                f"{round(int(snapshot.get('bytes') or 0) / 1024)} КБ",
+                t(
+                    "historydlg.size_line",
+                    time=human_time(snapshot.get("created_at")),
+                    count=snapshot.get("file_count", 0),
+                    kb=round(int(snapshot.get("bytes") or 0) / 1024),
+                ),
                 size=9,
             )
         )
         outcome = str(snapshot.get("outcome") or "")
         if outcome:
             labels = {
-                "done": "Агент завершил работу",
-                "incomplete": "Агент не завершил работу",
-                "cancelled": "Работа остановлена",
-                "error": "Ошибка агента",
-                "stopped": "Агент остановился",
+                "done": t("historydlg.outcome_done"),
+                "incomplete": t("historydlg.outcome_incomplete"),
+                "cancelled": t("historydlg.outcome_cancelled"),
+                "error": t("historydlg.outcome_error"),
+                "stopped": t("historydlg.outcome_stopped"),
             }
             card.layout().addWidget(
-                muted(f"Результат запуска: {labels.get(outcome, outcome)}", size=9)
+                muted(t("historydlg.outcome_line", outcome=labels.get(outcome, outcome)), size=9)
             )
         self.detail_layout.addWidget(card)
 
         changed = snapshot.get("changed_files") or []
         if changed:
             changed_card = Card(soft=True)
-            changed_card.layout().addWidget(title_label("Файлы, изменённые после снимка", 11))
+            changed_card.layout().addWidget(title_label(t("historydlg.changed_after_title"), 11))
             for row in changed[:40]:
                 path = str(row.get("path") or "")
                 action = str(row.get("action") or "edit")
-                label = QLabel(f"{path}  ·  {ACTION_LABELS.get(action, action)}")
+                label = QLabel(f"{path}  ·  {_action_label(action)}")
                 label.setWordWrap(True)
                 label.setFont(theme.ui_font(9))
                 label.setStyleSheet("color: #C1C7CF;")
@@ -244,8 +253,8 @@ class HistoryDialog(QDialog):
 
         files = snapshot_files(self.project, str(snapshot.get("id")), limit=120)
         files_card = Card(soft=True)
-        files_card.layout().addWidget(title_label("Содержимое снимка", 11))
-        preview = QLabel("\n".join(files) if files else "В снимке нет файлов.")
+        files_card.layout().addWidget(title_label(t("historydlg.snapshot_contents"), 11))
+        preview = QLabel("\n".join(files) if files else t("history.snapshot_empty"))
         preview.setWordWrap(True)
         preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         preview.setFont(theme.ui_font(9))
@@ -254,16 +263,16 @@ class HistoryDialog(QDialog):
         self.detail_layout.addWidget(files_card)
 
         actions = QHBoxLayout()
-        restore = QPushButton("↶  Вернуть эту версию")
+        restore = QPushButton(t("historydlg.restore_button"))
         restore.setObjectName("primary")
         restore.clicked.connect(self._restore)
         actions.addWidget(restore)
-        folder = QPushButton("Открыть папку снимка")
+        folder = QPushButton(t("historydlg.open_folder_button"))
         folder.setObjectName("ghost")
         folder.clicked.connect(self._open_folder)
         actions.addWidget(folder)
         actions.addStretch(1)
-        delete = QPushButton("Удалить снимок")
+        delete = QPushButton(t("historydlg.delete_button"))
         delete.setObjectName("danger")
         delete.clicked.connect(self._delete)
         actions.addWidget(delete)
@@ -275,15 +284,15 @@ class HistoryDialog(QDialog):
         try:
             snapshot = create_snapshot(
                 self.project,
-                label="Ручной снимок рабочей версии",
+                label=t("historydlg.manual_snapshot_label"),
                 reason="manual",
             )
         except Exception as exc:
-            QMessageBox.warning(self, "Не удалось создать снимок", str(exc))
+            QMessageBox.warning(self, t("historydlg.create_failed_title"), str(exc))
             return
         self.snapshot_created.emit(snapshot)
         self.refresh(select_id=str(snapshot.get("id")))
-        self.status.setText("Снимок создан. Теперь его можно вернуть в любой момент.")
+        self.status.setText(t("historydlg.created_status"))
 
     def _restore(self) -> None:
         if self._current is None:
@@ -291,10 +300,8 @@ class HistoryDialog(QDialog):
         snapshot = self._current
         answer = QMessageBox.question(
             self,
-            "Вернуть версию",
-            f"Вернуть версию «{snapshot.get('label')}»?\n\n"
-            "Файлы проекта будут заменены содержимым снимка. Текущее состояние "
-            "сначала сохранится отдельным снимком, поэтому действие можно отменить.",
+            t("historydlg.restore_title"),
+            t("historydlg.restore_text", label=snapshot.get("label")),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -303,12 +310,15 @@ class HistoryDialog(QDialog):
         try:
             result = restore_snapshot(self.project, str(snapshot.get("id")), safety=True)
         except Exception as exc:
-            QMessageBox.critical(self, "Не удалось вернуть версию", str(exc))
+            QMessageBox.critical(self, t("historydlg.restore_failed_title"), str(exc))
             return
         self.refresh(select_id=str(snapshot.get("id")))
         self.status.setText(
-            f"Версия возвращена: файлов восстановлено {result.get('restored', 0)}, "
-            f"удалено {result.get('removed', 0)}. Текущее состояние сохранено отдельно."
+            t(
+                "historydlg.restored_status",
+                restored=result.get("restored", 0),
+                removed=result.get("removed", 0),
+            )
         )
         self.restored.emit(str(snapshot.get("id")))
 
@@ -318,9 +328,8 @@ class HistoryDialog(QDialog):
         snapshot = self._current
         answer = QMessageBox.question(
             self,
-            "Удалить снимок",
-            f"Удалить снимок «{snapshot.get('label')}»? Это освободит место, но вернуть "
-            "эту версию будет уже нельзя.",
+            t("historydlg.delete_button"),
+            t("historydlg.delete_text", label=snapshot.get("label")),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -328,7 +337,7 @@ class HistoryDialog(QDialog):
             return
         if delete_snapshot(self.project, str(snapshot.get("id"))):
             self.refresh()
-            self.status.setText("Снимок удалён.")
+            self.status.setText(t("historydlg.deleted_status"))
 
     def _open_folder(self) -> None:
         if self._current is None:

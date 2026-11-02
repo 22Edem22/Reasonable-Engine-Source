@@ -15,6 +15,7 @@ from typing import Any, Callable
 from PySide6.QtCore import QThread, Signal
 
 from reasonable.ai.agent import Agent, AgentEvent
+from reasonable.core.i18n import t
 from reasonable.core.project import Project
 
 
@@ -94,9 +95,9 @@ class ScaffoldWorker(QThread):
 
     def run(self) -> None:  # noqa: D401
         try:
-            self.stage.emit("Создаю структуру проекта…")
+            self.stage.emit(t("workers.scaffold_structure"))
             project = Project.create(self.root, self.manifest)
-            self.stage.emit("Генерирую иконку, фон и стартовые спрайты…")
+            self.stage.emit(t("workers.scaffold_assets"))
             self.done.emit(project)
         except Exception as exc:  # pragma: no cover - GUI path
             self.failed.emit(str(exc), traceback.format_exc())
@@ -135,7 +136,7 @@ class SpriteWorker(QThread):
         try:
             from reasonable.ai.sprites import generate_background, generate_sprite
 
-            self.stage.emit("Генерирую изображение…")
+            self.stage.emit(t("workers.sprite_image"))
             if self.background:
                 result = generate_background(
                     self.prompt,
@@ -217,10 +218,10 @@ class ConvertWorker(QThread):
         try:
             from reasonable.core.convert import convert_project
 
-            self.stage.emit("Копирую проект без кэшей и старых экспортов…")
-            self.stage.emit("Применяю настройки и встраиваю движок…")
+            self.stage.emit(t("workers.convert_copy"))
+            self.stage.emit(t("workers.convert_engine"))
             result = convert_project(self.project, self.target, **self.options)
-            self.stage.emit("Обновляю инструкции агента и прогресс…")
+            self.stage.emit(t("workers.convert_progress"))
             self.done.emit(result)
         except Exception as exc:  # pragma: no cover - GUI path
             self.failed.emit(str(exc), traceback.format_exc())
@@ -244,13 +245,13 @@ class ProviderTestWorker(QThread):
                 [
                     {
                         "role": "user",
-                        "content": "Ответь ровно одним словом: работает",
+                        "content": t("workers.provider_test_prompt"),
                     }
                 ],
                 None,
                 temperature=0,
             )
             answer = (result.content or "").strip()
-            self.done.emit(True, answer or "Модель ответила пустым сообщением, но соединение работает.")
+            self.done.emit(True, answer or t("workers.provider_test_ok"))
         except Exception as exc:
             self.failed.emit(str(exc), traceback.format_exc())
