@@ -260,6 +260,11 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     # -- brand ---------------------------------------------------------
     "app.tagline": _pair("Разумный движок для смелых идей", "A reasonable way to make games"),
     "app.title": _pair("Reasonable Engine — {tagline}", "Reasonable Engine — {tagline}"),
+    # -- relative time (core/paths.human_time) --------------------------
+    "time.just_now": _pair("только что", "just now"),
+    "time.seconds_ago": _pair("{count} сек. назад", "{count} s ago"),
+    "time.minutes_ago": _pair("{count} мин. назад", "{count} min ago"),
+    "time.hours_ago": _pair("{count} ч. назад", "{count} h ago"),
     # -- main window: menus -------------------------------------------
     "menu.file": _pair("Файл", "&File"),
     "menu.project": _pair("Проект", "&Project"),

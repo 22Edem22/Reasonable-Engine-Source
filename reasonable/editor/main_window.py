@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = Settings()
         self.current_page: ProjectPage | None = None
-        self.setWindowTitle(f"{branding.APP_NAME} — {branding.TAGLINE_RU}")
+        self.setWindowTitle(t("app.title", tagline=i18n.tagline()))
         self.setMinimumSize(1120, 750)
         self.resize(1380, 900)
         icon_path = BRAND_DIR / "logo.ico"
@@ -66,7 +66,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
 
         self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage(f"Reasonable Engine {VERSION_NAME} ({VERSION_LABEL}) готова к работе.")
+        self.statusBar().showMessage(t("status.ready", version_name=VERSION_NAME, version_label=VERSION_LABEL))
 
         self._build_menus()
         self._update_actions()
@@ -185,7 +185,7 @@ class MainWindow(QMainWindow):
         self.recent_menu.clear()
         recents = self.settings.recent_projects()
         if not recents:
-            empty = self.recent_menu.addAction("Пока нет проектов")
+            empty = self.recent_menu.addAction(t("menu.recent_empty"))
             empty.setEnabled(False)
             return
         for entry in recents[:12]:
@@ -193,7 +193,7 @@ class MainWindow(QMainWindow):
             action.setToolTip(entry.get("path", ""))
             action.triggered.connect(lambda checked=False, path=entry.get("path", ""): self.open_project(path))
         self.recent_menu.addSeparator()
-        clear = self.recent_menu.addAction("Очистить список")
+        clear = self.recent_menu.addAction(t("menu.recent_clear"))
         clear.triggered.connect(self._clear_recents)
 
     def _clear_recents(self) -> None:
@@ -225,7 +225,7 @@ class MainWindow(QMainWindow):
     def choose_project(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Открыть проект Reasonable Engine",
+            t("dialog.open_project_title"),
             str(Path.home()),
         )
         if folder:
@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
         try:
             project = Project.load(target)
         except Exception as exc:
-            QMessageBox.warning(self, "Не удалось открыть проект", str(exc))
+            QMessageBox.warning(self, t("dialog.open_failed_title"), str(exc))
             self.settings.remove_recent(Path(target))
             self.welcome.refresh()
             return
@@ -271,8 +271,8 @@ class MainWindow(QMainWindow):
         if page.process is not None and page.process.state() != QProcess.ProcessState.NotRunning:
             answer = QMessageBox.question(
                 self,
-                "Проект запущен",
-                "Проект ещё запущен. Остановить его и переключиться?",
+                t("dialog.project_running_title"),
+                t("dialog.project_running_text"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -293,8 +293,8 @@ class MainWindow(QMainWindow):
             return
         self.stack.setCurrentWidget(self.welcome)
         self.welcome.refresh()
-        self.setWindowTitle(f"{branding.APP_NAME} — {branding.TAGLINE_RU}")
-        self.statusBar().showMessage("Выберите недавний проект или создайте новый.")
+        self.setWindowTitle(t("app.title", tagline=i18n.tagline()))
+        self.statusBar().showMessage(t("status.welcome_hint"))
         self._update_actions()
 
     # ------------------------------------------------------------------
@@ -313,7 +313,7 @@ class MainWindow(QMainWindow):
         self.welcome.refresh()
         if self.current_page is not None:
             self.current_page.refresh_ai()
-        self.statusBar().showMessage("Настройки сохранены.", 4000)
+        self.statusBar().showMessage(t("status.settings_saved"), 4000)
 
     def _run_current(self) -> None:
         if self.current_page is not None:
@@ -361,18 +361,17 @@ class MainWindow(QMainWindow):
         has_manifest = (target / "project.json").is_file()
 
         box = QMessageBox(self)
-        box.setWindowTitle("Удалить проект")
+        box.setWindowTitle(t("dialog.delete_title"))
         box.setIcon(QMessageBox.Icon.Warning)
-        box.setText(f"Удалить проект «{target.name}»?")
+        box.setText(t("dialog.delete_text", name=target.name))
         box.setInformativeText(
-            "Можно убрать проект только из списка недавних или удалить папку проекта "
-            f"с диска:\n{target}"
+t("dialog.delete_info", path=target)
         )
-        remove_button = box.addButton("Убрать из списка", QMessageBox.ButtonRole.ActionRole)
-        delete_button = box.addButton("Удалить с диска", QMessageBox.ButtonRole.DestructiveRole)
+        remove_button = box.addButton(t("dialog.delete_remove"), QMessageBox.ButtonRole.ActionRole)
+        delete_button = box.addButton(t("dialog.delete_disk"), QMessageBox.ButtonRole.DestructiveRole)
         if not has_manifest:
             delete_button.setEnabled(False)
-            delete_button.setToolTip("В этой папке нет project.json — удаление с диска недоступно.")
+            delete_button.setToolTip(t("dialog.delete_no_manifest"))
         box.addButton(QMessageBox.StandardButton.Cancel)
         box.exec()
         clicked = box.clickedButton()
@@ -388,28 +387,28 @@ class MainWindow(QMainWindow):
 
         if clicked is delete_button:
             if not has_manifest:
-                self._status("Папка не похожа на проект Reasonable Engine — удаление отменено.")
+                self._status(t("status.not_a_project"))
             elif self._unsafe_delete_target(target):
                 QMessageBox.warning(
                     self,
-                    "Удаление проекта",
-                    "Эта папка защищена: удалять её целиком нельзя. Проект убран из списка.",
+                    t("dialog.delete_protected_title"),
+                    t("dialog.delete_protected_text"),
                 )
             else:
                 try:
                     shutil.rmtree(target)
-                    self._status(f"Проект «{target.name}» удалён с диска.")
+                    self._status(t("status.project_deleted", name=target.name))
                 except OSError as exc:
                     QMessageBox.warning(
                         self,
-                        "Не удалось удалить проект",
-                        f"Папка проекта не удалена:\n{exc}\n\nПроект убран из списка недавних.",
+                        t("dialog.delete_failed_title"),
+                        t("dialog.delete_failed_text", error=exc),
                     )
 
         self.welcome.refresh()
         if self.stack.currentWidget() is self.welcome:
-            self.setWindowTitle(f"{branding.APP_NAME} — {branding.TAGLINE_RU}")
-            self.statusBar().showMessage("Список проектов обновлён.")
+            self.setWindowTitle(t("app.title", tagline=i18n.tagline()))
+            self.statusBar().showMessage(t("status.recents_updated"))
         self._update_actions()
 
     @staticmethod
@@ -432,14 +431,12 @@ class MainWindow(QMainWindow):
 
     def _about(self) -> None:
         box = QMessageBox(self)
-        box.setWindowTitle("О Reasonable Engine")
+        box.setWindowTitle(t("menu.about"))
         box.setIconPixmap(theme.logo_pixmap(96))
         box.setText(
             f"<h2 style='color:#F0F2F4'>Reasonable Engine {VERSION_NAME}</h2>"
-            f"<p style='color:#9AA1AB'>версия {VERSION_LABEL} · {branding.TAGLINE_RU}</p>"
-            "<p>Редактор игр и приложений с ИИ-агентом, спрайтами, "
-            "живым прогрессом и экспортом на Windows и Android.</p>"
-            "<p style='color:#9AA1AB'>Python · PySide6 · pygame · Pillow</p>"
+            + t("about.text", version_label=VERSION_LABEL, tagline=i18n.tagline())
+            + "<p style='color:#9AA1AB'>Python · PySide6 · pygame · Pillow</p>"
         )
         box.exec()
 
@@ -453,7 +450,7 @@ class MainWindow(QMainWindow):
         if readme.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(readme)))
         else:
-            QMessageBox.information(self, "Документация", "README.md не найден.")
+            QMessageBox.information(self, t("docs.title"), t("docs.readme_missing"))
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: N802
@@ -472,9 +469,9 @@ def _install_excepthook() -> None:
         LOGGER.error("Unhandled exception:\n%s", text)
         try:
             box = QMessageBox()
-            box.setWindowTitle("Неожиданная ошибка")
+            box.setWindowTitle(t("error.unexpected_title"))
             box.setIcon(QMessageBox.Icon.Critical)
-            box.setText("Reasonable Engine столкнулась с ошибкой, но продолжает работу.")
+            box.setText(t("error.unexpected_text"))
             box.setDetailedText(text)
             box.exec()
         except Exception:

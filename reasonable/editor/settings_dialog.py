@@ -281,7 +281,7 @@ class SettingsDialog(QDialog):
         card.layout().addWidget(muted(t("settings.language_hint"), size=9))
         row = QHBoxLayout()
         combo = QComboBox()
-        for code, label in (("ru", "Русский"), ("en", "English")):
+        for code, label in (("ru", "Русский"), ("en", "English")):  # self-descriptive by convention
             combo.addItem(label, code)
         index = combo.findData(self.settings.language())
         combo.setCurrentIndex(max(0, index))

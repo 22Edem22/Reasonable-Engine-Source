@@ -304,15 +304,17 @@ def human_time(iso_value: str | None) -> str:
         if value.tzinfo is None:
             value = value.astimezone()
         delta = datetime.now().astimezone() - value
+        from reasonable.core.i18n import t as _t
+
         seconds = int(delta.total_seconds())
         if seconds < 10:
-            return "только что"
+            return _t("time.just_now")
         if seconds < 60:
-            return f"{seconds} сек. назад"
+            return _t("time.seconds_ago", count=seconds)
         if seconds < 3600:
-            return f"{seconds // 60} мин. назад"
+            return _t("time.minutes_ago", count=seconds // 60)
         if seconds < 86400:
-            return f"{seconds // 3600} ч. назад"
+            return _t("time.hours_ago", count=seconds // 3600)
         return value.strftime("%d.%m.%Y %H:%M")
     except Exception:
         return iso_value
