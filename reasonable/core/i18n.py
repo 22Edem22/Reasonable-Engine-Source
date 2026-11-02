@@ -1371,4 +1371,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "external.check_engine": _pair("Встроенный движок", "Vendored engine"),
     "external.check_engine_hint": _pair("Проект самодостаточен", "The project is self-contained"),
     "external.readme_header": _pair("Внешний агент · {name}", "External agent · {name}"),
+    # --- Project settings dialog (editor/project_settings.py) ---
+    "projset.title": _pair("Настройки проекта", "Project settings"),
+    "projset.advanced": _pair("Расширенные параметры", "Advanced options"),
+    "projset.advanced_hint": _pair("Версия Android и служебные параметры.", "Android version and service settings."),
+    "projset.badge_builtin": _pair("ВСТРОЕННЫЙ", "BUILT-IN"),
+    "projset.badge_external": _pair("ВНЕШНИЙ", "EXTERNAL"),
+    "projset.intro": _pair(
+        "Меняйте название, цель и заметки в любой момент. Расширенные параметры — "
+        "под переключателем. Папка проекта остаётся на месте.",
+        "Change the name, goal and notes at any time. Advanced options are under "
+        "the toggle. The project folder stays where it is.",
+    ),
+    "projset.author": _pair("Автор", "Author"),
+    "projset.goal": _pair("Главная цель", "Main goal"),
+    "projset.notes_placeholder": _pair(
+        "Необязательные требования и пожелания. Первую задачу агенту пишите в разделе «ИИ-агент».",
+        "Optional requirements and wishes. Write the first task for the agent in the \"AI agent\" section.",
+    ),
+    "projset.notes": _pair("Заметки и требования", "Notes and requirements"),
+    "projset.android_version": _pair("Версия Android", "Android version"),
+    "projset.advanced_note": _pair(
+        "Параметры окна агент настраивает сам — пользователь их не видит. "
+        "Ориентация экрана для Android применяется при следующем экспорте. "
+        "Платформа проекта меняется через «Конвертировать…» — создаётся новый "
+        "проект, эта папка остаётся как есть.",
+        "The agent configures window options itself — the user does not see them. "
+        "Android screen orientation applies on the next export. The project platform "
+        "changes via \"Convert…\" — a new project is created and this folder stays as is.",
+    ),
+    "projset.save": _pair("Сохранить", "Save"),
+    "projset.empty_name": _pair("Название проекта не может быть пустым.", "The project name cannot be empty."),
+    "projset.save_error": _pair("Ошибка сохранения", "Save error"),
 }
