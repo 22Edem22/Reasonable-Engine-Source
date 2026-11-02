@@ -1744,4 +1744,181 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Экспорт ещё выполняется. Закрыть окно?",
         "The export is still running. Close the window?",
     ),
+    # -- version history dialog (editor/history_dialog.py) ----------------
+    "historydlg.title": _pair("История версий — Reasonable Engine", "Version history — Reasonable Engine"),
+    "historydlg.heading": _pair("История версий", "Version history"),
+    "historydlg.subtitle": _pair(
+        "Перед каждым запуском ИИ-агента сохраняется полная рабочая версия. "
+        "Любую из них можно вернуть — текущее состояние тоже сохранится.",
+        "A full working version is saved before every AI agent run. "
+        "Any of them can be restored — the current state will be saved too.",
+    ),
+    "historydlg.create_button": _pair("＋  Создать снимок", "＋  Create snapshot"),
+    "historydlg.versions_label": _pair("Версии", "Versions"),
+    "historydlg.empty_hint": _pair(
+        "Снимков пока нет. Они появятся автоматически перед первым запуском агента "
+        "или по кнопке «Создать снимок».",
+        "No snapshots yet. They appear automatically before the first agent run "
+        "or when you press “Create snapshot”.",
+    ),
+    "historydlg.changed_suffix": _pair(" · {count} файл(ов)", " · {count} file(s)")
+    ,
+    "historydlg.files_count_tooltip": _pair("Файлов: {count}", "Files: {count}"),
+    "historydlg.saved_versions": _pair("Сохранено версий: {count}", "Saved versions: {count}"),
+    "historydlg.select_hint": _pair(
+        "Выберите версию слева, чтобы увидеть файлы и вернуть её.",
+        "Select a version on the left to see its files and restore it.",
+    ),
+    "historydlg.size_line": _pair(
+        "{time} · файлов: {count} · {kb} КБ",
+        "{time} · files: {count} · {kb} KB",
+    ),
+    "historydlg.outcome_done": _pair("Агент завершил работу", "Agent finished the work"),
+    "historydlg.outcome_incomplete": _pair("Агент не завершил работу", "Agent did not finish the work"),
+    "historydlg.outcome_cancelled": _pair("Работа остановлена", "Work cancelled"),
+    "historydlg.outcome_error": _pair("Ошибка агента", "Agent error"),
+    "historydlg.outcome_stopped": _pair("Агент остановился", "Agent stopped"),
+    "historydlg.outcome_line": _pair("Результат запуска: {outcome}", "Run outcome: {outcome}"),
+    "historydlg.changed_after_title": _pair(
+        "Файлы, изменённые после снимка", "Files changed after the snapshot"
+    ),
+    "historydlg.action_create": _pair("создан", "created"),
+    "historydlg.action_edit": _pair("изменён", "changed"),
+    "historydlg.action_delete": _pair("удалён", "deleted"),
+    "historydlg.action_generate": _pair("сгенерирован", "generated"),
+    "historydlg.snapshot_contents": _pair("Содержимое снимка", "Snapshot contents"),
+    "historydlg.restore_button": _pair("↶  Вернуть эту версию", "↶  Restore this version"),
+    "historydlg.open_folder_button": _pair("Открыть папку снимка", "Open snapshot folder"),
+    "historydlg.delete_button": _pair("Удалить снимок", "Delete snapshot"),
+    "historydlg.manual_snapshot_label": _pair(
+        "Ручной снимок рабочей версии", "Manual snapshot of the working version"
+    ),
+    "historydlg.create_failed_title": _pair("Не удалось создать снимок", "Could not create a snapshot"),
+    "historydlg.created_status": _pair(
+        "Снимок создан. Теперь его можно вернуть в любой момент.",
+        "Snapshot created. You can restore it at any time now.",
+    ),
+    "historydlg.restore_title": _pair("Вернуть версию", "Restore version"),
+    "historydlg.restore_text": _pair(
+        "Вернуть версию «{label}»?\n\n"
+        "Файлы проекта будут заменены содержимым снимка. Текущее состояние "
+        "сначала сохранится отдельным снимком, поэтому действие можно отменить.",
+        "Restore the version “{label}”?\n\n"
+        "Project files will be replaced with the snapshot contents. The current state "
+        "is saved as a separate snapshot first, so the action can be undone.",
+    ),
+    "historydlg.restore_failed_title": _pair(
+        "Не удалось вернуть версию", "Could not restore the version"
+    ),
+    "historydlg.restored_status": _pair(
+        "Версия возвращена: файлов восстановлено {restored}, "
+        "удалено {removed}. Текущее состояние сохранено отдельно.",
+        "Version restored: {restored} file(s) recovered, "
+        "{removed} deleted. The current state was saved separately.",
+    ),
+    "historydlg.delete_text": _pair(
+        "Удалить снимок «{label}»? Это освободит место, но вернуть "
+        "эту версию будет уже нельзя.",
+        "Delete the snapshot “{label}”? This frees up space, but this version "
+        "can no longer be restored.",
+    ),
+    "historydlg.deleted_status": _pair("Снимок удалён.", "Snapshot deleted."),
+    # -- convert dialog (editor/convert_dialog.py) -------------------------
+    "convdlg.title": _pair("Конвертировать проект — Reasonable Engine", "Convert project — Reasonable Engine"),
+    "convdlg.heading": _pair("Конвертировать проект", "Convert project"),
+    "convdlg.subtitle": _pair(
+        "Создаётся отдельная папка. Исходный проект остаётся без изменений.",
+        "A separate folder is created. The source project stays unchanged.",
+    ),
+    "convdlg.result_ready": _pair("Новый проект готов", "New project is ready"),
+    "convdlg.open_folder": _pair("Открыть папку", "Open folder"),
+    "convdlg.open_new": _pair("Открыть новый проект", "Open the new project"),
+    "convdlg.create_button": _pair("Создать новый проект", "Create a new project"),
+    "convdlg.platform_new": _pair("Новая платформа", "New platform"),
+    "convdlg.platform_current": _pair("Сейчас: {name}", "Now: {name}"),
+    "convdlg.platform_windows_hint": _pair("Папка, Play.bat и опционально .exe", "Folder, Play.bat and optionally .exe"),
+    "convdlg.platform_android_hint": _pair(
+        "buildozer-пакет, касания и портрет/альбом", "buildozer package, touches and portrait/landscape"
+    ),
+    "convdlg.name_folder_title": _pair("Название и папка", "Name and folder"),
+    "convdlg.name_placeholder": _pair("Название нового проекта", "New project name"),
+    "convdlg.field_name": _pair("Название", "Name"),
+    "convdlg.field_folder": _pair("Папка", "Folder"),
+    "convdlg.browse_button": _pair("Выбрать…", "Browse…"),
+    "convdlg.folder_hint": _pair(
+        "В выбранной папке появится новая подпапка. Если имя занято, добавится суффикс -2.",
+        "A new subfolder appears in the chosen folder. If the name is taken, a -2 suffix is added.",
+    ),
+    "convdlg.options_title": _pair("Что ещё можно изменить", "What else can be changed"),
+    "convdlg.keep_as_project": _pair("Как в проекте", "As in the project"),
+    "convdlg.orientation_landscape": _pair("Альбомная", "Landscape"),
+    "convdlg.orientation_portrait": _pair("Портретная", "Portrait"),
+    "convdlg.field_orientation": _pair("Ориентация", "Orientation"),
+    "convdlg.agent_builtin": _pair("Встроенный ИИ", "Built-in AI"),
+    "convdlg.agent_external": _pair("Внешний агент", "External agent"),
+    "convdlg.field_agent_mode": _pair("Режим агента", "Agent mode"),
+    "convdlg.field_ui_levels": _pair("Уровень интерфейса", "Interface level"),
+    "convdlg.reset_check": _pair(
+        "Сбросить план, прогресс и ленту событий в новом проекте",
+        "Reset the plan, progress and event feed in the new project",
+    ),
+    "convdlg.options_note": _pair(
+        "Окно, разрешение и ориентацию агент подберёт сам — здесь это не настраивается. "
+        "Код и ассеты не переписываются: после создания попросите агента адаптировать "
+        "компоновку под новую платформу. APK собирается через buildozer на Linux/WSL2.",
+        "The agent picks window, resolution and orientation itself — not configurable here. "
+        "Code and assets are not rewritten: after creation ask the agent to adapt "
+        "the layout to the new platform. The APK is built via buildozer on Linux/WSL2.",
+    ),
+    "convdlg.preview_title": _pair("Предпросмотр", "Preview"),
+    "convdlg.limits_title": _pair("Что важно знать", "What you should know"),
+    "convdlg.limits_note": _pair(
+        "Платформа — главная ось конвертации. Ориентация, агент и уровни интерфейса "
+        "применяются к копии сразу. Код и ассеты не переписываются: после создания "
+        "попросите агента адаптировать компоновку, управление и safe margins под Android. "
+        "APK по-прежнему собирается через buildozer на Linux/WSL2.",
+        "Platform is the main conversion axis. Orientation, agent and interface levels "
+        "apply to the copy immediately. Code and assets are not rewritten: after creation "
+        "ask the agent to adapt the layout, controls and safe margins for Android. "
+        "The APK is still built via buildozer on Linux/WSL2.",
+    ),
+    "convdlg.hint_android": _pair(
+        "Android: проект получит android-ориентацию и пакет. "
+        "Проверьте касания и размеры элементов; APK собирается на Linux/WSL2.",
+        "Android: the project gets android orientation and packaging. "
+        "Check touches and element sizes; the APK is built on Linux/WSL2.",
+    ),
+    "convdlg.hint_windows": _pair(
+        "Windows: проект будет ориентирован на окно Windows, папку и .exe. "
+        "Ориентация портрет тоже поддерживается, если она нужна приложению.",
+        "Windows: the project targets a Windows window, folder and .exe. "
+        "Portrait orientation is also supported if the app needs it.",
+    ),
+    "convdlg.hint_same_platform": _pair(
+        " Платформа не меняется — это будет новая версия проекта.",
+        " The platform does not change — this will be a new version of the project.",
+    ),
+    "convdlg.browse_title": _pair("Куда сохранить новый проект", "Where to save the new project"),
+    "convdlg.badge_error": _pair("Ошибка", "Error"),
+    "convdlg.badge_ready": _pair("ГОТОВО", "READY"),
+    "convdlg.badge_no_changes": _pair("БЕЗ ИЗМЕНЕНИЙ", "NO CHANGES"),
+    "convdlg.no_changes_hint": _pair(
+        "Измените платформу, имя, ориентацию, уровни интерфейса, агент или прогресс — "
+        "точную копию можно создать только с хотя бы одним отличием.",
+        "Change the platform, name, orientation, interface levels, agent or progress — "
+        "an exact copy can only be created with at least one difference.",
+    ),
+    "convdlg.new_project_path": _pair("Новый проект: {path}", "New project: {path}"),
+    "convdlg.copying_status": _pair("Копирую проект…", "Copying the project…"),
+    "convdlg.running_button": _pair("Конвертирую…", "Converting…"),
+    "convdlg.created_message": _pair("Новый проект создан.", "The new project was created."),
+    "convdlg.another_copy_button": _pair("Создать ещё одну копию", "Create another copy"),
+    "convdlg.source_unchanged": _pair("Исходный проект не изменён.", "The source project was not changed."),
+    "convdlg.error_prefix": _pair("Ошибка: ", "Error: "),
+    "convdlg.failed_title": _pair("Конвертация не удалась", "Conversion failed"),
+    "convdlg.close_running_title": _pair("Конвертация", "Conversion"),
+    "convdlg.close_running_text": _pair(
+        "Конвертация ещё выполняется. Закрыть окно?",
+        "The conversion is still running. Close the window?",
+    ),
 }
