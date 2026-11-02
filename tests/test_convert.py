@@ -59,8 +59,9 @@ class ConvertTests(unittest.TestCase):
         self.assertTrue((target.root / "CONVERSION.md").is_file())
         self.assertTrue((target.root / "AGENT_GUIDE.md").is_file())
         guide = (target.root / "AGENT_GUIDE.md").read_text(encoding="utf-8")
-        self.assertIn("Платформа:** Android", guide)
-        self.assertIn("сконвертирован", guide)
+        # The external agent guide is English-only by design.
+        self.assertIn("**Platform:** Android", guide)
+        self.assertIn("Converted from", guide)
         main = (target.root / "main.py").read_text(encoding="utf-8")
         self.assertIn(repr(target.name), main)
         readme = (target.root / "README.md").read_text(encoding="utf-8")

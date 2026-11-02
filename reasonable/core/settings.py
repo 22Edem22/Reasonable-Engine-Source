@@ -32,6 +32,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ui": {
         "accent": "#FF6B4A",
         "sidebar_width": 232,
+        # Chosen on the very first page of the Windows installer and written
+        # into settings.json there; changeable later in the settings dialog.
+        "language": "ru",
     },
     # The intro splash always plays; there is no preview.skip_splash option.
     # Empty means "inside the installed engine folder" (see default_projects_dir).
@@ -84,6 +87,11 @@ class Settings:
             image["api_key"] = ""
         if not str(self.data.get("projects_dir") or "").strip():
             self.data["projects_dir"] = ""
+        # Language: older installs simply did not have ui.language — keep RU.
+        from .i18n import normalize_language
+
+        ui = self.data.setdefault("ui", {})
+        ui["language"] = normalize_language(ui.get("language"))
         # The step limit is gone: old installs keep working with unlimited steps.
         agent = self.data.setdefault("agent", {})
         try:
@@ -96,6 +104,23 @@ class Settings:
     def save(self) -> None:
         self.path = self.path or (app_data_dir() / "settings.json")
         atomic_write_json(self.path, self.data)
+        from .i18n import invalidate_cache
+
+        invalidate_cache()
+
+    # -- language ---------------------------------------------------------
+    def language(self) -> str:
+        from .i18n import normalize_language
+
+        return normalize_language(self.data.get("ui", {}).get("language"))
+
+    def set_language(self, value: str) -> None:
+        """Remember the UI language (chosen in the installer or settings)."""
+        from .i18n import invalidate_cache, normalize_language
+
+        self.data.setdefault("ui", {})["language"] = normalize_language(value)
+        self.save()
+        invalidate_cache()
 
     # -- project locations ------------------------------------------------
     def projects_dir(self) -> Path:
