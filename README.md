@@ -466,6 +466,7 @@ re.bat done "Проект готов"
 | [docs/CLI.md](docs/CLI.md) | Все команды `re.bat` и JSON-вывод |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Как устроены редактор, runtime, агент и протокол прогресса |
 | [docs/TESTING.md](docs/TESTING.md) | Автотесты и ручной чек-лист |
+| [AGENTS.md](AGENTS.md) | **Инструкция для ИИ-агентов**: правила работы с репозиторием, публичные изменения в «Reasonable Engine Public/CHANGELOG», версии, i18n |
 
 ---
 
