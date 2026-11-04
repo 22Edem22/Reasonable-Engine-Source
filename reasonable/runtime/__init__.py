@@ -27,6 +27,7 @@ from .graphics import (
 from .input import Input, TouchButton, VirtualJoystick
 from .save import SaveData
 from .scene import GridScene, Scene
+from .scenes import add_scene_objects, build_scene_objects, load_scene_data, scene_background
 from .splash import play_splash, save_splash_preview
 from .ui import (
     Avatar,
@@ -97,6 +98,10 @@ __all__ = [
     "UIApp",
     "Scene",
     "GridScene",
+    "load_scene_data",
+    "build_scene_objects",
+    "add_scene_objects",
+    "scene_background",
     "Node",
     "Sprite",
     "AnimatedSprite",

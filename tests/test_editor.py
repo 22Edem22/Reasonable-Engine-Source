@@ -67,6 +67,8 @@ class EditorTests(unittest.TestCase):
             cls.wizard.reject()
         finally:
             cls._tmp.cleanup()
+            # Flush deferred deletes before the interpreter tears Qt down.
+            cls.app.processEvents()
 
     def test_wizard_creates_project(self) -> None:
         self.assertTrue(self.outcome["done"], self.outcome["error"])
@@ -181,6 +183,34 @@ class EditorTests(unittest.TestCase):
             panel.timer.stop()
             panel.deleteLater()
 
+    def test_external_live_progress_replaces_old_tasks_without_ghosts(self) -> None:
+        from PySide6.QtWidgets import QLabel
+
+        from reasonable.editor.external import ExternalAgentPanel
+
+        panel = ExternalAgentPanel(self.project)
+        try:
+            panel._render_tasks(
+                {"tasks": [{"id": "t1", "title": "Old task", "status": "done"}]},
+                force=True,
+            )
+            panel._render_tasks(
+                {"tasks": [{"id": "t2", "title": "New task", "status": "in_progress"}]},
+                force=True,
+            )
+            self.assertEqual(panel.task_host.count(), 1)
+            row = panel.task_host.itemAt(0).widget()
+            self.assertIsNotNone(row)
+            texts = [label.text() for label in row.findChildren(QLabel)]
+            self.assertIn("New task", texts)
+            # The old row must be gone, not painted underneath the new one.
+            all_texts = [label.text() for label in panel.findChildren(QLabel)]
+            self.assertNotIn("Old task", all_texts)
+        finally:
+            panel.timer.stop()
+            panel.deleteLater()
+            self.app.processEvents()
+
     def test_agent_worker_reports_provider_error_as_failure(self) -> None:
         from reasonable.editor.workers import AgentWorker
 
@@ -234,20 +264,232 @@ class EditorTests(unittest.TestCase):
         self.assertIn("auto-test-marker", (self.project.root / "main.py").read_text(encoding="utf-8"))
         page.deleteLater()
 
-    def test_procedural_sprite_dialog(self) -> None:
+    def test_chat_enter_sends_and_ctrl_enter_adds_a_line(self) -> None:
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+
+        from reasonable.editor.chat import ChatPanel
+
+        panel = ChatPanel(self.project, self.settings)
+        sent: list[str] = []
+        panel.send = lambda text=None: sent.append(text if text is not None else panel.input.toPlainText())
+        try:
+            panel.input.setPlainText("первая строка")
+            enter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+            self.assertTrue(panel.eventFilter(panel.input, enter))
+            self.assertEqual(sent, ["первая строка"])
+
+            panel.input.setPlainText("первая")
+            panel.input.moveCursor(panel.input.textCursor().MoveOperation.End)
+            ctrl_enter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+            self.assertTrue(panel.eventFilter(panel.input, ctrl_enter))
+            self.assertEqual(sent, ["первая строка"])
+            self.assertEqual(panel.input.toPlainText(), "первая\n")
+        finally:
+            panel.deleteLater()
+            self.app.processEvents()
+
+    def test_chat_usage_label_reads_lifetime_totals(self) -> None:
+        from reasonable.core.usage import add_usage
+        from reasonable.editor.chat import ChatPanel
+
+        add_usage(self.project.root, prompt_tokens=100, completion_tokens=50, seconds=125)
+        panel = ChatPanel(self.project, self.settings)
+        try:
+            self.assertFalse(panel.usage_label.isHidden())
+            self.assertIn("150", panel.usage_label.text())
+            self.assertIn("2 мин", panel.usage_label.text())
+        finally:
+            panel.deleteLater()
+
+    def test_tool_calls_are_compact_and_collapsible(self) -> None:
+        from reasonable.editor.chat import ToolCallCard, ToolCallGroup
+
+        card = ToolCallCard("edit_file", {"path": "main.py", "old_text": "a", "new_text": "b"})
+        group = ToolCallGroup()
+        group.add_call(card)
+        try:
+            self.assertIn("Правка файла", card.header.text())
+            self.assertIn("main.py", card.header.text())
+            self.assertTrue(card.details.isHidden())
+            self.assertLessEqual(card.sizeHint().height(), 34)
+
+            card.header.click()
+            self.assertFalse(card.details.isHidden())
+            card.finish('{"ok": true, "message": "Файл изменён."}', True)
+            self.assertIn("✓", card.header.text())
+            self.assertEqual(card.details.text(), "Файл изменён.")
+
+            # Tool-call groups are collapsed by default.
+            self.assertTrue(group.body.isHidden())
+            self.assertIn("Вызовы инструментов · 1", group.header.text())
+            group.header.click()
+            self.assertFalse(group.body.isHidden())
+            group.header.click()
+            self.assertTrue(group.body.isHidden())
+        finally:
+            group.deleteLater()
+            card.deleteLater()
+            self.app.processEvents()
+
+    def test_server_error_offers_continue_and_can_auto_continue(self) -> None:
+        from reasonable.ai.agent import AgentEvent
+        from reasonable.core.settings import Settings
+        from reasonable.editor.chat import AgentErrorBubble, ChatPanel
+
+        settings = Settings(path=self.base / "auto_continue_settings.json")
+        settings.set_auto_continue("server", True)
+        panel = ChatPanel(self.project, settings)
+        sent: list[str] = []
+        panel.send = lambda text=None: sent.append(text)
+        try:
+            panel._on_event(
+                AgentEvent(
+                    "error",
+                    "Ошибка на стороне AI-провайдера (500).",
+                    {"error_kind": "server"},
+                )
+            )
+            bubble = panel.stream.itemAt(panel.stream.count() - 2).widget()
+            self.assertIsInstance(bubble, AgentErrorBubble)
+            self.assertIsNotNone(bubble.auto_check)
+            self.assertTrue(bubble.auto_check.isChecked())
+            self.assertEqual(bubble.continue_button.text(), "Продолжай")
+
+            bubble.auto_check.setChecked(False)
+            self.assertFalse(settings.is_auto_continue_enabled("server"))
+            bubble.auto_check.setChecked(True)
+            self.assertTrue(settings.is_auto_continue_enabled("server"))
+
+            bubble.continue_button.click()
+            self.assertEqual(sent, ["Продолжай"])
+
+            sent.clear()
+            panel._on_event(
+                AgentEvent(
+                    "error",
+                    "Ошибка на стороне AI-провайдера (500).",
+                    {"error_kind": "server"},
+                )
+            )
+            panel._on_failed("Ошибка на стороне AI-провайдера (500).")
+            loop = QEventLoop()
+            QTimer.singleShot(200, loop.quit)
+            loop.exec()
+            self.assertEqual(sent, ["Продолжай"])
+        finally:
+            settings.data.setdefault("agent", {})["auto_continue_errors"] = []
+            panel.deleteLater()
+            self.app.processEvents()
+
+    def test_auto_continue_has_no_attempt_limit(self) -> None:
+        from unittest import mock
+
+        from reasonable.core.settings import Settings
+        from reasonable.editor.chat import ChatPanel
+
+        settings = Settings(path=self.base / "auto_continue_unlimited.json")
+        settings.set_auto_continue("server", True)
+        panel = ChatPanel(self.project, settings)
+        try:
+            with mock.patch("reasonable.editor.chat.QTimer.singleShot") as timer:
+                for _ in range(15):
+                    panel._auto_continue_kind = "server"
+                    panel._schedule_auto_continue()
+            self.assertEqual(panel._auto_continue_attempts, 15)
+            self.assertEqual(timer.call_count, 15)
+        finally:
+            settings.data.setdefault("agent", {})["auto_continue_errors"] = []
+            panel.deleteLater()
+            self.app.processEvents()
+
+    def test_chat_panel_switches_between_saved_chats(self) -> None:
+        from reasonable.core import chatlog
+        from reasonable.core.project import Project, default_manifest
+        from reasonable.core.settings import Settings
+        from reasonable.editor.chat import ChatPanel
+
+        root = self.base / "multi-chat-project"
+        project = Project.create(
+            root,
+            default_manifest("Chat Test", project_type="game", mode="external"),
+            scaffold=False,
+        )
+        settings = Settings(path=self.base / "multi_chat_settings.json")
+        panel = ChatPanel(project, settings)
+        try:
+            first = chatlog.active_chat_id(root)
+            panel.new_chat()
+            chats = chatlog.list_chats(root)
+            self.assertEqual(len(chats), 2)
+            self.assertEqual(panel.chat_combo.count(), 2)
+            second = chatlog.active_chat_id(root)
+            self.assertNotEqual(first, second)
+
+            index = panel.chat_combo.findData(first)
+            panel.chat_combo.setCurrentIndex(index)
+            self.app.processEvents()
+            self.assertEqual(chatlog.active_chat_id(root), first)
+            self.assertTrue(panel.chat_combo.isEnabled())
+        finally:
+            panel.set_enabled(True)
+            panel.deleteLater()
+            self.app.processEvents()
+
+    def test_improve_creates_hidden_analysis_chat(self) -> None:
+        from reasonable.core import chatlog
+        from reasonable.core.project import Project, default_manifest
+        from reasonable.core.settings import Settings
+        from reasonable.editor.chat import ChatPanel, MessageBubble
+
+        root = self.base / "improve-chat-project"
+        project = Project.create(
+            root,
+            default_manifest("Chat Test", project_type="game", mode="external"),
+            scaffold=False,
+        )
+        settings = Settings(path=self.base / "improve_chat_settings.json")
+        panel = ChatPanel(project, settings)
+        captured: dict = {}
+        panel._ready_to_run = lambda: True
+        panel.prepare_run = lambda: True
+        panel._start = lambda message, **kwargs: captured.update(message=message, **kwargs)
+        try:
+            before = len(chatlog.list_chats(root))
+            panel.improve_project()
+            self.assertEqual(len(chatlog.list_chats(root)), before + 1)
+            self.assertTrue(captured.get("hidden"))
+            self.assertTrue(captured.get("analysis"))
+            self.assertEqual(captured.get("reply_language"), "ru")
+            self.assertIn("improvement", captured.get("message", "").lower())
+            active = chatlog.active_chat_id(root)
+            self.assertEqual(captured.get("chat_id"), active)
+            self.assertEqual(
+                next(chat["title"] for chat in chatlog.list_chats(root) if chat["id"] == active),
+                "Улучшения",
+            )
+
+            bubbles = [
+                panel.stream.itemAt(index).widget()
+                for index in range(panel.stream.count())
+            ]
+            self.assertFalse(
+                any(
+                    isinstance(widget, MessageBubble) and widget.role == "user"
+                    for widget in bubbles
+                )
+            )
+        finally:
+            panel.deleteLater()
+            self.app.processEvents()
+
+    def test_sprite_dialog_uses_only_the_external_model(self) -> None:
         from reasonable.editor.assets import GenerateImageDialog
 
         dialog = GenerateImageDialog(self.project, self.settings)
-        dialog.name_edit.setText("auto-star")
-        dialog.prompt.setPlainText("золотая звезда")
-        index = dialog.provider_combo.findData("procedural")
-        dialog.provider_combo.setCurrentIndex(index)
-        dialog._generate()
-        outcome = wait_for_worker(dialog.worker)
-        self.assertTrue(outcome["done"], outcome["error"])
-        path = Path(outcome["result"]["path"])
-        self.assertTrue(path.is_file())
-        self.assertEqual(path.parent.name, "sprites")
+        self.assertEqual(dialog.provider_combo.count(), 1)
+        self.assertEqual(dialog.provider_combo.itemData(0), "openai")
+        self.assertEqual(dialog.provider_combo.findData("procedural"), -1)
         dialog.deleteLater()
 
     def test_convert_dialog_creates_new_project(self) -> None:

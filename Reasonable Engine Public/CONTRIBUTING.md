@@ -32,7 +32,7 @@ engine's development — bug reports, ideas, and usage scenarios.
 ## Rules for a good report
 
 - **One issue — one problem.** Don't mix several bugs in one.
-- State the **release version** (RE-1.01, RE-1.02…), the OS, and, if the bug is
+- State the **release version** (RE-2.01, RE-2.02…), the OS, and, if the bug is
   in a generated program, the project type and interface level.
 - Attach logs: the editor writes them next to its settings, and project launch
   errors are visible in the project console ("Overview" section → launch console).
@@ -46,7 +46,7 @@ engine's development — bug reports, ideas, and usage scenarios.
 
 ## How the release cycle works
 
-- Releases are numbered RE-1.01, RE-1.02, …; the global generation is Reasonable
+- Releases are numbered RE-2.01, RE-2.02, …; the global generation is Reasonable
   Engine 1, 2, etc. Details: the "Versioning System" section in [README.md](README.md).
 - Fixes and accepted suggestions land in the next release; [CHANGELOG.md](CHANGELOG.md)
   notes exactly what was included.

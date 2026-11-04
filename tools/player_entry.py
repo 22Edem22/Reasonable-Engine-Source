@@ -16,7 +16,14 @@ import os
 import runpy
 import sys
 import traceback
+import warnings
 from pathlib import Path
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
 
 REPORT_ENV = "REASONABLE_PLAYER_SELF_TEST_REPORT"
 LOG_NAME = "ReasonablePlayer.log"
@@ -132,6 +139,24 @@ def _run_project(entry: Path) -> int:
         if candidate.is_dir() and str(candidate) not in sys.path:
             sys.path.insert(0, str(candidate))
     os.chdir(project_dir)
+    # The player owns the intro: it plays before project code, so rewriting
+    # main.py or passing splash=False cannot remove the engine branding.
+    try:
+        from reasonable.runtime.splash import play_splash
+
+        width, height = 1280, 720
+        try:
+            data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+            window = data.get("window") if isinstance(data, dict) else {}
+            width = int((window or {}).get("width") or width)
+            height = int((window or {}).get("height") or height)
+        except (OSError, ValueError, TypeError):
+            pass
+        if not play_splash((width, height)):
+            return 0
+    except Exception as exc:
+        _report_error(f"Не удалось показать заставку Reasonable Engine:\n{exc}")
+        return 5
     sys.argv = [str(entry), *sys.argv[2:]]
     try:
         runpy.run_path(str(entry), run_name="__main__")

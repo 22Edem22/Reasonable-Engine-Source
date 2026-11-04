@@ -26,6 +26,7 @@ from .prompts_en import (  # noqa: F401  (re-exported for existing imports)
     UI_LEVEL_LABELS_EN,
     build_agent_system_prompt,
     build_agent_system_prompt_body,
+    build_improvement_prompt,
     build_initial_user_message,
 )
 

@@ -1,8 +1,14 @@
-"""Welcome screen: recent projects, first steps and AI status."""
+"""Project hub shown when no project is open.
+
+The layout mirrors desktop engines: a compact title bar, a list of recent
+projects and a narrow column with the first-run actions and the AI status.
+"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from pathlib import Path
+
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -10,6 +16,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +39,7 @@ class WelcomePage(QWidget):
     configure_ai = Signal()
     open_recent = Signal(str)
     delete_project = Signal(str)
+    open_tutorial = Signal()
 
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -49,180 +57,175 @@ class WelcomePage(QWidget):
         content.setObjectName("root")
         scroll.setWidget(content)
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(40, 24, 40, 28)
-        layout.setSpacing(24)
+        layout.setContentsMargins(22, 14, 22, 16)
+        layout.setSpacing(14)
 
-        layout.addLayout(self._build_header())
-        layout.addWidget(self._build_intro())
-        layout.addLayout(self._build_body())
-        layout.addStretch(1)
+        layout.addWidget(self._build_header())
+        layout.addLayout(self._build_intro())
+        layout.addLayout(self._build_body(), 1)
         layout.addLayout(self._build_footer())
 
         self.refresh()
+        self._update_footer_compact()
 
     # ------------------------------------------------------------------
-    def _build_header(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(11)
+    def _build_header(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("topbar")
+        bar.setFixedHeight(46)
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 6, 10, 6)
+        row.setSpacing(9)
+
         logo = QLabel()
-        logo.setPixmap(theme.logo_pixmap(32))
+        logo.setPixmap(theme.logo_pixmap(22))
         row.addWidget(logo)
 
-        names = QVBoxLayout()
-        names.setSpacing(0)
         name = QLabel("Reasonable Engine")
         name.setObjectName("title")
-        name.setFont(theme.display_font(13, 700))
-        names.addWidget(name)
+        name.setFont(theme.ui_font(10, 600))
+        row.addWidget(name)
+
         sub = QLabel(t("welcome.version_line", version=VERSION_LABEL, tagline=i18n_tagline()))
         sub.setObjectName("dim")
-        sub.setFont(theme.ui_font(9))
-        names.addWidget(sub)
-        row.addLayout(names)
+        sub.setFont(theme.ui_font(8))
+        row.addWidget(sub)
         row.addStretch(1)
 
         settings_button = QPushButton(t("welcome.settings"))
         settings_button.setObjectName("ghost")
+        settings_button.setIcon(theme.icon("settings", 14))
+        settings_button.setIconSize(QSize(14, 14))
         settings_button.clicked.connect(self.open_settings)
         row.addWidget(settings_button)
-        return row
+        return bar
 
-    def _build_intro(self) -> QWidget:
-        section = QWidget()
-        layout = QHBoxLayout(section)
-        layout.setContentsMargins(0, 8, 0, 4)
-        layout.setSpacing(52)
+    def _build_intro(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 4, 0, 2)
+        row.setSpacing(16)
 
-        left = QVBoxLayout()
-        left.setSpacing(11)
-        eyebrow = QLabel(t("welcome.eyebrow"))
-        eyebrow.setObjectName("dim")
-        eyebrow.setFont(theme.ui_font(8, 700))
-        left.addWidget(eyebrow)
-
+        left_host = QWidget()
+        # The heading is two lines and the caption wraps to three. Without an
+        # explicit minimum the outer stretch layout may compress this column
+        # and clip the first line of both labels.
+        left_host.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+        left = QVBoxLayout(left_host)
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(6)
         heading = QLabel(t("welcome.heading"))
         heading.setObjectName("title")
-        heading.setFont(theme.display_font(25, 700))
-        heading.setWordWrap(True)
+        heading.setFont(theme.display_font(15, 600))
+        heading.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        heading.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         left.addWidget(heading)
-
-        caption = muted(
-            t("welcome.intro"),
-            size=10,
-        )
-        caption.setMaximumWidth(660)
-        caption.setMinimumHeight(72)
+        caption = muted(t("welcome.intro"), size=9)
+        caption.setMaximumWidth(640)
+        caption.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         left.addWidget(caption)
+        # Keep both wrapped lines intact even when the page below asks for
+        # space; the welcome content is scrollable, clipping is not accepted.
+        left_host.setMinimumHeight(max(left_host.sizeHint().height(), 1))
+        row.addWidget(left_host, 1)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(9)
+        host = QWidget()
+        host.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        buttons = QHBoxLayout(host)
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(8)
+
         self.create_button = QPushButton(t("welcome.create_ai"))
         self.create_button.setObjectName("primary")
-        self.create_button.setMinimumHeight(42)
-        self.create_button.setMinimumWidth(150)
-        self.create_button.setFont(theme.ui_font(10, 700))
+        self.create_button.setMinimumHeight(28)
+        self.create_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.create_button.setIcon(theme.icon("sparkles", 14, "#1B110D"))
         self.create_button.setToolTip(t("welcome.create_ai_tip"))
         self.create_button.clicked.connect(self.new_project)
         buttons.addWidget(self.create_button)
 
         self.open_button = QPushButton(t("welcome.open_project"))
-        self.open_button.setMinimumHeight(42)
-        self.open_button.setMinimumWidth(150)
-        self.open_button.setFont(theme.ui_font(10, 700))
+        self.open_button.setMinimumHeight(28)
+        self.open_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.open_button.setIcon(theme.icon("folder", 14))
         self.open_button.setToolTip(t("welcome.open_project_tip"))
         self.open_button.clicked.connect(self.open_project)
         buttons.addWidget(self.open_button)
 
         self.blank_button = QPushButton(t("welcome.blank_project"))
         self.blank_button.setObjectName("ghost")
-        self.blank_button.setMinimumHeight(42)
-        self.blank_button.setMinimumWidth(150)
-        self.blank_button.setFont(theme.ui_font(10, 700))
+        self.blank_button.setMinimumHeight(28)
+        self.blank_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.blank_button.setIcon(theme.icon("plus", 14))
         self.blank_button.setToolTip(t("welcome.blank_project_tip"))
         self.blank_button.clicked.connect(self.new_blank_project)
         buttons.addWidget(self.blank_button)
-        buttons.addStretch(1)
-        left.addLayout(buttons)
 
-        links = QHBoxLayout()
-        links.setSpacing(9)
-        external = QPushButton(t("welcome.external_guide"))
-        external.setObjectName("ghost")
-        external.clicked.connect(self._open_external_guide)
-        links.addWidget(external)
-        links.addStretch(1)
-        left.addLayout(links)
-        left.addStretch(1)
-        layout.addLayout(left, 3)
-
-        steps = QVBoxLayout()
-        steps.setSpacing(9)
-        steps.addWidget(self._eyebrow(t("welcome.what_next")))
-        for number, title, text in (
-            ("1", t("welcome.step1_title"), t("welcome.step1_text")),
-            ("2", t("welcome.step2_title"), t("welcome.step2_text")),
-            ("3", t("welcome.step3_title"), t("welcome.step3_text")),
-        ):
-            row = QHBoxLayout()
-            row.setSpacing(11)
-            marker = QLabel(number)
-            marker.setObjectName("dim")
-            marker.setFont(theme.ui_font(9, 700))
-            marker.setFixedWidth(14)
-            marker.setAlignment(Qt.AlignmentFlag.AlignTop)
-            row.addWidget(marker)
-            texts = QVBoxLayout()
-            texts.setSpacing(1)
-            label = QLabel(title)
-            label.setFont(theme.ui_font(10, 600))
-            texts.addWidget(label)
-            texts.addWidget(muted(text, size=9))
-            row.addLayout(texts, 1)
-            steps.addLayout(row)
-        steps.addStretch(1)
-        layout.addLayout(steps, 2)
-        return section
+        row.addWidget(host, 0, Qt.AlignmentFlag.AlignVCenter)
+        return row
 
     def _eyebrow(self, text: str) -> QLabel:
         label = QLabel(text)
         label.setObjectName("dim")
-        label.setFont(theme.ui_font(8, 700))
+        label.setFont(theme.section_font())
         return label
 
     def _build_body(self) -> QHBoxLayout:
         body = QHBoxLayout()
-        body.setSpacing(16)
+        body.setSpacing(12)
 
-        recent_card = Card()
-        recent_card.setMinimumHeight(230)
+        recent_card = Card(padding=12)
+        recent_card.setMinimumHeight(240)
         header = QHBoxLayout()
-        header.addWidget(title_label(t("welcome.recent_projects"), 12))
+        header.addWidget(title_label(t("welcome.recent_projects"), 9))
         header.addStretch(1)
         self.recent_count = Badge("0", "default")
         header.addWidget(self.recent_count)
         recent_card.layout().addLayout(header)
-        recent_card.layout().addWidget(
-            muted(t("welcome.recent_hint"), size=9)
-        )
+        recent_card.layout().addWidget(muted(t("welcome.recent_hint"), size=8))
         self.recent_box = QVBoxLayout()
-        self.recent_box.setSpacing(9)
+        self.recent_box.setSpacing(5)
         recent_card.layout().addLayout(self.recent_box)
         recent_card.layout().addStretch(1)
         body.addWidget(recent_card, 3)
 
         right = QVBoxLayout()
-        right.setSpacing(16)
-        ai_card = Card(soft=True)
+        right.setSpacing(12)
+
+        steps_card = Card(soft=True, padding=12)
+        steps_card.layout().addWidget(self._eyebrow(t("welcome.what_next")))
+        for number, title, text in (
+            ("1", t("welcome.step1_title"), t("welcome.step1_text")),
+            ("2", t("welcome.step2_title"), t("welcome.step2_text")),
+            ("3", t("welcome.step3_title"), t("welcome.step3_text")),
+        ):
+            step = QHBoxLayout()
+            step.setSpacing(8)
+            marker = QLabel(number)
+            marker.setObjectName("dim")
+            marker.setFont(theme.ui_font(8, 700))
+            marker.setFixedWidth(10)
+            marker.setAlignment(Qt.AlignmentFlag.AlignTop)
+            step.addWidget(marker)
+            texts = QVBoxLayout()
+            texts.setSpacing(0)
+            label = QLabel(title)
+            label.setFont(theme.ui_font(9, 600))
+            texts.addWidget(label)
+            texts.addWidget(muted(text, size=8))
+            step.addLayout(texts, 1)
+            steps_card.layout().addLayout(step)
+        right.addWidget(steps_card)
+
+        ai_card = Card(soft=True, padding=12)
         ai_header = QHBoxLayout()
-        ai_header.addWidget(title_label(t("welcome.ai_helper"), 11))
+        ai_header.addWidget(self._eyebrow(t("welcome.ai_helper")))
         ai_header.addStretch(1)
         self.ai_status = Badge(t("welcome.ai_checking"), "default")
         ai_header.addWidget(self.ai_status)
         ai_card.layout().addLayout(ai_header)
-        self.ai_text = muted(
-            t("welcome.ai_hint"),
-            size=9,
-        )
+        self.ai_text = muted(t("welcome.ai_hint"), size=8)
         self.ai_text.setWordWrap(True)
         ai_card.layout().addWidget(self.ai_text)
         self.ai_button = QPushButton(t("welcome.configure_ai"))
@@ -236,17 +239,49 @@ class WelcomePage(QWidget):
 
     def _build_footer(self) -> QHBoxLayout:
         row = QHBoxLayout()
+        tutorial = QPushButton(t("welcome.tutorial"))
+        tutorial.setObjectName("ghost")
+        tutorial.setIcon(theme.icon("help", 13))
+        tutorial.setToolTip(t("welcome.tutorial_tip"))
+        tutorial.clicked.connect(self.open_tutorial)
+        row.addWidget(tutorial)
+
+        external = QPushButton(t("welcome.external_guide"))
+        external.setObjectName("ghost")
+        external.setIcon(theme.icon("code", 13))
+        external.clicked.connect(self._open_external_guide)
+        row.addWidget(external)
+
         hint = QLabel(t("welcome.footer_splash"))
         hint.setObjectName("dim")
-        hint.setFont(theme.ui_font(9))
+        hint.setFont(theme.ui_font(8))
         row.addWidget(hint)
         row.addStretch(1)
-        folder = QLabel(t("welcome.projects_folder", path=self.settings.projects_dir()))
+        self._footer_path = str(self.settings.projects_dir())
+        folder = QLabel(t("welcome.projects_folder", path=self._footer_path))
         folder.setObjectName("dim")
-        folder.setFont(theme.ui_font(9))
+        folder.setFont(theme.ui_font(8))
         folder.setToolTip(t("welcome.projects_folder_tip"))
         row.addWidget(folder)
+        self._footer_hint = hint
+        self._footer_folder = folder
         return row
+
+    def _update_footer_compact(self) -> None:
+        """Keep the footer inside narrow windows instead of clipping it."""
+        if not hasattr(self, "_footer_folder"):
+            return
+        compact = self.width() < 1250
+        self._footer_hint.setVisible(not compact)
+        path = str(self.settings.projects_dir())
+        self._footer_path = path
+        shown = Path(path).name if compact else path
+        self._footer_folder.setText(t("welcome.projects_folder", path=shown))
+        self._footer_folder.setToolTip(f"{t('welcome.projects_folder_tip')}\n{path}")
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._update_footer_compact()
 
     # ------------------------------------------------------------------
     def _open_external_guide(self) -> None:
@@ -279,12 +314,12 @@ class WelcomePage(QWidget):
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setObjectName("muted")
             empty.setWordWrap(True)
-            empty.setStyleSheet("padding: 34px 12px;")
+            empty.setStyleSheet("padding: 26px 10px;")
             self.recent_box.addWidget(empty)
         else:
             grid = QGridLayout()
-            grid.setSpacing(9)
-            for index, entry in enumerate(recents[:4]):
+            grid.setSpacing(5)
+            for index, entry in enumerate(recents[:8]):
                 card = ProjectCard(
                     entry.get("name", t("welcome.default_project_name")),
                     entry.get("goal", ""),
@@ -320,6 +355,7 @@ class WelcomePage(QWidget):
                 )
             )
             self.ai_button.setText(t("welcome.ai_check_settings"))
+        self._update_footer_compact()
 
     def _clear_layout(self, layout) -> None:
         while layout.count():

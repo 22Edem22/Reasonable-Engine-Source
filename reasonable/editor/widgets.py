@@ -20,12 +20,12 @@ from . import theme
 
 
 class Card(QFrame):
-    def __init__(self, parent: QWidget | None = None, *, soft: bool = False, padding: int = 18) -> None:
+    def __init__(self, parent: QWidget | None = None, *, soft: bool = False, padding: int = 12) -> None:
         super().__init__(parent)
         self.setObjectName("cardSoft" if soft else "card")
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(padding, padding, padding, padding)
-        self._layout.setSpacing(12)
+        self._layout.setSpacing(8)
 
     def layout(self) -> QVBoxLayout:  # type: ignore[override]
         return self._layout
@@ -199,36 +199,44 @@ class ProjectCard(QFrame):
         super().__init__(parent)
         self.setObjectName("projectRow")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(6)
-        top = QHBoxLayout()
-        top.setSpacing(8)
+        self.setToolTip(goal or path)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(9, 7, 7, 7)
+        layout.setSpacing(9)
+
+        icon = QLabel()
+        icon.setFixedSize(26, 26)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setPixmap(theme.icon_pixmap("cube" if kind == "game" else "grid", 16, theme.COLORS["muted"]))
+        icon.setStyleSheet("background: #2E3137; border: 1px solid #3A3D43; border-radius: 3px;")
+        layout.addWidget(icon)
+
+        texts = QVBoxLayout()
+        texts.setSpacing(0)
         heading = QLabel(name)
         heading.setObjectName("title")
-        heading.setFont(theme.display_font(11, 600))
-        top.addWidget(heading)
-        top.addStretch(1)
+        heading.setFont(theme.ui_font(9, 600))
+        texts.addWidget(heading)
+        location = QLabel(path)
+        location.setObjectName("dim")
+        location.setFont(theme.ui_font(8))
+        location.setMinimumWidth(40)
+        texts.addWidget(location)
+        layout.addLayout(texts, 1)
+
         kind_label = QLabel(t("widgets.kind_game") if kind == "game" else t("widgets.kind_app"))
         kind_label.setObjectName("dim")
-        kind_label.setFont(theme.ui_font(9))
-        top.addWidget(kind_label)
-        delete = QPushButton("×")
+        kind_label.setFont(theme.ui_font(8))
+        layout.addWidget(kind_label)
+
+        delete = QPushButton()
         delete.setObjectName("ghost")
-        delete.setFixedSize(24, 24)
+        delete.setFixedSize(22, 22)
+        delete.setIcon(theme.icon("trash", 13))
         delete.setToolTip(t("widgets.delete_project"))
         delete.setCursor(Qt.CursorShape.PointingHandCursor)
         delete.clicked.connect(self.delete_requested)
-        top.addWidget(delete)
-        layout.addLayout(top)
-        if goal:
-            text = muted(goal)
-            text.setMaximumHeight(38)
-            layout.addWidget(text)
-        location = QLabel(path)
-        location.setObjectName("dim")
-        location.setFont(theme.ui_font(9))
-        layout.addWidget(location)
+        layout.addWidget(delete)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:

@@ -16,11 +16,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "active_provider": "openrouter",
     "provider_overrides": {},
     "image": {
-        "provider": "procedural",
+        "provider": "openai",
         "base_url": "",
-        "model": "pixel",
+        "model": "gpt-image-1",
         "api_key": "",
-        "fallback_to_procedural": True,
     },
     "agent": {
         # 0 means unlimited: the agent works until the task is done or the
@@ -28,6 +27,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "max_steps": 0,
         "temperature": 0.65,
         "context_messages": 36,
+        # Error categories after which the chat may send "Продолжай" itself.
+        # Empty by default: automatic continuation is an explicit opt-in.
+        "auto_continue_errors": [],
+        # Independent audit of the user's task before the agent declares success.
+        "supervisor": True,
+        # Parallel development: a non-editing master plans work for several
+        # scoped specialists, then validates and audits the merged result.
+        "parallel": True,
+        "parallel_workers": 3,
+        "parallel_rounds": 3,
     },
     "ui": {
         "accent": "#FF6B4A",
@@ -35,6 +44,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         # Chosen on the very first page of the Windows installer and written
         # into settings.json there; changeable later in the settings dialog.
         "language": "ru",
+        # Set after the first launch quick start; the tour can be replayed
+        # from the Help menu or the welcome page at any time.
+        "tutorial_seen": False,
     },
     # The intro splash always plays; there is no preview.skip_splash option.
     # Empty means "inside the installed engine folder" (see default_projects_dir).
@@ -98,11 +110,14 @@ class Settings:
             for provider_id in removed:
                 overrides.pop(provider_id, None)
         image = self.data.setdefault("image", {})
-        if image.get("provider") in removed:
-            image["provider"] = "procedural"
+        # The offline sprite template generator is gone. Keep old installs on
+        # the external-model path instead of pointing at a removed provider.
+        if image.get("provider") != "openai":
+            image["provider"] = "openai"
             image["base_url"] = ""
-            image["model"] = "pixel"
+            image["model"] = ""
             image["api_key"] = ""
+        image.pop("fallback_to_procedural", None)
         if not str(self.data.get("projects_dir") or "").strip():
             self.data["projects_dir"] = ""
         # Language: older installs simply did not have ui.language — keep RU.
@@ -117,6 +132,16 @@ class Settings:
                 agent["max_steps"] = 0
         except (TypeError, ValueError):
             agent["max_steps"] = 0
+        # Keep only known error categories so an old or hand-edited settings
+        # file cannot inject arbitrary values into the auto-continue flow.
+        from .agent_errors import AUTO_CONTINUE_KINDS
+
+        raw_auto = agent.get("auto_continue_errors")
+        if not isinstance(raw_auto, list):
+            raw_auto = []
+        agent["auto_continue_errors"] = [
+            kind for kind in AUTO_CONTINUE_KINDS if kind in raw_auto
+        ]
         self.data.pop("preview", None)
 
     def save(self) -> None:
@@ -139,6 +164,27 @@ class Settings:
         self.data.setdefault("ui", {})["language"] = normalize_language(value)
         self.save()
         invalidate_cache()
+
+    # -- onboarding -------------------------------------------------------
+    def _ui_data(self) -> dict:
+        ui = self.data.get("ui")
+        if not isinstance(ui, dict):
+            ui = {}
+            self.data["ui"] = ui
+        return ui
+
+    def tutorial_seen(self) -> bool:
+        ui = self.data.get("ui")
+        return bool(isinstance(ui, dict) and ui.get("tutorial_seen"))
+
+    def mark_tutorial_seen(self) -> None:
+        self._ui_data()["tutorial_seen"] = True
+        self.save()
+
+    def reset_tutorial(self) -> None:
+        """Show the quick start again on the next launch."""
+        self._ui_data()["tutorial_seen"] = False
+        self.save()
 
     # -- project locations ------------------------------------------------
     def projects_dir(self) -> Path:
@@ -183,7 +229,7 @@ class Settings:
         from reasonable.ai.providers import get_image_provider, IMAGE_PROVIDERS
 
         data = dict(self.data.get("image", {}))
-        preset = get_image_provider(data.get("provider", "procedural"))
+        preset = get_image_provider(data.get("provider", "openai"))
         # If the user hasn't customised the endpoint, follow the preset.
         user_base = data.get("base_url")
         default_bases = {item.base_url for item in IMAGE_PROVIDERS}
@@ -203,6 +249,42 @@ class Settings:
         image = self.data.setdefault("image", {})
         image.update(values)
         self.save()
+
+    # -- agent auto-continue ----------------------------------------------
+    def auto_continue_kinds(self) -> list[str]:
+        from .agent_errors import AUTO_CONTINUE_KINDS
+
+        agent = self.data.get("agent", {})
+        raw = agent.get("auto_continue_errors") if isinstance(agent, dict) else None
+        if not isinstance(raw, list):
+            return []
+        return [kind for kind in AUTO_CONTINUE_KINDS if kind in raw]
+
+    def is_auto_continue_enabled(self, kind: str) -> bool:
+        return kind in self.auto_continue_kinds()
+
+    # -- task supervisor --------------------------------------------------
+    def supervisor_enabled(self) -> bool:
+        agent = self.data.get("agent")
+        return bool((agent or {}).get("supervisor", True))
+
+    def set_supervisor(self, enabled: bool) -> None:
+        self.data.setdefault("agent", {})["supervisor"] = bool(enabled)
+        self.save()
+
+    def set_auto_continue(self, kind: str, enabled: bool) -> None:
+        from .agent_errors import AUTO_CONTINUE_KINDS
+
+        if kind not in AUTO_CONTINUE_KINDS:
+            return
+        kinds = set(self.auto_continue_kinds())
+        if enabled:
+            kinds.add(kind)
+        else:
+            kinds.discard(kind)
+        self.data.setdefault("agent", {})["auto_continue_errors"] = [
+            item for item in AUTO_CONTINUE_KINDS if item in kinds
+        ]
 
     # -- recents ----------------------------------------------------------
     def recent_projects(self) -> list[dict]:

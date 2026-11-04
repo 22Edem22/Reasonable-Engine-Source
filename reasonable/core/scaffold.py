@@ -7,6 +7,7 @@ built-in and external AI agents. Nothing else is required to run it.
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import sys
@@ -88,6 +89,43 @@ def _fallback_icon(path: Path, accent=(217, 119, 87)) -> None:
         pass
 
 
+def _starter_hero_shapes() -> list[dict]:
+    return [
+        {"type": "ellipse", "center": [50, 91], "radius": [28, 6], "fill": "#00000033"},
+        {"type": "ellipse", "center": [18, 67], "radius": [7, 12], "fill": "#2F6FE4", "outline": "#14213D", "outline_width": 2},
+        {"type": "ellipse", "center": [82, 67], "radius": [7, 12], "fill": "#2F6FE4", "outline": "#14213D", "outline_width": 2},
+        {"type": "ellipse", "center": [50, 68], "radius": [27, 24], "fill": "#3F86FF", "outline": "#14213D", "outline_width": 2.2},
+        {"type": "ellipse", "center": [50, 33], "radius": [23, 21], "fill": "#FFD1A6", "outline": "#14213D", "outline_width": 2.2},
+        {"type": "arc", "box": [26, 10, 74, 48], "start": 180, "end": 360, "width": 5, "fill": "#3A2418"},
+        {"type": "ellipse", "center": [42, 33], "radius": [3, 4], "fill": "#14213D"},
+        {"type": "ellipse", "center": [58, 33], "radius": [3, 4], "fill": "#14213D"},
+        {"type": "arc", "box": [43, 37, 57, 46], "start": 20, "end": 160, "width": 1.6, "fill": "#14213D"},
+    ]
+
+
+def _starter_star_shapes() -> list[dict]:
+    points = []
+    for index in range(20):
+        angle = -90 + index * 18
+        radius = 40 if index % 2 == 0 else 17
+        points.append([50 + radius * math.cos(math.radians(angle)), 50 + radius * math.sin(math.radians(angle))])
+    return [
+        {"type": "polygon", "points": points, "fill": "#FFD447", "outline": "#6B4A12", "outline_width": 2.5},
+        {"type": "ellipse", "center": [42, 39], "radius": [7, 9], "fill": "#FFF3B0", "opacity": 0.8},
+    ]
+
+
+def _starter_slime_shapes() -> list[dict]:
+    return [
+        {"type": "ellipse", "center": [50, 88], "radius": [30, 6], "fill": "#00000030"},
+        {"type": "ellipse", "center": [50, 58], "radius": [34, 30], "fill": "#55D96B", "outline": "#173A21", "outline_width": 2.5},
+        {"type": "ellipse", "center": [38, 47], "radius": [12, 8], "fill": "#B7F7C0", "opacity": 0.75},
+        {"type": "ellipse", "center": [40, 58], "radius": [4, 5], "fill": "#173A21"},
+        {"type": "ellipse", "center": [60, 58], "radius": [4, 5], "fill": "#173A21"},
+        {"type": "arc", "box": [43, 64, 57, 74], "start": 20, "end": 160, "width": 1.8, "fill": "#173A21"},
+    ]
+
+
 def _generate_assets(project) -> None:
     assets = project.root / "assets"
     (assets / "sprites").mkdir(parents=True, exist_ok=True)
@@ -95,58 +133,32 @@ def _generate_assets(project) -> None:
     (assets / "audio").mkdir(parents=True, exist_ok=True)
     icon_path = assets / "icon.png"
     goal = project.goal or project.name
-    try:
-        from reasonable.ai.sprites import generate_icon
-
-        generate_icon(
-            f"glowing star symbol for {goal}",
-            icon_path,
-            size=512,
-            image_config={"provider": "procedural"},
-        )
-    except Exception:
-        _fallback_icon(icon_path)
+    _fallback_icon(icon_path)
     # A pure-tkinter project needs no pygame artwork: no background and no
     # sprites, so the project never ships files its interface level never uses.
     if project.ui_levels == ["simple"]:
         return
     background_path = assets / "background.png"
     try:
-        from reasonable.ai.sprites import generate_background
+        from reasonable.ai.sprites import procedural_background
 
-        generate_background(
+        image, _meta = procedural_background(
             f"atmospheric game landscape for {goal}",
-            background_path,
             width=int((project.manifest.get("window") or {}).get("width", 1280)),
             height=int((project.manifest.get("window") or {}).get("height", 720)),
-            image_config={"provider": "procedural"},
         )
+        image.save(background_path, "PNG")
     except Exception:
         pass
     try:
-        from reasonable.ai.sprites import generate_sprite
+        from reasonable.ai.drawing import draw_sprite
 
-        generate_sprite(
-            f"friendly hero character for {goal}",
-            assets / "sprites" / "player.png",
-            style=project.manifest.get("ai", {}).get("image_style", "flat"),
-            size=256,
-            image_config={"provider": "procedural"},
-        )
-        generate_sprite(
-            "gold star collectible",
-            assets / "sprites" / "star.png",
-            style="flat",
-            size=128,
-            image_config={"provider": "procedural"},
-        )
-        generate_sprite(
-            "green slime enemy creature",
-            assets / "sprites" / "slime.png",
-            style="flat",
-            size=128,
-            image_config={"provider": "procedural"},
-        )
+        # Starter art for the sample game only. Each object is drawn from its
+        # own description; the agent replaces these assets as soon as the user's
+        # real task starts.
+        draw_sprite(assets / "sprites" / "player.png", shapes=_starter_hero_shapes(), size=256)
+        draw_sprite(assets / "sprites" / "star.png", shapes=_starter_star_shapes(), size=128)
+        draw_sprite(assets / "sprites" / "slime.png", shapes=_starter_slime_shapes(), size=128)
     except Exception:
         pass
 
@@ -159,6 +171,22 @@ def _write_readme(project) -> None:
         from .project import UI_LEVEL_LABELS
 
         levels_text = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in project.ui_levels)
+        starter = str(project.manifest.get("template") or project.project_type)
+        starter_section = ""
+        if starter in {"game", "app"} and project.ui_levels != ["simple"]:
+            starter_section = """## What is already built
+
+The starter is not an empty window — it is a working product you can play or
+use right away:
+
+- **Game**: title menu, how-to-play screen, enemy waves, combo multiplier,
+  invulnerable dash, four power-ups, procedural sound, saved high score and a
+  results screen. Mouse, keyboard and an on-screen joystick all work.
+- **App**: task planner with priorities, tags, search, sorting, weekly
+  statistics, a day streak, undo-delete and a context-aware AI assistant. Data
+  is stored in `data.json` next to the project.
+
+"""
         readme = f"""# {project.name}
 
 {goal}
@@ -182,7 +210,7 @@ python main.py
 The Reasonable Engine splash always plays before the project — it is part of
 the engine and cannot be disabled.
 
-## First task for the agent
+{starter_section}## First task for the agent
 
 The project is created, but the first prompt is not written in advance. Open
 the project in the Reasonable Engine editor → the **“AI agent”** section and
@@ -206,6 +234,7 @@ settings are required. `F11` toggles fullscreen at any moment.
 ├─ main.py              entry point
 ├─ project.json         project settings
 ├─ assets/              sprites, backgrounds, icon, sounds
+├─ scenes/              visual scenes (main.json = starter level)
 ├─ progress/            shared progress for the editor and agents
 ├─ _engine/reasonable/  bundled copy of the engine
 ├─ AGENT_GUIDE.md       instructions for the AI agent
@@ -257,6 +286,22 @@ engine root: `build_exe.bat` or `python tools/build_editor_exe.py`.
     from .project import UI_LEVEL_LABELS
 
     levels_text = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in project.ui_levels)
+    starter = str(project.manifest.get("template") or project.project_type)
+    starter_section = ""
+    if starter in {"game", "app"} and project.ui_levels != ["simple"]:
+        starter_section = """## Что уже готово
+
+Стартовый пример — не пустое окно, а рабочий продукт, которым можно
+пользоваться сразу:
+
+- **Игра**: титульное меню, экран обучения, волны врагов, комбо-множитель,
+  неуязвимый рывок, четыре бонуса, процедурный звук, сохранение рекорда и экран
+  результатов. Работают мышь, клавиатура и экранный джойстик.
+- **Приложение**: планировщик задач с приоритетами, тегами, поиском,
+  сортировкой, недельной статистикой, серией дней, отменой удаления и
+  контекстным ИИ-помощником. Данные хранятся в `data.json` рядом с проектом.
+
+"""
     readme = f"""# {project.name}
 
 {goal}
@@ -280,7 +325,7 @@ python main.py
 Перед проектом всегда проигрывается заставка Reasonable Engine — она является
 частью движка, и отключить её нельзя.
 
-## Первая задача агенту
+{starter_section}## Первая задача агенту
 
 Проект уже создан, но первый промпт не записан заранее. Откройте проект в
 редакторе Reasonable Engine → раздел **«ИИ-агент»** и опишите первую задачу
@@ -304,6 +349,7 @@ python main.py
 ├─ main.py              точка входа
 ├─ project.json         настройки проекта
 ├─ assets/              спрайты, фоны, иконка, звуки
+├─ scenes/              визуальные сцены (main.json — стартовый уровень)
 ├─ progress/            общий прогресс для редактора и агентов
 ├─ _engine/reasonable/  встроенная копия движка
 ├─ AGENT_GUIDE.md       инструкция для ИИ-агента
@@ -399,7 +445,7 @@ set "ROOT=%HERE:~0,-1%"
 set "PYTHONPATH=%HERE%_engine;%ROOT%;%PYTHONPATH%"
 cd /d "%ROOT%"
 call :find_python
-"%PY%" main.py
+"%PY%" -m reasonable.runtime.launch main.py
 if errorlevel 1 pause
 exit /b %ERRORLEVEL%
 
@@ -421,7 +467,7 @@ set -e
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="$HERE/_engine:$HERE:${PYTHONPATH:-}"
 cd "$HERE"
-exec "${REASONABLE_PYTHON:-python3}" main.py
+exec "${REASONABLE_PYTHON:-python3}" -m reasonable.runtime.launch main.py
 """,
     )
     try:
@@ -491,6 +537,7 @@ def scaffold_project(project) -> None:
         "assets/audio",
         "progress",
         ".reasonable",
+        "scenes",
     ):
         (project.root / folder).mkdir(parents=True, exist_ok=True)
 
@@ -515,6 +562,23 @@ def scaffold_project(project) -> None:
         )
 
     _generate_assets(project)
+    if template_name in {"game", "app"}:
+        try:
+            from .scene import create_scene, list_scenes
+
+            if not list_scenes(project.root):
+                window = project.manifest.get("window") or {}
+                size = (int(window.get("width") or 1280), int(window.get("height") or 720))
+                is_game = template_name == "game"
+                create_scene(
+                    project.root,
+                    tr("Main level", "Главный уровень") if is_game else tr("Main screen", "Главный экран"),
+                    size=size,
+                    template="level" if is_game else "app",
+                    identifier="main",
+                )
+        except Exception as exc:  # a broken starter scene must not block creation
+            print(tr("[Reasonable] Could not create the starter scene: {error}", "[Reasonable] Не удалось создать стартовую сцену: {error}", error=exc), file=sys.stderr)
     _write_readme(project)
     _write_launchers(project)
     _write_support_files(project)

@@ -15,9 +15,9 @@ Windsurf, Aider и др.), который работает в корневом �
 
 | Путь | Что это | Можно менять? |
 |---|---|---|
-| `reasonable/core/` | Ядро: `i18n.py`, `settings.py`, `paths.py`, `project.py`, `scaffold.py`, `history.py`, `progress.py`, `convert.py`, `chatlog.py` | Да, по задаче |
+| `reasonable/core/` | Ядро: `i18n.py`, `settings.py`, `paths.py`, `project.py`, `scaffold.py`, `history.py`, `progress.py`, `convert.py`, `chatlog.py`, `usage.py` | Да, по задаче |
 | `reasonable/editor/` | Редактор на PySide6 (весь UI пользователя) | Да, по задаче |
-| `reasonable/ai/` | Встроенный агент: `agent.py`, `tools.py`, `client.py`, `providers.py`, `sprites.py`, `external.py`, `prompts_en.py` | Да, по задаче |
+| `reasonable/ai/` | Встроенный агент: `agent.py`, `tools.py`, `client.py`, `providers.py`, `drawing.py`, `sprites.py`, `external.py`, `prompts_en.py` | Да, по задаче |
 | `reasonable/runtime/` | pygame-рантайм; **вендорится в проекты пользователей** (`_engine/reasonable`) | Осторожно: обратная совместимость |
 | `reasonable/templates/` | Шаблоны проектов (`game`, `app`, `blank`, `simple`) | Осторожно: их читают тесты и scaffold |
 | `tests/` | Автотесты (`unittest`) | Новые тесты — да; существующие якоря — см. §5 |
@@ -26,7 +26,7 @@ Windsurf, Aider и др.), который работает в корневом �
 | `Reasonable Engine Public/` | **Публичный репозиторий пользователя**: README, CHANGELOG, CONTRIBUTING, LICENSE, docs — без исходного кода | Только через §3 |
 | `README.md` (корень) | Главный внутренний readme | Да, синхронно с кодом |
 | `I18N-HANDOFF.md` | Бриф незавершённой работы по двуязычности RU/EN | Читать, не переписывать |
-| `reasonable/version.py` | `VERSION`, `VERSION_LABEL` (RE-1.01 и т.д.) | Только при выпуске релиза (§4) |
+| `reasonable/version.py` | `VERSION`, `VERSION_LABEL` (RE-2.01 и т.д.) | Только при выпуске релиза (§4) |
 
 Запрещено менять без явного запроса пользователя: `LICENSE*`, `installer/EULA.txt`,
 бренд-ассеты (`logo.png`, `reasonable/assets/brand`), заставку (`runtime/splash.py` —
@@ -81,17 +81,17 @@ github-public/changelog):
 
 ## 4. Система версий
 
-Формат: **RE-<поколение>.<релиз>** (RE-1.01, RE-1.02…). Правила:
+Формат: **RE-<поколение>.<релиз>** (RE-2.01, RE-2.02…). Правила:
 
 1. Первый релиз поколения — всегда `.01`; версии «RE-2.00» не существует.
-2. Номера идут подряд: после RE-1.09 → RE-1.10, после RE-1.99 → RE-1.100.
+2. Номера идут подряд: после RE-2.09 → RE-2.10, после RE-2.99 → RE-2.100.
 3. Поколение меняется только при глобальном обновлении движка (новая архитектура,
    несовместимый формат проектов) и никогда не откатывается.
 4. При выпуске релиза синхронно обнови: `reasonable/version.py` (`VERSION`,
    `VERSION_LABEL`), заголовок changelog'ов (раздел `[RE-x.xx]` получает дату),
    упоминания текущей версии в обоих README и в этом файле.
 
-Текущий статус: **RE-1.01** — рабочий релиз; следующая цель — RE-1.02.
+Текущий статус: **RE-2.01** — первый релиз поколения Reasonable Engine 2.
 
 ## 5. Двуязычность (i18n) — конвенции
 

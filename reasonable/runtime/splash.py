@@ -8,7 +8,6 @@ offline in exported Windows builds and on Android.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import time
 from pathlib import Path
@@ -34,20 +33,15 @@ SPLASH_CAPTIONS_FALLBACK = "СОЗДАВАЙ. ИГРАЙ. РАЗУМНО."
 
 
 # The intro splash is part of Reasonable Engine branding and always plays.
-# End users cannot disable or skip it: every project.json flag and every
-# RE_SKIP_* environment variable was removed deliberately. The ONLY bypass is
-# the developer key below: the engine developer sets RE_SPLASH_DEV_TOKEN to a
-# personal secret whose SHA-256 matches this constant. The hash ships with the
-# bytecode-only runtime, so the token itself never leaves the developer.
-DEV_TOKEN_HASH = "fd0575fca0f9344e27a35b70c539137200281c9a3ad8bacd11a0a5b1cccf6230"
+# There is intentionally no project flag, environment variable or developer
+# token that can disable it. The only exception is a headless dummy-driver run,
+# which finishes the same code path instantly for tests and agent validation.
+_SPLASH_PLAYED = False
 
 
-def developer_splash_bypass() -> bool:
-    """True only for the engine developer's personal splash key."""
-    token = os.environ.get("RE_SPLASH_DEV_TOKEN", "")
-    if not token:
-        return False
-    return hashlib.sha256(token.encode("utf-8")).hexdigest() == DEV_TOKEN_HASH
+def splash_played() -> bool:
+    """True when the intro already played in this process."""
+    return _SPLASH_PLAYED
 
 
 def _is_headless() -> bool:
@@ -101,7 +95,13 @@ class SplashAnimator:
         self.logo_center = pygame.Vector2(width / 2, height * (0.42 if self.landscape else 0.38))
         self.caption_font = get_font(max(18, int(base * 0.030)), bold=True)
         self.version_font = get_font(max(13, int(base * 0.020)), bold=False)
-        self.caption = f"{APP_NAME.upper()} 1"
+        try:
+            from reasonable.version import VERSION_NAME
+
+            generation = str(VERSION_NAME or "").strip()
+        except Exception:
+            generation = ""
+        self.caption = f"{APP_NAME.upper()} {generation}".strip()
         try:  # i18n is optional in exported standalone builds
             from reasonable.core.i18n import splash_caption
 
@@ -163,11 +163,12 @@ def play_splash(
     """Play the intro. Returns False if the window was closed.
 
     ``accent`` and ``skippable`` are accepted for call compatibility but
-    intentionally ignored: the intro always plays in full for end users. Only
-    the engine developer's personal key (``RE_SPLASH_DEV_TOKEN``) or a
-    headless dummy-driver run finishes the intro early.
+    intentionally ignored: the intro always plays in full for end users. The
+    only shortcut is a headless dummy-driver run, where the same code path
+    finishes instantly for tests and agent validation.
     """
-    if developer_splash_bypass():
+    global _SPLASH_PLAYED
+    if _SPLASH_PLAYED:
         return True
     if not pygame.get_init():
         pygame.init()
@@ -218,6 +219,7 @@ def play_splash(
             break
         clock.tick(60)
     pygame.event.pump()
+    _SPLASH_PLAYED = True
     return True
 
 

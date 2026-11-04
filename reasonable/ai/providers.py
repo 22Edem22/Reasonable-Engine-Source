@@ -30,6 +30,9 @@ class ProviderPreset:
     headers: dict[str, str] = field(default_factory=dict)
     supports_tools: bool = True
     note: str = ""
+    # Optional override for the model-list endpoint. Most providers expose
+    # ``{base_url}/models``; some gateways use a different path.
+    models_url: str = ""
 
     @property
     def is_local(self) -> bool:
@@ -243,6 +246,35 @@ PROVIDERS: tuple[ProviderPreset, ...] = (
         models_hint=("claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1"),
     ),
     ProviderPreset(
+        id="opencode",
+        name="OpenCode Go",
+        group="Платные",
+        kind="openai",
+        base_url="https://opencode.ai/inference/go/openai/v1",
+        default_model="deepseek-v4.1-flash",
+        requires_key=True,
+        description=(
+            "Подписка OpenCode Go: один ключ Console даёт доступ к сильным кодовым "
+            "моделям (DeepSeek, Kimi, GLM, Qwen, Claude Haiku и другим) с "
+            "OpenAI-совместимым протоколом и поддержкой инструментов."
+        ),
+        key_url="https://opencode.ai/console",
+        docs_url="https://opencode.ai/v2/docs/console/go/",
+        models_hint=(
+            "deepseek-v4.1-flash",
+            "kimi-k2.7-code",
+            "glm-5.3-flash",
+            "qwen3.8-flash",
+            "minimax-m3.1-flash",
+        ),
+        note=(
+            "Вставьте личный ключ Console (oc_sk_…) или сервисного аккаунта. "
+            "Reasonable Engine сам отправляет User-Agent и стабильный "
+            "x-opencode-session, поэтому ошибка MissingSessionID не возникает."
+        ),
+        models_url="https://opencode.ai/inference/go/v1/models",
+    ),
+    ProviderPreset(
         id="custom",
         name="Свой OpenAI-совместимый сервер",
         group="Другое",
@@ -362,6 +394,20 @@ _EN_PRESET_TEXT: dict[str, dict[str, str]] = {
             "autonomous project development."
         ),
     },
+    "opencode": {
+        "name": "OpenCode Go",
+        "group": "Paid",
+        "description": (
+            "An OpenCode Go subscription: one Console key unlocks strong coding "
+            "models (DeepSeek, Kimi, GLM, Qwen, Claude Haiku and more) through an "
+            "OpenAI-compatible protocol with tool support."
+        ),
+        "note": (
+            "Paste a personal Console key (oc_sk_…) or a service-account key. "
+            "Reasonable Engine sends its own User-Agent and a stable "
+            "x-opencode-session, so the MissingSessionID error does not occur."
+        ),
+    },
     "custom": {
         "name": "Custom OpenAI-compatible server",
         "group": "Other",
@@ -411,13 +457,6 @@ class ImageProviderPreset:
 
 
 _EN_IMAGE_TEXT: dict[str, dict[str, str]] = {
-    "procedural": {
-        "name": "Procedural sprites (offline)",
-        "description": (
-            "Built-in pixel-art and flat-sprite generator. Needs no network and "
-            "quickly produces a consistent asset set."
-        ),
-    },
     "openai": {
         "name": "OpenAI-compatible images",
         "description": (
@@ -429,17 +468,6 @@ _EN_IMAGE_TEXT: dict[str, dict[str, str]] = {
 
 
 IMAGE_PROVIDERS: tuple[ImageProviderPreset, ...] = (
-    ImageProviderPreset(
-        id="procedural",
-        name="Процедурные спрайты (офлайн)",
-        description=(
-            "Встроенный генератор пиксель-арта и плоских спрайтов. Не требует сети, "
-            "быстро создаёт согласованный набор ассетов."
-        ),
-        base_url="",
-        default_model="pixel",
-        requires_key=False,
-    ),
     ImageProviderPreset(
         id="openai",
         name="OpenAI-совместимые изображения",
@@ -583,7 +611,7 @@ def providers_in_group(group: str) -> Iterable[ProviderPreset]:
 
 
 def get_image_provider(provider_id: str) -> ImageProviderPreset:
-    return IMAGE_PROVIDER_MAP.get(provider_id, IMAGE_PROVIDER_MAP["procedural"])
+    return IMAGE_PROVIDER_MAP.get(provider_id, IMAGE_PROVIDER_MAP["openai"])
 
 
 def merge_provider_config(settings, provider_id: str) -> dict:
@@ -595,6 +623,7 @@ def merge_provider_config(settings, provider_id: str) -> dict:
         "name": preset.display_name,
         "kind": override.get("kind", preset.kind),
         "base_url": (override.get("base_url") or preset.base_url).strip(),
+        "models_url": str(override.get("models_url") or preset.models_url).strip(),
         "model": (override.get("model") or preset.default_model).strip(),
         "api_key": (override.get("api_key") or "").strip(),
         "requires_key": preset.requires_key,

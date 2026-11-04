@@ -4,7 +4,7 @@
 
 ## Installation
 
-1. Download `ReasonableEngine-Setup-RE-1.01.exe` from the
+1. Download `ReasonableEngine-Setup-RE-2.01.exe` from the
    [Releases](../../releases/latest) page.
 2. Run the installer. It will install the editor, a portable Python, and the
    runtime itself — there is nothing extra to install.
@@ -15,6 +15,12 @@ preserved when the engine is updated, but keep backups of important projects —
 just copy the project folder to a safe place.
 
 ## Your first project
+
+On the first launch an interactive six-step **tutorial** opens: choose a project
+type, write a task and see the plan, visit the workspaces in order, run the
+project, undo changes and pick an export format. The next step unlocks only
+after the action. You can close it and replay it later from **Help → Quick
+start** (`F1`) or the **Tutorial** button on the start screen.
 
 1. On the welcome screen, click **"Create project"**.
 2. Describe the idea in your own words: for example, "A space cat collects stars
@@ -57,7 +63,7 @@ just copy the project folder to a safe place.
 2. Choose the provider and model, paste the API key (it is stored only on your
    computer).
 3. Without a key and without the internet, local models (Ollama, LM Studio) and
-   procedural asset generation are available.
+   agent-drawn sprites via `draw_sprite` are available.
 
 ## What's next
 

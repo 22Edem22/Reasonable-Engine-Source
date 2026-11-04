@@ -34,6 +34,10 @@ def _project_file(relative: str) -> Path:
         return candidate
     return BUNDLE_DIR / relative
 
+# Importing the package installs the engine's warning filters before pygame
+# pulls in deprecated pkg_resources on some builds.
+import reasonable  # noqa: F401,E402
+
 import pygame  # noqa: E402
 
 from reasonable.runtime import Game, render_text  # noqa: E402

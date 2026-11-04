@@ -199,7 +199,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         env["RE_FRAMES"] = str(max(1, args.frames))
     try:
         process = subprocess.run(
-            project.run_command(),
+            project.run_command(splash_wrapper=True),
             cwd=str(project.root),
             env=env,
             timeout=args.timeout or None,
@@ -233,6 +233,7 @@ def cmd_sprite(args: argparse.Namespace) -> int:
             size=args.size,
             image_config=config,
             seed=args.seed,
+            context=project.goal or project.name,
         )
     except Exception as exc:
         print(_tr("Generation error: {error}", "Ошибка генерации: {error}", error=exc), file=sys.stderr)
@@ -264,6 +265,7 @@ def cmd_bg(args: argparse.Namespace) -> int:
             height=args.height,
             image_config=config,
             seed=args.seed,
+            context=project.goal or project.name,
         )
     except Exception as exc:
         print(_tr("Generation error: {error}", "Ошибка генерации: {error}", error=exc), file=sys.stderr)
@@ -461,7 +463,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("output", help=_tr("For example assets/sprites/player.png", "Например assets/sprites/player.png"))
     p.add_argument("--style", default="flat", choices=("flat", "pixel", "painterly", "icon"))
     p.add_argument("--size", type=int, default=256)
-    p.add_argument("--provider", default="", help="procedural | openai")
+    p.add_argument("--provider", default="", help="openai (external model)")
     p.add_argument("--seed", type=int, default=None)
     p.set_defaults(func=cmd_sprite)
 

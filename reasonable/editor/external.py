@@ -405,12 +405,22 @@ class ExternalAgentPanel(QWidget):
             item = self.task_host.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
+                widget.setParent(None)
                 widget.deleteLater()
+            elif item.layout() is not None:
+                # Old versions added bare QHBoxLayouts. Remove their widgets
+                # too, otherwise ghost rows stay painted over the new plan.
+                self._clear_layout(item.layout())
         if not tasks:
             self.task_host.addWidget(muted(t("extpanel.no_plan"), size=9))
             return
         for task in tasks:
-            row = QHBoxLayout()
+            row_widget = QFrame()
+            row_widget.setStyleSheet("background: transparent;")
+            row = QHBoxLayout(row_widget)
+            row.setContentsMargins(0, 2, 0, 2)
+            row.setSpacing(7)
             status = task.get("status", "pending")
             icon, color = {
                 "done": ("✓", "#8DB8A0"),
@@ -418,20 +428,35 @@ class ExternalAgentPanel(QWidget):
                 "skipped": ("–", "#6F7680"),
             }.get(status, ("·", "#6F7680"))
             marker = QLabel(icon)
-            marker.setFixedWidth(16)
-            marker.setStyleSheet(f"color: {color}; font-weight: 800;")
+            marker.setFixedSize(18, 22)
+            marker.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            marker.setStyleSheet(
+                f"color: {color}; font-weight: 800; background: transparent; border: none;"
+            )
             row.addWidget(marker)
-            title = QLabel(task.get("title", ""))
+            title = QLabel(str(task.get("title", "")))
             title.setWordWrap(True)
             title.setFont(theme.ui_font(9))
+            title.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
             if status == "done":
                 title.setStyleSheet("color: #7D848E; text-decoration: line-through;")
             elif status == "in_progress":
-                title.setStyleSheet("color: #D7C294;")
+                title.setStyleSheet("color: #D7C294; font-weight: 600;")
             else:
                 title.setStyleSheet("color: #C1C7CF;")
             row.addWidget(title, 1)
-            self.task_host.addLayout(row)
+            self.task_host.addWidget(row_widget)
+
+    def _clear_layout(self, layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+            elif item.layout() is not None:
+                self._clear_layout(item.layout())
 
     def _render_events(self) -> None:
         events = read_events(self.project.root, limit=28)

@@ -13,6 +13,7 @@ is writing the code.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any, Iterable
@@ -307,14 +308,34 @@ def finish_progress(project_dir: Path, message: str = "") -> dict[str, Any]:
 
 
 def read_events(project_dir: Path, limit: int = _MAX_EVENTS_RETURNED) -> list[dict[str, Any]]:
+    """Return the newest events without loading the whole journal.
+
+    ``events.jsonl`` is append-only and the editor polls it on a timer, so the
+    last N lines are read by seeking from the end instead of reading up to
+    several megabytes on every tick.
+    """
     path = events_path(project_dir)
+    limit = max(1, int(limit))
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            lines = handle.readlines()[-limit:]
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            pos = size
+            data = b""
+            chunk = 64 * 1024
+            while pos > 0 and data.count(b"\n") < limit + 1 and len(data) < 8_000_000:
+                step = min(chunk, pos)
+                pos -= step
+                handle.seek(pos)
+                data = handle.read(step) + data
+            lines = data.decode("utf-8", "replace").splitlines()
     except OSError:
         return []
-    events = []
-    for line in lines:
+    if pos > 0 and lines:
+        # The first line may start mid-character after the seek.
+        lines = lines[1:]
+    events: list[dict[str, Any]] = []
+    for line in lines[-limit:]:
         line = line.strip()
         if not line:
             continue
@@ -327,27 +348,53 @@ def read_events(project_dir: Path, limit: int = _MAX_EVENTS_RETURNED) -> list[di
     return events
 
 
+def walk_project_files(project_dir: Path, *, ignored: set[str] | None = None):
+    """Yield project files while pruning ignored folders early."""
+    project_dir = Path(project_dir)
+    skip = set(ignored) if ignored is not None else {
+        ".reasonable",
+        "__pycache__",
+        ".git",
+        "progress",
+        "dist",
+        "build",
+        ".venv",
+        "venv",
+        "_engine",
+    }
+    stack = [project_dir]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    if entry.name not in skip:
+                        stack.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    yield Path(entry.path)
+            except OSError:
+                continue
+
+
 def scan_recent_files(project_dir: Path, limit: int = 16) -> list[dict[str, Any]]:
     """Find recently modified project files, useful in external-agent mode."""
     project_dir = Path(project_dir)
-    ignored_dirs = {".reasonable", "__pycache__", ".git", "progress", "dist", "build", ".venv", "venv"}
     ignored_suffixes = {".pyc", ".tmp", ".log"}
     rows: list[dict[str, Any]] = []
     try:
-        for path in project_dir.rglob("*"):
+        for path in walk_project_files(project_dir):
             if len(rows) > 900:
                 break
+            if path.suffix.lower() in ignored_suffixes:
+                continue
             try:
                 rel_parts = path.relative_to(project_dir).parts
-            except ValueError:
-                continue
-            if any(part in ignored_dirs for part in rel_parts):
-                continue
-            if not path.is_file() or path.suffix.lower() in ignored_suffixes:
-                continue
-            try:
                 stat = path.stat()
-            except OSError:
+            except (OSError, ValueError):
                 continue
             rows.append(
                 {

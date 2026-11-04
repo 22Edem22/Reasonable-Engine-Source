@@ -82,6 +82,29 @@ class ScaffoldTests(unittest.TestCase):
             self.assertTrue((project.root / "README.md").is_file())
             self.assertTrue(project.has_vendored_engine())
 
+    def test_game_project_ships_an_editable_starter_scene(self) -> None:
+        from reasonable.core.scene import list_scenes, load_scene
+
+        scenes = list_scenes(self.game.root)
+        self.assertEqual(scenes[0]["id"], "main")
+        scene = load_scene(self.game.root, "main")
+        self.assertEqual(scene["size"], [1280, 720])
+        self.assertGreaterEqual(len(scene["objects"]), 10)
+        roles = {str(item.get("role")) for item in scene["objects"] if item.get("marker")}
+        self.assertIn("player", roles)
+        self.assertIn("star", roles)
+        self.assertIn("slime", roles)
+
+    def test_app_project_ships_an_editable_ui_scene(self) -> None:
+        from reasonable.core.scene import load_scene
+
+        scene = load_scene(self.app.root, "main")
+        self.assertEqual(scene.get("template"), "app")
+        self.assertGreaterEqual(len(scene["objects"]), 15)
+        kinds = {str(item.get("kind")) for item in scene["objects"]}
+        self.assertIn("panel", kinds)
+        self.assertIn("text", kinds)
+
     def test_agent_pack_is_complete(self) -> None:
         for project, type_skill in (
             (self.game, "game-development.md"),
@@ -219,6 +242,81 @@ class ScaffoldTests(unittest.TestCase):
         self.assertFalse((simple.root / "skills" / "ui-advanced-scenes.md").is_file())
         result = _run_project(simple)
         self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+
+    def test_example_app_migrates_old_data_and_keeps_planner_fields(self) -> None:
+        env = self.app.run_env()
+        env.update({"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"})
+        code = (
+            "import json, main;"
+            "data = main.normalise_data({'tasks': [{'id': 7, 'title': 'Old', 'done': True}]});"
+            "print(json.dumps({'version': data['version'], 'history': data['history'],"
+            " 'task': data['tasks'][0]}, ensure_ascii=False))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(self.app.root),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertEqual(data["version"], 2)
+        self.assertEqual(data["history"], {})
+        self.assertEqual(data["task"]["priority"], 1)
+        self.assertEqual(data["task"]["tag"], "Личное")
+
+    def test_game_scene_markers_spawn_entities_and_effects_stay_centred(self) -> None:
+        env = self.game.run_env()
+        env.update({"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"})
+        code = (
+            "import pygame, main;"
+            "pygame.init(); pygame.display.set_mode((1280, 720));"
+            "g = main.SparkGame(); s = main.WorldScene(g); g.scene = s;"
+            "print(len(s.stars), len(s.enemies));"
+            "s.on_resize((1920, 1080));"
+            "p = s.camera.world_to_screen((s.player.x, s.player.y));"
+            "print(round(p.x), round(p.y), round(s.player.x), round(s.player.y))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(self.game.root),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        lines = result.stdout.strip().splitlines()
+        self.assertEqual(lines[-2].split()[:2], ["7", "2"])
+        screen_x, screen_y, player_x, player_y = lines[-1].split()
+        self.assertEqual((screen_x, screen_y), (player_x, player_y))
+
+    def test_example_game_ships_a_real_menu_and_powerups(self) -> None:
+        env = self.game.run_env()
+        env.update({"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"})
+        code = (
+            "import main;"
+            "print(main.SparkGame.__name__, hasattr(main, 'Sfx'),"
+            " hasattr(main, 'PowerUp'), hasattr(main, 'WorldScene'))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(self.game.root),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertIn("SparkGame True True True", result.stdout)
 
     def test_protected_vendoring_ships_bytecode_only(self) -> None:
         from reasonable.core.scaffold import vendor_engine

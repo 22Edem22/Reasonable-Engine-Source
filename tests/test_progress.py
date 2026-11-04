@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,10 +7,12 @@ from reasonable.core.progress import (
     activity_is_live,
     derived_percent,
     ensure_state,
+    events_path,
     finish_progress,
     read_events,
     read_state,
     record_event,
+    scan_recent_files,
     set_plan,
     set_progress,
     set_status,
@@ -39,6 +42,37 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual([event["message"] for event in events], ["Первый шаг", "Второй шаг"])
         self.assertEqual(events[1]["data"], {"n": 2})
         self.assertEqual(read_state(self.root)["last_event"], "Второй шаг")
+
+    def test_large_journal_returns_only_the_tail(self) -> None:
+        # The editor polls this file, so it must never read the whole journal.
+        ensure_state(self.root)
+        path = events_path(self.root)
+        with path.open("a", encoding="utf-8") as handle:
+            for index in range(4000):
+                handle.write(
+                    json.dumps(
+                        {"ts": "2026-01-01T00:00:00", "type": "task", "message": f"Шаг {index}"},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        events = read_events(self.root, limit=25)
+        self.assertEqual(len(events), 25)
+        self.assertEqual(events[-1]["message"], "Шаг 3999")
+        self.assertEqual(events[0]["message"], "Шаг 3975")
+
+    def test_recent_files_skip_ignored_folders(self) -> None:
+        ensure_state(self.root)
+        (self.root / "src").mkdir()
+        (self.root / "src" / "main.py").write_text("print(1)\n", encoding="utf-8")
+        engine = self.root / "_engine" / "reasonable"
+        engine.mkdir(parents=True)
+        (engine / "huge.py").write_text("x = 1\n", encoding="utf-8")
+        (self.root / "build").mkdir()
+        (self.root / "build" / "out.bin").write_text("x", encoding="utf-8")
+
+        paths = [row["path"] for row in scan_recent_files(self.root, limit=10)]
+        self.assertEqual(paths, ["src/main.py"])
 
     def test_plan_and_task_updates(self) -> None:
         set_plan(self.root, ["Изучить проект", "Собрать меню", "Проверить запуск"])

@@ -38,6 +38,7 @@ from reasonable.ai.providers import (
     provider_group_label,
 )
 from reasonable.core import i18n
+from reasonable.core.agent_errors import AUTO_CONTINUE_KINDS
 from reasonable.core.i18n import t
 from reasonable.core.settings import Settings
 
@@ -289,8 +290,29 @@ class SettingsDialog(QDialog):
         combo.currentIndexChanged.connect(lambda _index, box=combo: self._language_changed(box))
         self.language_combos.append(combo)
         row.addWidget(combo, 1)
+        tutorial = QPushButton(t("settings.tutorial_button"))
+        tutorial.setObjectName("ghost")
+        tutorial.setIcon(theme.icon("help", 13))
+        tutorial.setToolTip(t("settings.tutorial_hint"))
+        tutorial.clicked.connect(self._open_tutorial)
+        row.addWidget(tutorial)
         card.layout().addLayout(row)
         return card
+
+    def _open_tutorial(self) -> None:
+        from .tutorial import show_tutorial
+
+        action = show_tutorial(self.settings, self)
+        if action == "new_project":
+            # Close the settings dialog and let the main window start the
+            # project wizard the user asked for in the final tutorial step.
+            parent = self.parent()
+            while parent is not None:
+                if hasattr(parent, "new_project"):
+                    self.accept()
+                    parent.new_project()
+                    return
+                parent = parent.parent()
 
     def _language_changed(self, box: QComboBox) -> None:
         code = box.currentData()
@@ -596,6 +618,7 @@ class SettingsDialog(QDialog):
             "name": preset.name,
             "kind": preset.kind,
             "base_url": self.base_edit.text().strip(),
+            "models_url": preset.models_url,
             "model": self.model_combo.currentText().strip(),
             "api_key": self.key_edit.text().strip(),
             "requires_key": preset.requires_key,
@@ -631,6 +654,7 @@ class SettingsDialog(QDialog):
             "name": preset.name,
             "kind": preset.kind,
             "base_url": self.base_edit.text().strip(),
+            "models_url": preset.models_url,
             "model": self.model_combo.currentText().strip(),
             "api_key": self.key_edit.text().strip(),
             "requires_key": preset.requires_key,
@@ -792,9 +816,6 @@ class SettingsDialog(QDialog):
         self.image_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.image_key.setPlaceholderText(t("settings.key_placeholder"))
         form.addRow(self._label(t("settings.label_api_key")), self.image_key)
-
-        self.image_fallback = QCheckBox(t("settings.fallback_checkbox"))
-        form.addRow("", self.image_fallback)
         card.layout().addLayout(form)
         layout.addWidget(card)
 
@@ -812,16 +833,15 @@ class SettingsDialog(QDialog):
 
     def _load_image(self) -> None:
         config = self.settings.image_config()
-        index = self.image_provider.findData(config.get("provider", "procedural"))
+        index = self.image_provider.findData(config.get("provider", "openai"))
         self.image_provider.setCurrentIndex(max(0, index))
         self._image_provider_changed()
         self.image_base.setText(config.get("base_url", ""))
         self.image_model.setCurrentText(config.get("model", ""))
         self.image_key.setText(str(config.get("api_key") or ""))
-        self.image_fallback.setChecked(bool(config.get("fallback_to_procedural", True)))
 
     def _image_provider_changed(self) -> None:
-        provider = get_image_provider(self.image_provider.currentData() or "procedural")
+        provider = get_image_provider(self.image_provider.currentData() or "openai")
         self.image_description.setText(provider.display_description)
         self.image_base.setText(provider.base_url)
         self.image_model.clear()
@@ -856,6 +876,42 @@ class SettingsDialog(QDialog):
         form.addRow(self._label(t("settings.label_context")), self.context_messages)
         card.layout().addLayout(form)
         layout.addWidget(card)
+
+        auto = Card(soft=True)
+        auto.layout().addWidget(title_label(t("settings.auto_continue_title"), 11))
+        auto.layout().addWidget(muted(t("settings.auto_continue_hint"), size=9))
+        self.auto_continue_boxes: dict[str, QCheckBox] = {}
+        for kind in AUTO_CONTINUE_KINDS:
+            box = QCheckBox(t(f"errors.kind_{kind}"))
+            box.setToolTip(t(f"errors.kind_{kind}_hint"))
+            self.auto_continue_boxes[kind] = box
+            auto.layout().addWidget(box)
+        layout.addWidget(auto)
+
+        supervisor = Card(soft=True)
+        supervisor.layout().addWidget(title_label(t("settings.supervisor_title"), 11))
+        supervisor.layout().addWidget(muted(t("settings.supervisor_hint"), size=9))
+        self.supervisor_box = QCheckBox(t("settings.supervisor_check"))
+        self.supervisor_box.setToolTip(t("settings.supervisor_check_tip"))
+        supervisor.layout().addWidget(self.supervisor_box)
+        layout.addWidget(supervisor)
+
+        parallel = Card(soft=True)
+        parallel.layout().addWidget(title_label(t("settings.parallel_title"), 11))
+        parallel.layout().addWidget(muted(t("settings.parallel_hint"), size=9))
+        self.parallel_box = QCheckBox(t("settings.parallel_check"))
+        self.parallel_box.setToolTip(t("settings.parallel_check_tip"))
+        parallel.layout().addWidget(self.parallel_box)
+        parallel_form = QFormLayout()
+        parallel_form.setSpacing(8)
+        self.parallel_workers = QSpinBox()
+        self.parallel_workers.setRange(2, 6)
+        parallel_form.addRow(self._label(t("settings.parallel_workers")), self.parallel_workers)
+        self.parallel_rounds = QSpinBox()
+        self.parallel_rounds.setRange(1, 5)
+        parallel_form.addRow(self._label(t("settings.parallel_rounds")), self.parallel_rounds)
+        parallel.layout().addLayout(parallel_form)
+        layout.addWidget(parallel)
 
         projects = Card(soft=True)
         projects.layout().addWidget(title_label(t("settings.projects_title"), 11))
@@ -913,6 +969,13 @@ class SettingsDialog(QDialog):
         agent = self.settings.data.get("agent", {})
         self.temperature.setValue(float(agent.get("temperature", 0.65)))
         self.context_messages.setValue(int(agent.get("context_messages", 36)))
+        enabled = set(self.settings.auto_continue_kinds())
+        for kind, box in self.auto_continue_boxes.items():
+            box.setChecked(kind in enabled)
+        self.supervisor_box.setChecked(self.settings.supervisor_enabled())
+        self.parallel_box.setChecked(bool(agent.get("parallel", True)))
+        self.parallel_workers.setValue(int(agent.get("parallel_workers", 3) or 3))
+        self.parallel_rounds.setValue(int(agent.get("parallel_rounds", 3) or 3))
         self.projects_dir_edit.setText(str(self.settings.data.get("projects_dir") or ""))
 
     # ------------------------------------------------------------------
@@ -928,19 +991,27 @@ class SettingsDialog(QDialog):
             {
                 "temperature": float(self.temperature.value()),
                 "context_messages": int(self.context_messages.value()),
+                "auto_continue_errors": [
+                    kind
+                    for kind, box in self.auto_continue_boxes.items()
+                    if box.isChecked()
+                ],
+                "supervisor": self.supervisor_box.isChecked(),
+                "parallel": self.parallel_box.isChecked(),
+                "parallel_workers": int(self.parallel_workers.value()),
+                "parallel_rounds": int(self.parallel_rounds.value()),
             }
         )
         self.settings.data["projects_dir"] = (
             self.projects_dir_edit if self._advanced else self.simple_projects_edit
         ).text().strip()
         self.settings.data.setdefault("ui", {})["advanced_settings"] = self._advanced
-        preset = get_image_provider(self.image_provider.currentData() or "procedural")
+        preset = get_image_provider(self.image_provider.currentData() or "openai")
         self.settings.update_image(
             provider=preset.id,
             base_url=self.image_base.text().strip() or preset.base_url,
             model=self.image_model.currentText().strip() or preset.default_model,
             api_key=self.image_key.text().strip(),
-            fallback_to_procedural=bool(self.image_fallback.isChecked()),
         )
         self.settings.save()
         i18n.invalidate_cache()

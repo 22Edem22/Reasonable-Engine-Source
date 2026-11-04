@@ -215,17 +215,20 @@ PYTHONPATH="$PWD/_engine:$PWD" python3 -m reasonable.cli --project "$PWD" run --
 ```bat
 re.bat sprite "золотая звезда" assets/sprites/star.png
 re.bat sprite "синий кристалл" assets/sprites/crystal.png --style pixel --size 128
-re.bat sprite "слизень" assets/sprites/slime.png --provider procedural --seed 42
+re.bat sprite "слизень" assets/sprites/slime.png --provider openai --seed 42
 ```
 
 | Флаг | Значение |
 |---|---|
 | `--style` | `flat`, `pixel`, `painterly`, `icon`; по умолчанию `flat` |
 | `--size` | 64…1024; по умолчанию 256 |
-| `--provider` | `procedural`, `openai`; по умолчанию из настроек |
+| `--provider` | `openai` (внешняя модель изображений); по умолчанию из настроек |
 | `--seed` | Фиксирует результат |
 
-Файл обязан находиться внутри `assets/`. Иначе команда завершается с кодом `2`. Результат всегда выводится JSON:
+Спрайты создаёт только внешняя модель изображений. Без неё команда завершается
+ошибкой и предлагает встроенному агенту использовать `draw_sprite` — шаблон
+больше не подставляется. Файл обязан находиться внутри `assets/`, иначе команда
+завершается с кодом `2`. Результат всегда выводится JSON:
 
 ```json
 {
@@ -233,7 +236,7 @@ re.bat sprite "слизень" assets/sprites/slime.png --provider procedural --
   "style": "flat",
   "size": 256,
   "seed": 12345,
-  "provider": "procedural",
+  "provider": "openai",
   "fallback": false,
   "path": "assets/sprites/star.png"
 }

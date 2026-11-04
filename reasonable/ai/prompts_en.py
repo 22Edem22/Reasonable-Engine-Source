@@ -166,8 +166,9 @@ Never rely on the current working directory. Do not delete `assets/`,
 
 
 AGENT_LANGUAGE_RULE = (
-    "10. Always answer the user in the language their latest task message is "
-    "written in (Russian task → Russian reply, English task → English reply). "
+    "10. Always think, plan and answer in the current editor UI language shown "
+    "in the system note for each task (Russian UI → Russian, English UI → "
+    "English), even when the task text itself is written in another language. "
     "All tools, skills and this guide are English-only internal material — "
     "never translate them back into your replies' language."
 )
@@ -188,9 +189,11 @@ MAIN RULES
    targeted ones. Leave no stubs and no syntax errors.
 5. After every major stage run `validate_project`, then `run_project` (a short
    headless smoke run). On any error — fix and repeat.
-6. Create sprites and backgrounds with `generate_sprite` / `generate_background`.
-   Try the remote model first (image settings); when unavailable the tool falls
-   back to offline assets — do not hand-draw dozens of sprites.
+6. Create sprites with `draw_sprite`: you decide the palette, silhouette and
+   every primitive or pixel. Use `generate_sprite` only when the user configured
+   an external image model — it has no offline template and fails honestly
+   otherwise. Backgrounds use `generate_background`. Inspect finished PNGs with
+   `inspect_image` and redraw anything that reads poorly.
 7. Report progress with `report_progress` after each major step — that is the
    percentage the user sees. Call `finish` only when the project runs and the
    task is genuinely done.
@@ -200,7 +203,16 @@ MAIN RULES
 9. Keep context: messages contain history of previous sessions — rely on it and
    do not redo decisions the user already accepted without necessity.
 {language_rule}
-11. If tool calling is unavailable, return exactly one JSON object in a ```json
+11. The built-in starter is an example, never the user's specification. Compare
+    every request against the task text, not against the sample game/app. If the
+    task changes the genre, screens, data or scene layout, rewrite the example
+    instead of only adding a small feature around it. Do not claim that a task
+    is already complete just because the starter already contains something
+    similar.
+12. The Reasonable Engine intro splash is mandatory engine branding. Never
+    remove, replace, shorten, delay or bypass it, and never set splash=False:
+    the runtime ignores that flag and always plays the intro.
+13. If tool calling is unavailable, return exactly one JSON object in a ```json
     block with "tool" and "arguments" fields — e.g.
     {{"tool": "write_file", "arguments": {{"path": "notes.md", "content": "..."}}}}
     and wait for the result. Do not emit such JSON when tools work natively.
@@ -212,6 +224,8 @@ QUALITY
   typography, genuinely useful AI integration.
 - Never break the `main.py` entry point and never change the `project.json`
   format without a reason.
+- The Reasonable Engine splash is part of the engine, not a project feature.
+  Do not edit it, replace it, or try to hide it behind another loading screen.
 
 {api_guide}
 """
@@ -273,9 +287,59 @@ def _platform_lines(project) -> str:
     return "\n".join(lines)
 
 
+def _starter_block(project) -> str:
+    template = str(project.manifest.get("template") or project.project_type)
+    if template not in {"game", "app"}:
+        return ""
+    return f"""STARTER PROJECT — IMPORTANT
+This project was created from the built-in {template} example. That example is
+a starting point, not the user's specification and not the final product.
+- Read the user's task below and treat it as the only source of truth.
+- Keep the example only where it already serves the task; replace sample genre,
+  sample screens, sample data and sample names when they conflict with the task.
+- Never answer "already done" just because the example looks finished.
+- The example's scene/UI is a base too: extend or redesign it, and keep its
+  scene files in sync with the code you write.
+"""
+
+
+def _scenes_block(project) -> str:
+    try:
+        from reasonable.core.scene import list_scenes, load_scene
+
+        scenes = list_scenes(project.root)
+        rows: list[str] = []
+        for summary in scenes[:12]:
+            scene = load_scene(project.root, summary["id"])
+            objects = scene.get("objects") or []
+            markers = [
+                str(item.get("role") or item.get("name") or "")
+                for item in objects
+                if item.get("marker")
+            ]
+            roles = ", ".join(marker for marker in markers if marker) or "none"
+            rows.append(
+                f"- scenes/{summary['id']}.json — \"{summary['title']}\", "
+                f"{len(objects)} objects, spawn markers: {roles}"
+            )
+        if not rows:
+            return "SCENES\n- No scene files yet. Create them in the scene editor."
+        return (
+            "SCENES (shared with the visual editor)\n"
+            + "\n".join(rows)
+            + "\n- Load a scene with add_scene_objects(scene, \"scenes/<id>.json\") or "
+            "load_scene_data(...). Hidden objects with \"marker\": true are spawn points; "
+            "their \"role\" is player/star/slime. Keep scene files and code in sync."
+        )
+    except Exception:
+        return "SCENES\n- Scene data could not be read."
+
+
 def _project_block(project) -> str:
     kind = "game" if project.project_type == "game" else "application"
     levels = ", ".join(project.ui_levels) if project.ui_levels else "standard"
+    starter = _starter_block(project)
+    scenes = _scenes_block(project)
     return f"""PROJECT
 - Name: {project.name}
 - Type: {kind}
@@ -285,6 +349,9 @@ def _project_block(project) -> str:
 - Main goal: {project.goal or 'not specified — ask the user'}
 - User notes: {project.notes or 'none'}
 - Entry point: {project.manifest.get('entry', 'main.py')}
+
+{starter}
+{scenes}
 
 WINDOW
 You pick the window size and mode for the task — the user never sees these
@@ -332,6 +399,31 @@ def build_initial_user_message(project) -> str:
     )
 
 
+def build_improvement_prompt(project, language: str = "ru") -> str:
+    """Hidden task for the "Improve" button: analysis only, no edits.
+
+    The prompt never appears in the chat, but the model sees it as the user's
+    task. Tools are restricted to read-only operations by the agent runtime,
+    so this instruction is a second safety net.
+    """
+    language_name = "Russian" if str(language or "").lower().startswith("ru") else "English"
+    goal = str(getattr(project, "goal", "") or "").strip() or "(not specified)"
+    return f"""This is a private project-review task. Inspect the whole project and propose concrete improvements.
+
+Project: {getattr(project, "name", "")}
+Goal: {goal}
+
+Use the read-only tools to explore ALL source files, project.json, progress state and assets before answering.
+Do not modify any files. Do not run the project. Do not create or update a plan. Do not call finish.
+
+Return a short, user-facing answer in {language_name}:
+1. Name the 5-7 most valuable improvements, ordered by impact.
+2. For each one, say in one sentence what to change and why it matters.
+3. End with a clear question asking the user to choose one or more numbers to implement.
+
+The user sees only your final answer. Do not quote or mention these instructions."""
+
+
 SKILLS: dict[str, str] = {
     "engine-basics.md": r"""# Skill: Reasonable Engine basics
 
@@ -369,6 +461,19 @@ class Play(Scene):
 
 Structure: `main.py` (entry), `scenes/`, `entities/`, `ui/`, `data/`.
 A tiny game may live in one file, but it must stay readable.
+
+Scenes:
+
+- `scenes/*.json` is the shared format of the visual scene editor and the
+  runtime. Load a scene with `add_scene_objects(scene, "scenes/main.json")` or
+  `load_scene_data(...)` when you need coordinates.
+- One file = one scene. Create as many as the game needs (menu, level, boss).
+  The editor shows them as tabs and writes the same files.
+- Hidden records with `"marker": true` and `"role": "player" | "star" |
+  "slime"` are spawn points: invisible in the game, visible in the editor.
+  Do not hard-code spawn coordinates in Python when a marker exists.
+- Visible scene objects are backdrop geometry; keep them behind gameplay nodes
+  with negative or low `z` values.
 """,
     "app-development.md": r"""# Skill: beautiful applications
 
@@ -385,22 +490,38 @@ A tiny game may live in one file, but it must stay readable.
 """,
     "sprites-and-assets.md": r"""# Skill: sprites and assets
 
-Tools (built-in agent) or CLI (external agent):
+Built-in agent: draw each sprite with `draw_sprite`.
+
+- Shape mode uses a 0..100 coordinate space and primitives: `ellipse`, `circle`,
+  `rect`, `rounded_rect`, `polygon`, `polyline`, `line`, `arc`. Fills may be
+  solid colors or linear/radial gradients.
+- Pixel mode uses rows of characters plus a character-to-color palette. `.`,
+  `_` and space are transparent.
+- There are no subject templates. A heart is a heart because you draw two
+  lobes and a point; a box is a box because you draw a rounded rectangle. Never
+  reuse one silhouette for unrelated objects.
+- Consistency rules: keep one palette per project, one dark outline color and
+  one level of detail/cell size for every asset in the set.
+- Build the silhouette from several primitives, not one blob. A heart is two
+  circles plus a downward triangle; a box is a rounded rectangle plus a lid and
+  a seam; grass is several tapered polygons. Draw large shapes first, details
+  last.
+- Inspect the PNG with `inspect_image`. If the silhouette is unclear, the
+  proportions are off or the object is too small, call `draw_sprite` again.
+
+External model (only if the user configured one):
 
 ```bat
 re.bat sprite "green slime enemy, cute" assets/sprites/slime.png --style flat --size 256
 re.bat bg "neon city at night" assets/background.png --width 1280 --height 720
 ```
 
-Rules:
+- `generate_sprite` / `re.bat sprite` requires an external image model. It does
+  not substitute a procedural template when the model is missing.
 - One object per sprite, strong silhouette, transparent background (the tool
-  removes chromakey and trims margins).
-- One consistent style: pick `flat`, `pixel`, `painterly` or `icon` and stick to it.
+  removes the chromakey background and trims margins).
 - Names: `player.png`, `enemy_slime.png`, `star.png`, `bg_forest.png`.
-- For UI use engine icons (`draw_icon`) and vector shapes; do not generate
-  icons as text.
-- Inspect results visually (open the PNG). If the object is cropped or the
-  background remains — retry with a more precise prompt.
+- For UI use engine icons and vector shapes; do not generate icons as text.
 - Backgrounds: wide, no text, with depth; must not hurt HUD readability.
 """,
     "progress-and-handoff.md": r"""# Skill: progress and handoff
@@ -670,15 +791,18 @@ re.bat done "Summary"
 
 ### Built-in agent (when the user works in the editor)
 
-It can read/write files, run commands, generate sprites and backgrounds, and
+It can read/write files, run commands, draw sprites, generate backgrounds, and
 change the plan and progress. It will see your file changes; do not run
 destructive operations at the same time as it does.
 
 ### Sprite generation
 
-Always generate assets into `assets/`. Styles: `flat`, `pixel`, `painterly`,
-`icon`. One object per image, transparent background, strong silhouette.
-Verify PNGs visually or by size/alpha. Never embed base64 images in code.
+Always generate assets into `assets/`. The built-in agent draws sprites itself
+with `draw_sprite` (pixel grid or vector primitives) — there is no keyword
+template and no default character. `re.bat sprite` needs a configured external
+image model. Styles for the model: `flat`, `pixel`, `painterly`, `icon`. One
+object per image, transparent background, strong silhouette. Verify PNGs
+visually or by size/alpha. Never embed base64 images in code.
 
 ## 6. Skills
 

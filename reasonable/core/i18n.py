@@ -151,14 +151,16 @@ def detect_user_language(text: str) -> str:
 
 _TASK_LANGUAGE_NOTES = {
     "ru": (
-        "[SYSTEM NOTE] The user's task below is written in Russian. "
-        "Reply to the user strictly in Russian until they switch languages. "
-        "Tool names, code and file contents stay in English."
+        "[SYSTEM NOTE] The editor UI language is Russian. "
+        "Think, plan, report progress and answer the user strictly in Russian, "
+        "even if the task text is written in another language. "
+        "Tool names, code, identifiers and file contents stay in English."
     ),
     "en": (
-        "[SYSTEM NOTE] The user's task below is written in English. "
-        "Reply to the user strictly in English until they switch languages. "
-        "Tool names, code and file contents stay in English."
+        "[SYSTEM NOTE] The editor UI language is English. "
+        "Think, plan, report progress and answer the user strictly in English, "
+        "even if the task text is written in another language. "
+        "Tool names, code, identifiers and file contents stay in English."
     ),
 }
 
@@ -167,6 +169,11 @@ def task_language_note(text: str) -> str:
     """Instruction injected before a user message so the agent answers in the
     language of exactly that task (tools/skills themselves are English-only)."""
     return _TASK_LANGUAGE_NOTES[detect_user_language(text)]
+
+
+def language_note(language: str | None = None) -> str:
+    """Same instruction for a hidden task whose reply language is chosen by the UI."""
+    return _TASK_LANGUAGE_NOTES[normalize_language(language or current_language())]
 
 
 def tr(en: str, ru: str, **values: Any) -> str:
@@ -449,6 +456,7 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     ),
     # -- shared / generic ------------------------------------------------
     "common.cancel": _pair("Отмена", "Cancel"),
+    "common.save": _pair("Сохранить", "Save"),
     "common.close": _pair("Закрыть", "Close"),
     "common.browse": _pair("Выбрать…", "Browse…"),
     "common.next": _pair("Далее", "Next"),
@@ -773,29 +781,91 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "settings.setup_provider_btn": _pair("Настроить провайдера", "Set up provider"),
     "settings.open_site": _pair("Открыть сайт", "Open site"),
     "settings.images_intro": _pair(
-        "Встроенный агент и кнопка «Сгенерировать спрайт» используют этот провайдер. "
-        "Если сеть недоступна, процедурный генератор создаст аккуратный спрайт локально.",
-        "The built-in agent and the “Generate sprite” button use this provider. When the "
-        "network is unavailable, the procedural generator creates a tidy sprite locally.",
+        "Внешняя модель изображений используется кнопкой «Сгенерировать спрайт» и "
+        "инструментом generate_sprite. Без неё встроенный агент рисует спрайты сам "
+        "через draw_sprite — шаблоны больше не подставляются.",
+        "The external image model is used by the “Generate sprite” button and the "
+        "generate_sprite tool. Without one the built-in agent draws sprites itself "
+        "with draw_sprite — no templates are substituted.",
     ),
     "settings.label_provider": _pair("Провайдер", "Provider"),
     "settings.label_description": _pair("Описание", "Description"),
     "settings.label_base_url": _pair("Base URL", "Base URL"),
-    "settings.fallback_checkbox": _pair(
-        "Если сеть недоступна — рисовать процедурно",
-        "If the network is unavailable — draw procedurally",
-    ),
     "settings.tip_title": _pair("Совет", "Tip"),
     "settings.tip_text": _pair(
         "Для спрайтов лучше всего работают короткие предметные промпты: "
-        "«золотая звезда, флэт, прозрачный фон». Фон можно сгенерировать отдельно "
-        "кнопкой в разделе «Ассеты».",
+        "«золотая звезда, флэт, прозрачный фон». Без внешней модели агент рисует "
+        "предмет сам фигурами или пиксельной сеткой.",
         "Short, concrete prompts work best for sprites: “golden star, flat, transparent "
-        "background”. Backgrounds can be generated separately with the button in the "
-        "“Assets” section.",
+        "background”. Without an external model the agent draws the object itself from "
+        "shapes or a pixel grid.",
     ),
     "settings.label_temperature": _pair("Температура", "Temperature"),
     "settings.label_context": _pair("Помнить сообщений", "Messages to remember"),
+    "settings.auto_continue_title": _pair(
+        "Автопродолжение после ошибок",
+        "Automatic continue after errors",
+    ),
+    "settings.auto_continue_hint": _pair(
+        "Агент сам отправит «Продолжай» после выбранных ошибок. "
+        "Если ничего не выбрано, автопродолжение выключено. "
+        "Число попыток не ограничено; при повторных ошибках интервал увеличивается.",
+        "The agent will send “Continue” automatically after the selected errors. "
+        "With nothing selected, automatic continuation is off. "
+        "Attempts are unlimited; the interval grows when errors repeat.",
+    ),
+    "settings.supervisor_title": _pair(
+        "Проверка выполнения задачи",
+        "Task completion check",
+    ),
+    "settings.supervisor_hint": _pair(
+        "Перед финальным ответом отдельный проход сверяет исходную задачу, "
+        "изменённые файлы, проверку и запуск. Если что-то не сделано, агент "
+        "продолжает работу, а не объявляет готовый результат.",
+        "Before the final answer a separate pass compares the original task with "
+        "the changed files, validation and run result. If something is missing, "
+        "the agent keeps working instead of declaring success.",
+    ),
+    "settings.supervisor_check": _pair(
+        "Проверять, что агент сделал именно задачу",
+        "Check that the agent did exactly the task",
+    ),
+    "settings.supervisor_check_tip": _pair(
+        "Дополнительный запрос к модели после завершения. Отключите, если "
+        "экономите токены или хотите завершать работу сразу.",
+        "An extra model request after completion. Disable it to save tokens or "
+        "to finish immediately.",
+    ),
+    "settings.parallel_title": _pair(
+        "Параллельная разработка",
+        "Parallel development",
+    ),
+    "settings.parallel_hint": _pair(
+        "Главный агент планирует работу и раздаёт независимые задачи специалистам "
+        "по коду и ассетам. Затем он сам проверяет запуск, устраивает независимый "
+        "аудит и отправляет точечные исправления. При сбое автоматически "
+        "возвращается обычный режим.",
+        "A master agent plans the work and assigns independent tasks to code and "
+        "asset specialists. It then verifies the launch, runs an independent audit "
+        "and sends focused repairs. On failure it falls back to the regular mode.",
+    ),
+    "settings.parallel_check": _pair(
+        "Работать несколькими агентами одновременно",
+        "Work with several agents at once",
+    ),
+    "settings.parallel_check_tip": _pair(
+        "Ускоряет большие задачи. Отключите для максимально предсказуемого "
+        "последовательного режима.",
+        "Speeds up large tasks. Disable for the most predictable sequential mode.",
+    ),
+    "settings.parallel_workers": _pair(
+        "Специалистов одновременно",
+        "Specialists at once",
+    ),
+    "settings.parallel_rounds": _pair(
+        "Кругов исправлений",
+        "Repair rounds",
+    ),
     "settings.projects_hint2": _pair(
         "По умолчанию новые проекты создаются в папке Projects рядом с движком. "
         "Можно выбрать любую другую папку — путь сохранится.",
@@ -846,6 +916,7 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "projectpage.nav_agent": _pair("ИИ-агент", "AI agent"),
     "projectpage.nav_code": _pair("Код", "Code"),
     "projectpage.nav_assets": _pair("Ассеты", "Assets"),
+    "projectpage.nav_scene": _pair("Сцена", "Scene"),
     "projectpage.project_label": _pair("ПРОЕКТ", "PROJECT"),
     "projectpage.project_settings_btn": _pair("Настройки проекта", "Project settings"),
     "projectpage.history_btn": _pair("История версий", "Version history"),
@@ -896,6 +967,11 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "projectpage.open_agent_btn_full": _pair("Открыть ИИ-агента", "Open AI agent"),
     "projectpage.edit_code_btn": _pair("Редактировать код", "Edit code"),
     "projectpage.sprites_btn": _pair("Спрайты", "Sprites"),
+    "projectpage.scene_btn": _pair("Сцена", "Scene"),
+    "projectpage.scene_btn_tip": _pair(
+        "Открыть визуальный редактор сцен",
+        "Open the visual scene editor",
+    ),
     "projectpage.plan_title": _pair("План работ", "Work plan"),
     "projectpage.plan_hint": _pair(
         "План ведёт ИИ-агент. Здесь он показывается для чтения.",
@@ -1135,6 +1211,8 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "The process could not start. Check the Python path and the project folder.",
     ),
     "projectpage.stopping_console": _pair("\nОстанавливаю проект…\n", "\nStopping the project…\n"),
+    "projectpage.console_stopped": _pair("Проект остановлен.", "Project stopped."),
+    "projectpage.stopped_status": _pair("Проект остановлен пользователем.", "The project was stopped by the user."),
     "projectpage.stopped_title": _pair("Запуск остановлен", "Run stopped"),
     "projectpage.stopped_detail": _pair(
         "Проект остановлен до завершения. Запустите снова, когда будете готовы.",
@@ -1473,6 +1551,7 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "chat.role_user": _pair("Вы", "You"),
     "chat.role_tool": _pair("Инструмент", "Tool"),
     "chat.role_system": _pair("Система", "System"),
+    "chat.role_error": _pair("Ошибка", "Error"),
     "chat.show_full": _pair("Показать полностью", "Show full text"),
     "chat.collapse": _pair("Свернуть", "Collapse"),
     "chat.action_create": _pair("создан", "created"),
@@ -1508,6 +1587,26 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "chat.status_ready_badge": _pair("ГОТОВ", "READY"),
     "chat.stop_button": _pair("■  Остановить", "■  Stop"),
     "chat.clear_button": _pair("Очистить", "Clear"),
+    "chat.chat_label": _pair("Чат:", "Chat:"),
+    "chat.chat_select_tip": _pair("Выберите сохранённый чат", "Choose a saved chat"),
+    "chat.untitled_chat": _pair("Новый чат", "New chat"),
+    "chat.new_chat_tip": _pair("Создать новый чат", "Create a new chat"),
+    "chat.delete_chat_tip": _pair("Удалить текущий чат", "Delete the current chat"),
+    "chat.delete_chat_title": _pair("Удалить чат?", "Delete chat?"),
+    "chat.delete_chat_text": _pair(
+        "Чат «{title}» будет удалён без возможности восстановления.",
+        "The chat “{title}” will be deleted permanently.",
+    ),
+    "chat.improve_button": _pair("Улучшить", "Improve"),
+    "chat.improve_tip": _pair(
+        "Проанализировать весь код и предложить улучшения",
+        "Review all code and suggest improvements",
+    ),
+    "chat.improve_chat_title": _pair("Улучшения", "Improvements"),
+    "chat.improve_working": _pair(
+        "Изучаю проект и готовлю предложения…",
+        "Reviewing the project and preparing suggestions…",
+    ),
     "chat.intro_heading": _pair("Опишите первую задачу", "Describe the first task"),
     "chat.intro_text": _pair(
         "Агент прочитает проект, составит план, изменит файлы и проверит запуск.",
@@ -1543,8 +1642,8 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "+{count} tasks — on the \"Overview\" tab.",
     ),
     "chat.input_placeholder": _pair(
-        "Напишите задачу агенту…  Ctrl+Enter — отправить",
-        "Write a task for the agent…  Ctrl+Enter to send",
+        "Напишите задачу агенту…  Enter — отправить, Ctrl+Enter — новая строка",
+        "Write a task for the agent…  Enter to send, Ctrl+Enter for a new line",
     ),
     "chat.input_hint": _pair(
         "Агент меняет файлы в проекте и показывает прогресс.",
@@ -1562,6 +1661,17 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "chat.step_progress": _pair("Шаг {step} · агент работает…", "Step {step} · the agent is working…"),
     "chat.tool_label": _pair("Инструмент: {name}", "Tool: {name}"),
     "chat.token_count": _pair("{count} токенов", "{count} tokens"),
+    "chat.usage_total": _pair(
+        "Всего: {tokens} токенов · {time}",
+        "Total: {tokens} tokens · {time}",
+    ),
+    "chat.usage_tooltip": _pair(
+        "За всё время в этом проекте\nЗапросов: {requests}\nОтправлено: {prompt}\nПолучено: {completion}\nВремя генерации: {time}",
+        "All time in this project\nRequests: {requests}\nSent: {prompt}\nReceived: {completion}\nGeneration time: {time}",
+    ),
+    "chat.time_less_minute": _pair("меньше минуты", "less than a minute"),
+    "chat.time_minutes": _pair("{minutes} мин", "{minutes} min"),
+    "chat.time_hours_minutes": _pair("{hours} ч {minutes:02d} мин", "{hours} h {minutes:02d} min"),
     "chat.snapshot_saved": _pair(
         "Снимок рабочей версии сохранён — изменения можно отменить.",
         "Working version snapshot saved — changes can be undone.",
@@ -1608,6 +1718,96 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "Stop the agent first.",
     ),
     "chat.step_tasks": _pair("{stage}  ·  задачи {done}/{total}", "{stage}  ·  tasks {done}/{total}"),
+    # -- agent error categories (core/agent_errors.py) ------------------
+    "errors.kind_server": _pair("Ошибки сервера (5xx)", "Server errors (5xx)"),
+    "errors.kind_server_hint": _pair(
+        "Провайдер временно не смог обработать запрос.",
+        "The provider temporarily could not process the request.",
+    ),
+    "errors.kind_rate_limit": _pair("Перегрузка и лимиты (429)", "Overload and rate limits (429)"),
+    "errors.kind_rate_limit_hint": _pair(
+        "Слишком много запросов или бесплатный лимит исчерпан.",
+        "Too many requests or the free limit is exhausted.",
+    ),
+    "errors.kind_timeout": _pair("Тайм-аут ответа", "Response timeout"),
+    "errors.kind_timeout_hint": _pair(
+        "Сервер не ответил за отведённое время.",
+        "The server did not answer in time.",
+    ),
+    "errors.kind_network": _pair("Обрыв или отказ соединения", "Connection lost or refused"),
+    "errors.kind_network_hint": _pair(
+        "Проблема с сетью, локальным сервером или портом.",
+        "A problem with the network, local server or port.",
+    ),
+    "errors.kind_bad_response": _pair("Некорректный ответ сервера", "Invalid server response"),
+    "errors.kind_bad_response_hint": _pair(
+        "Сервер вернул пустой или нечитаемый ответ.",
+        "The server returned an empty or unreadable response.",
+    ),
+    # -- chat: continue after a server error -----------------------------
+    "chat.continue_button": _pair("Продолжай", "Continue"),
+    "chat.continue_prompt": _pair("Продолжай", "Continue"),
+    "chat.auto_continue_check": _pair("Продолжать автоматически", "Continue automatically"),
+    "chat.auto_continue_check_tip": _pair(
+        "Автоматически отправлять «Продолжай» после таких ошибок. "
+        "Отключить можно в настройках.",
+        "Send “Continue” automatically after these errors. "
+        "You can turn this off in settings.",
+    ),
+    "chat.auto_continue_hint": _pair(
+        "В следующий раз агент продолжит сам после такой ошибки.",
+        "Next time the agent will continue by itself after this error.",
+    ),
+    "chat.supervisor_found": _pair(
+        "Независимая проверка нашла невыполненные пункты.",
+        "The independent check found unfinished items.",
+    ),
+    "chat.auto_continue_hint_on": _pair(
+        "Автопродолжение включено. Число попыток не ограничено; интервал растёт, "
+        "чтобы не перегружать сервер. Отключить можно в настройках.",
+        "Automatic continuation is on. Attempts are unlimited; the interval grows "
+        "so the server is not hammered. You can turn it off in settings.",
+    ),
+    # -- chat: compact tool call cards (editor/chat.py) -----------------
+    "chat.tool_group": _pair("Вызовы инструментов", "Tool calls"),
+    "chat.tool_group_hint": _pair(
+        "Свернуть или развернуть все вызовы",
+        "Collapse or expand all calls",
+    ),
+    "chat.tool_toggle_hint": _pair(
+        "Нажмите, чтобы показать или скрыть подробности",
+        "Click to show or hide the details",
+    ),
+    "chat.tool_list_files": _pair("Файлы проекта", "Project files"),
+    "chat.tool_read_file": _pair("Чтение файла", "Reading a file"),
+    "chat.tool_write_file": _pair("Запись файла", "Writing a file"),
+    "chat.tool_edit_file": _pair("Правка файла", "Editing a file"),
+    "chat.tool_delete_path": _pair("Удаление", "Deleting"),
+    "chat.tool_search_text": _pair("Поиск по проекту", "Searching the project"),
+    "chat.tool_run_command": _pair("Команда", "Command"),
+    "chat.tool_run_project": _pair("Запуск проекта", "Running the project"),
+    "chat.tool_validate_project": _pair("Проверка проекта", "Validating the project"),
+    "chat.tool_generate_sprite": _pair("Генерация спрайта", "Generating a sprite"),
+    "chat.tool_draw_sprite": _pair("Рисование спрайта", "Drawing a sprite"),
+    "chat.tool_generate_background": _pair("Генерация фона", "Generating a background"),
+    "chat.tool_inspect_image": _pair("Проверка изображения", "Inspecting an image"),
+    "chat.tool_set_plan": _pair("План работ", "Work plan"),
+    "chat.tool_update_task": _pair("Обновление задачи", "Updating a task"),
+    "chat.tool_report_progress": _pair("Прогресс", "Progress"),
+    "chat.tool_get_progress": _pair("Чтение прогресса", "Reading progress"),
+    "chat.tool_finish": _pair("Завершение", "Finishing"),
+    "chat.tool_unknown": _pair("Инструмент", "Tool"),
+    "chat.tool_running": _pair("Выполняется…", "Running…"),
+    "chat.tool_stopped": _pair("Остановлено", "Stopped"),
+    "chat.tool_task_count": _pair("задач: {count}", "tasks: {count}"),
+    "chat.tool_no_output": _pair("Нет вывода", "No output"),
+    "chat.tool_no_matches": _pair("Совпадений нет", "No matches"),
+    "chat.tool_no_issues": _pair("Ошибок нет", "No errors"),
+    "chat.tool_truncated": _pair("… (сокращено)", "… (truncated)"),
+    "chat.task_status_pending": _pair("ожидает", "pending"),
+    "chat.task_status_in_progress": _pair("в работе", "in progress"),
+    "chat.task_status_done": _pair("готово", "done"),
+    "chat.task_status_skipped": _pair("пропущено", "skipped"),
     # --- Reusable widgets (editor/widgets.py) ---
     "widgets.kind_game": _pair("Игра", "Game"),
     "widgets.kind_app": _pair("Приложение", "App"),
@@ -2075,6 +2275,110 @@ work until there is a result, do not repeat the same action.""",
     "extpanel.no_plan": _pair("Агент ещё не создал план.", "The agent has not created a plan yet."),
     "extpanel.no_files": _pair("Пока нет изменённых файлов.", "No changed files yet."),
 
+    # -- scene editor (editor/scene_editor.py) --------------------------
+    "scene.title": _pair("Редактор сцены", "Scene editor"),
+    "scene.scenes": _pair("СЦЕНЫ", "SCENES"),
+    "scene.new_scene": _pair("Новая сцена", "New scene"),
+    "scene.manage": _pair("Управление сценой", "Manage scene"),
+    "scene.new_level": _pair("Уровень", "Level"),
+    "scene.new_menu": _pair("Меню", "Menu"),
+    "scene.new_empty": _pair("Пустая сцена", "Empty scene"),
+    "scene.new_prompt": _pair("Название сцены:", "Scene name:"),
+    "scene.new_default_name": _pair("Сцена {index}", "Scene {index}"),
+    "scene.rename": _pair("Переименовать сцену…", "Rename scene…"),
+    "scene.duplicate": _pair("Дублировать сцену", "Duplicate scene"),
+    "scene.delete": _pair("Удалить сцену", "Delete scene"),
+    "scene.delete_last": _pair(
+        "Нельзя удалить последнюю сцену — в проекте должна остаться хотя бы одна.",
+        "The last scene cannot be deleted — a project must keep at least one.",
+    ),
+    "scene.delete_text": _pair(
+        "Удалить сцену «{title}»? Это действие нельзя отменить.",
+        "Delete the scene “{title}”? This cannot be undone.",
+    ),
+    "scene.settings": _pair("Настройки сцены…", "Scene settings…"),
+    "scene.settings_title": _pair("Настройки сцены", "Scene settings"),
+    "scene.settings_saved": _pair("Настройки сцены сохранены: {title}", "Scene settings saved: {title}"),
+    "scene.opened": _pair("Открыта сцена: {title}", "Scene opened: {title}"),
+    "scene.created": _pair("Создана сцена: {title}", "Scene created: {title}"),
+    "scene.renamed": _pair("Сцена переименована: {title}", "Scene renamed: {title}"),
+    "scene.deleted": _pair("Сцена удалена. Открыта: {title}", "Scene deleted. Opened: {title}"),
+    "scene.run": _pair("Запустить", "Run"),
+    "scene.run_tip": _pair("Запустить проект и проверить сцену в игре", "Run the project and test the scene in the game"),
+    "scene.field_grid": _pair("Шаг сетки", "Grid step"),
+    "scene.empty_title": _pair("Пустая сцена", "Empty scene"),
+    "scene.empty_text": _pair(
+        "Добавьте первый объект или начните с маркера игрока. "
+        "Дальше объекты можно двигать мышью и настраивать справа.",
+        "Add your first object or start with a player marker. "
+        "Objects can then be dragged and tuned on the right.",
+    ),
+    "scene.add_platform": _pair("Прямоугольник", "Rectangle"),
+    "scene.add_circle": _pair("Круг", "Circle"),
+    "scene.add_text": _pair("Текст", "Text"),
+    "scene.add_player": _pair("Старт игрока", "Player start"),
+    "scene.add_player_tip": _pair(
+        "Скрытый маркер: в примере игры задаёт точку появления игрока.",
+        "A hidden marker: in the sample game it sets the player spawn point.",
+    ),
+    "scene.marker_tip": _pair(
+        "Маркер появления: невидим в игре, но задаёт позицию персонажа или предмета.",
+        "Spawn marker: invisible in the game but defines where an entity appears.",
+    ),
+    "scene.markers": _pair("Маркеры появления", "Spawn markers"),
+    "scene.add_star": _pair("Звезда", "Star"),
+    "scene.add_slime": _pair("Слизень", "Slime"),
+    "scene.objects": _pair("ОБЪЕКТЫ", "OBJECTS"),
+    "scene.inspector": _pair("ИНСПЕКТОР", "INSPECTOR"),
+    "scene.tool_select": _pair("Выбор и перемещение (V)", "Select and move (V)"),
+    "scene.tool_rect": _pair("Прямоугольник (R)", "Rectangle (R)"),
+    "scene.tool_circle": _pair("Круг (O)", "Circle (O)"),
+    "scene.tool_text": _pair("Текст (T)", "Text (T)"),
+    "scene.tool_panel": _pair("Панель (P)", "Panel (P)"),
+    "scene.tool_image": _pair("Изображение из ассетов", "Image from assets"),
+    "scene.tool_delete": _pair("Удалить объект (Del)", "Delete object (Del)"),
+    "scene.tool_duplicate": _pair("Дублировать (Ctrl+D)", "Duplicate (Ctrl+D)"),
+    "scene.snap": _pair("Привязка к сетке", "Snap to grid"),
+    "scene.grid": _pair("Сетка", "Grid"),
+    "scene.zoom": _pair("Масштаб", "Zoom"),
+    "scene.zoom_in": _pair("Приблизить", "Zoom in"),
+    "scene.zoom_out": _pair("Отдалить", "Zoom out"),
+    "scene.reset_view": _pair("Сбросить вид (0)", "Reset view (0)"),
+    "scene.bring_front": _pair("На передний план", "Bring to front"),
+    "scene.send_back": _pair("На задний план", "Send to back"),
+    "scene.save": _pair("Сохранить сцену (Ctrl+S)", "Save scene (Ctrl+S)"),
+    "scene.saved": _pair("Сцена сохранена: {path}", "Scene saved: {path}"),
+    "scene.load_failed": _pair("Не удалось открыть сцену: {error}", "Could not open the scene: {error}"),
+    "scene.save_failed": _pair("Не удалось сохранить сцену: {error}", "Could not save the scene: {error}"),
+    "scene.empty_hint": _pair(
+        "Добавьте объекты кнопками на панели или перетащите изображение из «Ассетов».",
+        "Add objects with the toolbar or drag an image from Assets.",
+    ),
+    "scene.field_name": _pair("Имя", "Name"),
+    "scene.field_position": _pair("Позиция", "Position"),
+    "scene.field_size": _pair("Размер", "Size"),
+    "scene.field_rotation": _pair("Поворот", "Rotation"),
+    "scene.field_color": _pair("Цвет", "Colour"),
+    "scene.field_text": _pair("Текст", "Text"),
+    "scene.field_asset": _pair("Изображение", "Image"),
+    "scene.field_z": _pair("Слой", "Layer"),
+    "scene.field_radius": _pair("Скругление", "Corner radius"),
+    "scene.field_visible": _pair("Видимый", "Visible"),
+    "scene.pick_asset": _pair("Выбрать…", "Choose…"),
+    "scene.no_selection": _pair("Объект не выбран", "No object selected"),
+    "scene.object_default": _pair("Объект {index}", "Object {index}"),
+    "scene.image_missing": _pair("Файл изображения не найден", "Image file not found"),
+    "scene.added": _pair("Объект добавлен на сцену.", "Object added to the scene."),
+    "scene.bg_color": _pair("Фон сцены", "Scene background"),
+    "scene.footer_hint": _pair(
+        "ЛКМ — выбрать/создать и перетащить · R/O/T/P — инструменты · "
+        "колесо — масштаб · средняя кнопка — панорама · Del — удалить",
+        "Click to select/create and drag · R/O/T/P — tools · "
+        "wheel to zoom · middle drag to pan · Del to delete",
+    ),
+    "scene.save_hint": _pair("Изменения сохраняются автоматически", "Changes are saved automatically"),
+    "scene.dirty": _pair("Есть несохранённые изменения", "Unsaved changes"),
+
     # -- assets page / generation dialog -------------------------------
     "assets.gen_title_bg": _pair("Генерация фона", "Background generation"),
     "assets.gen_title_sprite": _pair("Генерация спрайта", "Sprite generation"),
@@ -2105,13 +2409,11 @@ work until there is a result, do not repeat the same action.""",
     "assets.preview_placeholder": _pair("Здесь появится результат", "The result will appear here"),
     "assets.generate_button": _pair("Сгенерировать", "Generate"),
     "assets.generate_again_button": _pair("Сгенерировать ещё", "Generate another"),
-    "assets.note_procedural": _pair(
-        "Локальный процедурный генератор: быстро, без сети, стилизованные формы.",
-        "Local procedural generator: fast, offline, stylized shapes.",
-    ),
     "assets.note_openai": _pair(
-        "OpenAI-совместимый сервер изображений. Нужны Base URL и ключ в настройках.",
-        "OpenAI-compatible image server. Requires a Base URL and key in settings.",
+        "OpenAI-совместимый сервер изображений. Нужны Base URL и ключ в настройках. "
+        "Без модели попросите агента нарисовать ассет через draw_sprite.",
+        "OpenAI-compatible image server. Requires a Base URL and key in settings. "
+        "Without a model, ask the agent to draw the asset with draw_sprite.",
     ),
     "assets.need_prompt_title": _pair("Нужен промпт", "Prompt required"),
     "assets.need_prompt_text": _pair(
@@ -2245,5 +2547,240 @@ work until there is a result, do not repeat the same action.""",
     "code.validate_summary": _pair(
         "Проверка: ошибок {errors}, предупреждений {warnings}.",
         "Validation: {errors} errors, {warnings} warnings.",
+    ),
+
+    # -- first-run quick start (editor/tutorial.py) ----------------------
+    "menu.tutorial": _pair("Быстрый старт (обучение)", "Quick start (tutorial)"),
+    "settings.tutorial_button": _pair("Обучение", "Tutorial"),
+    "settings.tutorial_hint": _pair(
+        "Повторить короткое обучение по редактору",
+        "Replay the short editor tutorial",
+    ),
+    "welcome.tutorial": _pair("Обучение", "Tutorial"),
+    "welcome.tutorial_tip": _pair(
+        "Повторить короткое обучение по редактору",
+        "Replay the short editor tutorial",
+    ),
+    "tutorial.title": _pair("Быстрый старт", "Quick start"),
+    "tutorial.subtitle": _pair(
+        "Шесть интерактивных шагов — выполняйте действия по порядку",
+        "Six hands-on steps — complete each action to move on",
+    ),
+    "tutorial.badge": _pair("ОБУЧЕНИЕ", "TUTORIAL"),
+    "tutorial.outline": _pair("ШАГИ", "STEPS"),
+    "tutorial.outline_hint": _pair(
+        "Следующий шаг открывается после выполнения действия. Обучение можно закрыть в любой момент.",
+        "The next step unlocks after you complete the action. You can close the tutorial at any time.",
+    ),
+    "tutorial.tip": _pair("СОВЕТ", "TIP"),
+    "tutorial.step_of": _pair("ШАГ {step} ИЗ {total}", "STEP {step} OF {total}"),
+    "tutorial.progress": _pair("Шаг {step} из {total}", "Step {step} of {total}"),
+    "tutorial.keyboard_hint": _pair(
+        "← → — шаги · Esc",
+        "← → steps · Esc",
+    ),
+    "tutorial.back": _pair("Назад", "Back"),
+    "tutorial.next": _pair("Далее", "Next"),
+    "tutorial.skip": _pair("Пропустить", "Skip"),
+    "tutorial.skip_tip": _pair(
+        "Закрыть обучение — открыть его снова можно через «Помощь → Быстрый старт» или кнопку «Обучение».",
+        "Close the tutorial — reopen it from Help → Quick start or the Tutorial button.",
+    ),
+    "tutorial.done": _pair("Готово", "Done"),
+    "tutorial.action_heading": _pair("ВАШЕ ДЕЙСТВИЕ", "YOUR TURN"),
+    "tutorial.locked_hint": _pair(
+        "Выполните действие выше, чтобы продолжить",
+        "Complete the action above to continue",
+    ),
+
+    # step 1 — choose a project type
+    "tutorial.step1_choose_ai": _pair("Создать с ИИ", "Create with AI"),
+    "tutorial.step1_choose_blank": _pair("Пустой проект", "Blank project"),
+    "tutorial.step1_selected_ai": _pair(
+        "Выбрано: проект с ИИ. Мастер спросит идею и тип — остальное соберёт движок.",
+        "Selected: an AI project. The wizard asks for the idea and type — the engine builds the rest.",
+    ),
+    "tutorial.step1_selected_blank": _pair(
+        "Выбрано: пустой проект. Подходит, если хотите начать с чистого листа.",
+        "Selected: a blank project. A good choice when you want a clean start.",
+    ),
+
+    # step 2 — task and plan
+    "tutorial.step2_placeholder": _pair(
+        "Например: добавь меню и три уровня",
+        "For example: add a menu and three levels",
+    ),
+    "tutorial.step2_submit": _pair("Поставить задачу", "Give the task"),
+    "tutorial.step2_empty": _pair(
+        "Напишите хотя бы пару слов — так агенту будет понятнее.",
+        "Write at least a few words — it helps the agent understand.",
+    ),
+    "tutorial.step2_chip1": _pair("Добавь меню и три уровня", "Add a menu and three levels"),
+    "tutorial.step2_chip2": _pair("Сделай экран статистики", "Build a statistics screen"),
+    "tutorial.step2_chip3": _pair("Улучши графику и звук", "Improve the graphics and sound"),
+    "tutorial.step2_plan_ready": _pair(
+        "План готов — агент начнёт с первой задачи и будет отмечать прогресс.",
+        "The plan is ready — the agent starts with the first task and tracks progress.",
+    ),
+    "tutorial.step2_plan1": _pair("Изучить проект и структуру", "Study the project and its structure"),
+    "tutorial.step2_plan2": _pair("Собрать меню", "Build the menu"),
+    "tutorial.step2_plan3": _pair("Добавить три уровня", "Add three levels"),
+    "tutorial.step2_plan4": _pair("Проверить запуск", "Check the launch"),
+
+    # step 3 — visit the workspaces in order
+    "tutorial.section_hint": _pair(
+        "Нажимайте разделы по порядку, как в настоящем проекте.",
+        "Click the workspaces in order, just like in a real project.",
+    ),
+    "tutorial.section_overview": _pair(
+        "Обзор: готовность, план, события и история версий.",
+        "Overview: readiness, plan, events and version history.",
+    ),
+    "tutorial.section_agent": _pair(
+        "ИИ-агент: задача словами, живой план и вызовы инструментов.",
+        "AI agent: a task in words, a live plan and tool calls.",
+    ),
+    "tutorial.section_code": _pair(
+        "Код: дерево файлов и полноценный редактор с сохранением.",
+        "Code: the file tree and a full editor with saving.",
+    ),
+    "tutorial.section_assets": _pair(
+        "Ассеты: спрайты, фоны, звуки и генерация изображений.",
+        "Assets: sprites, backgrounds, sounds and image generation.",
+    ),
+    "tutorial.section_scene": _pair(
+        "Сцена: визуальный холст с сеткой, объектами и инспектором.",
+        "Scene: a visual canvas with a grid, objects and an inspector.",
+    ),
+    "tutorial.step3_done": _pair(
+        "Все пять разделов освоены — теперь вы знаете, где что лежит.",
+        "All five workspaces visited — you know where everything lives.",
+    ),
+
+    # step 4 — run
+    "tutorial.step4_console": _pair(
+        "$ python main.py\nЗапуск проекта…",
+        "$ python main.py\nStarting the project…",
+    ),
+    "tutorial.step4_run": _pair("Запустить проект", "Run the project"),
+    "tutorial.step4_ok": _pair(
+        "Проект запущен, проверка пройдена: 0 ошибок. Так выглядит успешный запуск.",
+        "The project started and validation passed: 0 errors. This is what a successful run looks like.",
+    ),
+
+    # step 5 — undo
+    "tutorial.step5_changes": _pair(
+        "Агент изменил 2 файла:\n• main.py — новая сцена\n• ui.py — кнопка меню",
+        "The agent changed 2 files:\n• main.py — a new scene\n• ui.py — a menu button",
+    ),
+    "tutorial.step5_undo": _pair("Отменить изменения", "Undo the changes"),
+    "tutorial.step5_ok": _pair(
+        "Изменения отменены — проект вернулся к снимку перед запуском агента.",
+        "The changes are undone — the project is back to the snapshot taken before the agent run.",
+    ),
+
+    # step 6 — export
+    "tutorial.step6_folder": _pair("Папка Windows", "Windows folder"),
+    "tutorial.step6_exe": _pair(".exe", ".exe"),
+    "tutorial.step6_android": _pair("Android", "Android"),
+    "tutorial.step6_export": _pair("Экспортировать", "Export"),
+    "tutorial.step6_start": _pair("Создать проект с ИИ", "Create an AI project"),
+    "tutorial.step6_ok": _pair(
+        "Готово: {target}. Проект можно запускать без установленного редактора.",
+        "Done: {target}. The project runs without the editor installed.",
+    ),
+
+    "tutorial.step1_short": _pair("Проект", "Project"),
+    "tutorial.step1_title": _pair("Создайте проект", "Create a project"),
+    "tutorial.step1_body": _pair(
+        "На стартовом экране выберите «Новый проект с ИИ» — движок соберёт готовую "
+        "основу и откроет её. Или начните с пустого проекта, если хотите полностью "
+        "ручной контроль. Недавние проекты всегда под рукой в том же окне.",
+        "On the start screen choose “New AI project” — the engine builds a ready "
+        "foundation and opens it. Or start from a blank project for full manual "
+        "control. Recent projects stay one click away in the same window.",
+    ),
+    "tutorial.step1_tip": _pair(
+        "Первый экран — это ещё и список недавних проектов: вернуться к работе можно в один клик.",
+        "The start screen doubles as your recent-projects list: one click to get back to work.",
+    ),
+    "tutorial.step2_short": _pair("ИИ-задача", "AI task"),
+    "tutorial.step2_title": _pair("Опишите задачу словами", "Describe the task in words"),
+    "tutorial.step2_body": _pair(
+        "Откройте раздел «ИИ-агент» и напишите, что нужно сделать: «добавь меню и "
+        "три уровня» или «сделай экран статистики». Агент сам составит план, "
+        "изменит файлы, нарисует ассеты и проверит запуск. Прогресс и вызовы "
+        "инструментов видны прямо в чате.",
+        "Open “AI agent” and say what you need: “add a menu and three levels” or "
+        "“build a statistics screen”. The agent plans the work, edits files, "
+        "draws assets and checks the launch. Progress and tool calls are visible "
+        "right in the chat.",
+    ),
+    "tutorial.step2_tip": _pair(
+        "Чем конкретнее задача, тем лучше результат. Можно писать на русском или английском.",
+        "The more specific the task, the better the result. Write in Russian or English.",
+    ),
+    "tutorial.step3_short": _pair("Разделы", "Workspaces"),
+    "tutorial.step3_title": _pair("Пять рабочих пространств", "Five workspaces"),
+    "tutorial.step3_body": _pair(
+        "«Обзор» показывает состояние и историю. «ИИ-агент» — чат с планом. "
+        "«Код» — полноценный редактор файлов. «Ассеты» — спрайты, фоны и звуки. "
+        "«Сцена» — визуальный холст для размещения объектов. Переключайтесь "
+        "горячими клавишами Ctrl+1…Ctrl+5.",
+        "“Overview” shows status and history. “AI agent” is the planning chat. "
+        "“Code” is a full file editor. “Assets” holds sprites, backgrounds and "
+        "sounds. “Scene” is a visual canvas for placing objects. Switch with "
+        "Ctrl+1…Ctrl+5.",
+    ),
+    "tutorial.step3_tip": _pair(
+        "Черновики в редакторе кода сохраняются автоматически перед каждым запуском агента.",
+        "Drafts in the code editor are saved automatically before every agent run.",
+    ),
+    "tutorial.step4_short": _pair("Запуск", "Run"),
+    "tutorial.step4_title": _pair("Запустите и проверьте", "Run and check"),
+    "tutorial.step4_body": _pair(
+        "Кнопка «Запустить» (Ctrl+R) открывает проект в отдельном окне, а вывод "
+        "появляется в консоли редактора. Агент сам вызывает проверку и пробный "
+        "запуск перед тем, как объявить работу готовой, — но вы всегда можете "
+        "запустить вручную и посмотреть результат своими глазами.",
+        "The “Run” button (Ctrl+R) opens the project in its own window and its "
+        "output appears in the editor console. The agent validates and test-runs "
+        "the project before declaring the work done — but you can always run it "
+        "manually and judge the result yourself.",
+    ),
+    "tutorial.step4_tip": _pair(
+        "В игре F11 переключает полный экран, Esc — пауза. В приложении работают мышь и касания.",
+        "In a game F11 toggles fullscreen and Esc pauses. In an app mouse and touch both work.",
+    ),
+    "tutorial.step5_short": _pair("Отмена", "Undo"),
+    "tutorial.step5_title": _pair("Верните любой шаг назад", "Undo any step"),
+    "tutorial.step5_body": _pair(
+        "Перед каждым запуском агента движок делает снимок проекта. В карточке "
+        "изменений есть кнопка «Отменить», а раздел «История версий» позволяет "
+        "вернуться к любой более ранней точке. Восстановление тоже отменяемо, "
+        "так что экспериментировать безопасно.",
+        "Before every agent run the engine takes a project snapshot. The changes "
+        "card has an Undo button, and “Version history” lets you return to any "
+        "earlier point. A restore is undoable too, so experimenting is safe.",
+    ),
+    "tutorial.step5_tip": _pair(
+        "Снимки хранятся в папке проекта, их можно открыть и скопировать без редактора.",
+        "Snapshots live inside the project folder and can be opened or copied without the editor.",
+    ),
+    "tutorial.step6_short": _pair("Экспорт", "Export"),
+    "tutorial.step6_title": _pair("Поделитесь результатом", "Share the result"),
+    "tutorial.step6_body": _pair(
+        "Раздел «Экспорт» собирает папку Windows, отдельный .exe или пакет для "
+        "Android. Игра и приложение запускаются без установленного редактора — "
+        "внутри проекта уже лежит движок. Обучение можно повторить в любой момент "
+        "через «Помощь → Быстрый старт» или кнопку «Обучение» на стартовом экране.",
+        "“Export” builds a Windows folder, a standalone .exe or an Android "
+        "package. Games and apps run without the editor installed — the engine "
+        "already ships inside the project. Replay this tutorial any time from "
+        "Help → Quick start or the Tutorial button on the start screen.",
+    ),
+    "tutorial.step6_tip": _pair(
+        "Перед экспортом полезно один раз пройти проект вручную — так видны мелочи, которых не видит проверка.",
+        "Before exporting, play through the project once by hand — you will spot details that validation cannot.",
     ),
 }

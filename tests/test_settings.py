@@ -25,10 +25,10 @@ class SettingsTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def test_defaults_use_openrouter_and_procedural(self) -> None:
+    def test_defaults_use_openrouter_and_external_images(self) -> None:
         self.assertEqual(DEFAULT_SETTINGS["version"], 2)
         self.assertEqual(DEFAULT_SETTINGS["active_provider"], "openrouter")
-        self.assertEqual(DEFAULT_SETTINGS["image"]["provider"], "procedural")
+        self.assertEqual(DEFAULT_SETTINGS["image"]["provider"], "openai")
         self.assertEqual(DEFAULT_SETTINGS["projects_dir"], "")
 
     def test_pollinations_settings_are_migrated(self) -> None:
@@ -51,9 +51,9 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.active_provider, "openrouter")
         self.assertNotIn("pollinations", settings.data["provider_overrides"])
         image = settings.image_config()
-        self.assertEqual(image["provider"], "procedural")
-        self.assertEqual(image["model"], "pixel")
-        self.assertEqual(image["base_url"], "")
+        self.assertEqual(image["provider"], "openai")
+        self.assertEqual(image["model"], "gpt-image-1")
+        self.assertEqual(image["base_url"], "https://api.openai.com/v1")
         self.assertEqual(settings.data["image"]["api_key"], "")
 
     def test_projects_dir_defaults_inside_install_root(self) -> None:
@@ -97,6 +97,31 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(len(settings.recent_projects()), 1)
         settings.remove_recent(project)
         self.assertEqual(settings.recent_projects(), [])
+
+    def test_auto_continue_errors_are_saved_and_sanitized(self) -> None:
+        settings = Settings(self.path)
+        self.assertEqual(settings.auto_continue_kinds(), [])
+        settings.set_auto_continue("server", True)
+        settings.set_auto_continue("timeout", True)
+        settings.set_auto_continue("not-a-kind", True)
+        settings.save()
+        self.assertEqual(settings.auto_continue_kinds(), ["server", "timeout"])
+        self.assertTrue(settings.is_auto_continue_enabled("server"))
+        self.assertFalse(settings.is_auto_continue_enabled("network"))
+
+        reloaded = Settings(self.path)
+        self.assertEqual(reloaded.auto_continue_kinds(), ["server", "timeout"])
+        reloaded.set_auto_continue("server", False)
+        self.assertEqual(reloaded.auto_continue_kinds(), ["timeout"])
+
+        reloaded.data.setdefault("agent", {})["auto_continue_errors"] = [
+            "server",
+            "unknown",
+            "timeout",
+        ]
+        reloaded.save()
+        again = Settings(self.path)
+        self.assertEqual(again.auto_continue_kinds(), ["server", "timeout"])
 
 
 if __name__ == "__main__":

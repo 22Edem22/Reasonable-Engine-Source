@@ -289,40 +289,70 @@ class Project:
             return str(p).replace("\\", "/")
 
     # -- files ------------------------------------------------------------
+    @staticmethod
+    def _iter_walk(root: Path, *, include_engine: bool = False):
+        """Yield ``(path, is_dir)`` without descending into ignored folders.
+
+        ``Path.rglob`` walks the whole tree first and filters afterwards, which
+        is very slow for projects with a vendored engine, ``build`` or a
+        virtualenv. Scanning with ``os.scandir`` lets us prune those folders
+        completely.
+        """
+        stack = [Path(root)]
+        while stack:
+            current = stack.pop()
+            try:
+                entries = list(os.scandir(current))
+            except OSError:
+                continue
+            for entry in entries:
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                    continue
+                if is_dir and (
+                    entry.name == "__pycache__"
+                    or (not include_engine and entry.name in IGNORED_DIRS)
+                ):
+                    continue
+                path = Path(entry.path)
+                yield path, is_dir
+                if is_dir:
+                    stack.append(path)
+
     def list_files(self, *, include_engine: bool = False, limit: int = 1200) -> list[str]:
         rows: list[str] = []
-        for path in self.root.rglob("*"):
+        for path, is_dir in self._iter_walk(self.root, include_engine=include_engine):
             if len(rows) >= limit:
                 break
+            if is_dir:
+                continue
             try:
                 parts = path.relative_to(self.root).parts
             except ValueError:
                 continue
-            if not include_engine and any(part in IGNORED_DIRS for part in parts):
-                continue
-            if path.is_file():
-                rows.append("/".join(parts))
+            rows.append("/".join(parts))
         rows.sort(key=str.lower)
         return rows
 
     def list_tree(self, *, include_engine: bool = False) -> list[dict[str, Any]]:
         """Flat list of folders and files for the file browser."""
         rows: list[dict[str, Any]] = []
-        for path in self.root.rglob("*"):
+        for path, is_dir in self._iter_walk(self.root, include_engine=include_engine):
             try:
                 parts = path.relative_to(self.root).parts
             except ValueError:
                 continue
-            if not include_engine and any(part in IGNORED_DIRS for part in parts):
-                continue
-            if any(part == "__pycache__" for part in parts):
-                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                stat = None
             rows.append(
                 {
                     "path": "/".join(parts),
-                    "is_dir": path.is_dir(),
-                    "size": path.stat().st_size if path.is_file() else 0,
-                    "mtime": path.stat().st_mtime,
+                    "is_dir": is_dir,
+                    "size": stat.st_size if (stat is not None and not is_dir) else 0,
+                    "mtime": stat.st_mtime if stat is not None else 0.0,
                 }
             )
         rows.sort(key=lambda item: (not item["is_dir"], item["path"].lower()))
@@ -365,9 +395,18 @@ class Project:
         env.setdefault("PYTHONIOENCODING", "utf-8")
         return env
 
-    def run_command(self) -> list[str]:
-        from .paths import project_launch_command
+    def run_command(self, *, splash_wrapper: bool = False) -> list[str]:
+        from .paths import project_launch_command, python_command
 
+        if splash_wrapper and (self.root / ENGINE_DIR_NAME / "reasonable").is_dir():
+            # The wrapper plays the intro before any project code, so even a
+            # rewritten main.py cannot skip the engine branding.
+            return [
+                *python_command(),
+                "-m",
+                "reasonable.runtime.launch",
+                str(self.entry),
+            ]
         return project_launch_command(self.entry, project_root=self.root)
 
     def launch(self) -> subprocess.Popen:
@@ -377,7 +416,7 @@ class Project:
         if sys.platform == "win32":
             creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         return subprocess.Popen(
-            self.run_command(),
+            self.run_command(splash_wrapper=True),
             cwd=str(self.root),
             env=self.run_env(),
             stdout=subprocess.PIPE,

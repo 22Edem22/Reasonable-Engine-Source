@@ -12,7 +12,16 @@ import os
 import sys
 import tempfile
 import traceback
+import warnings
 from pathlib import Path
+
+# pygame may pull in the deprecated pkg_resources module; keep that specific
+# harmless warning out of the user's console.
+warnings.filterwarnings(
+    "ignore",
+    message=r"pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
 
 
 def _self_test() -> int:

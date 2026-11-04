@@ -22,7 +22,7 @@ class AgentToolsTests(unittest.TestCase):
         (self.root / "progress").mkdir()
         (self.root / "main.py").write_text("print('ok')\n", encoding="utf-8")
         (self.root / "game.py").write_text("def update():\n    return 1\n", encoding="utf-8")
-        self.tools = AgentTools(self.project, image_config={"provider": "procedural"})
+        self.tools = AgentTools(self.project, image_config={})
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -130,20 +130,30 @@ class AgentToolsTests(unittest.TestCase):
         self.assertFalse(blocked["ok"])
         self.assertIn("validate_project", blocked["error"])
 
-    def test_sprite_generation_and_inspection(self) -> None:
-        generated = self.call(
-            "generate_sprite",
-            prompt="золотая звезда",
-            path="assets/sprites/star.png",
+    def test_draw_sprite_and_inspection(self) -> None:
+        drawn = self.call(
+            "draw_sprite",
+            path="assets/sprites/heart.png",
             size=96,
+            shapes=[
+                {"type": "ellipse", "center": [36, 40], "radius": [22, 22], "fill": "#E63946"},
+                {"type": "ellipse", "center": [64, 40], "radius": [22, 22], "fill": "#E63946"},
+                {"type": "polygon", "points": [[16, 44], [84, 44], [50, 88]], "fill": "#E63946"},
+            ],
         )
-        self.assertTrue(generated["ok"])
-        self.assertEqual(generated["provider"], "procedural")
-        self.assertTrue((self.root / "assets" / "sprites" / "star.png").is_file())
-        inspected = self.call("inspect_image", path="assets/sprites/star.png")
+        self.assertTrue(drawn["ok"])
+        self.assertEqual(drawn["provider"], "draw")
+        self.assertTrue((self.root / "assets" / "sprites" / "heart.png").is_file())
+        inspected = self.call("inspect_image", path="assets/sprites/heart.png")
         self.assertTrue(inspected["ok"])
         self.assertEqual(tuple(inspected["size"]), (96, 96))
         self.assertGreater(inspected["opaque_percent"], 5)
+
+    def test_generate_sprite_without_model_returns_an_honest_error(self) -> None:
+        result = self.call("generate_sprite", prompt="звезда", path="assets/sprites/star.png", size=64)
+        self.assertFalse(result["ok"])
+        self.assertIn("draw_sprite", result["error"])
+        self.assertFalse((self.root / "assets" / "sprites" / "star.png").exists())
 
     def test_sprite_must_live_in_assets(self) -> None:
         result = self.call("generate_sprite", prompt="звезда", path="star.png", size=64)

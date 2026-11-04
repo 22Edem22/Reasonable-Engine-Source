@@ -31,11 +31,18 @@ just wait a little longer; force-closing does not harm the project.
 
 **Is the internet required?**
 For cloud models (Anthropic, OpenAI, OpenRouter, DeepSeek…) — yes. Local models
-(Ollama, LM Studio) and procedural asset generation work offline.
+(Ollama, LM Studio) and agent-drawn sprites via `draw_sprite` work offline.
 
 **Where is my API key?**
 Only on your computer, in the Reasonable Engine settings. We never receive or
 store it.
+
+**Can I connect an OpenCode Go key?**
+Yes. Subscribe to Go in the OpenCode Console, create a Personal API key and choose
+**Settings → AI providers → OpenCode Go** in the editor. The Base URL is already
+filled in (`https://opencode.ai/inference/go/openai/v1`); paste the key, load the
+models and test the connection. The editor sends its own `User-Agent` and a stable
+`x-opencode-session`, so `MissingSessionID` does not occur.
 
 **The agent stopped, but the task isn't finished?**
 Write to it: "Continue". The agent works without a step limit; if it stopped, it
@@ -56,7 +63,7 @@ the editor UI on purpose.
 To the Desktop by default. The path can be changed with the "Change…" button.
 
 **Does a second "Reasonable Engine" window open from the exe?**
-It shouldn't. Make sure you export with release RE-1.01 or newer — the extra
+It shouldn't. Make sure you export with release RE-2.01 or newer — the extra
 window is excluded there.
 
 **Who can I hand my built games to?**
@@ -65,9 +72,9 @@ as a link to the official download page (see LICENSE.txt).
 
 ## Versions
 
-**What does RE-1.01 mean?**
-Generation 1, release 01. Releases go in order (RE-1.02, RE-1.03…); versions
-like "RE-2.00" don't exist — a new generation starts with RE-2.01. Details: the
+**What does RE-2.01 mean?**
+Generation 2, release 01. Releases go in order (RE-2.02, RE-2.03…); versions
+like "RE-2.00" don't exist — a new generation starts with RE-3.01. Details: the
 "Versioning System" section in the [README](../README.md#-versioning-system).
 
 **Where can I see my version?**

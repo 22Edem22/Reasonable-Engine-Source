@@ -18,7 +18,7 @@ except Exception:  # exported builds may run without the bundled core package
 from reasonable.core.paths import resource_path
 from .input import Input
 from .scene import Scene
-from .splash import play_splash
+from .splash import play_splash, splash_played
 from .utils import BG, color, draw_gradient, get_font, render_text, with_alpha
 
 
@@ -55,7 +55,10 @@ class App:
         if resizable is not None:
             flags = (flags | pygame.RESIZABLE) if resizable else (flags & ~pygame.RESIZABLE)
         self.flags = flags
-        self.splash = splash
+        # The splash is part of the engine's identity. ``splash=False`` is
+        # accepted only for source compatibility and intentionally ignored:
+        # project code must not be able to remove the intro.
+        self.splash = True
         self.splash_skippable = splash_skippable
         self.splash_accent = splash_accent
         self.icon = icon
@@ -152,7 +155,7 @@ class App:
         # The intro always plays: there is no user-facing way to skip it.
         # Only the engine developer (personal key) or headless test runs can
         # bypass it, and both are handled inside play_splash.
-        if self.splash:
+        if not splash_played():
             if not play_splash(self.size, accent=self.splash_accent, skippable=self.splash_skippable):
                 pygame.quit()
                 return
@@ -373,16 +376,22 @@ class UIApp(App):
     def on_draw(self, surface: pygame.Surface) -> None:
         size = surface.get_size()
         if self._background_surface is None or self._background_size != size:
+            # The gradient and the ambient glows never change while the window
+            # keeps its size, so bake them into one surface once instead of
+            # rebuilding two large glows on every frame.
             background = pygame.Surface(size)
+            try:
+                background = background.convert()
+            except pygame.error:
+                pass
             draw_gradient(background, background.get_rect(), self.theme.bg, self.theme.bg_bottom)
+            from .utils import draw_glow
+
+            draw_glow(background, (size[0] * 0.16, size[1] * 0.08), int(min(size) * 0.44), self.theme.accent, 18, 5)
+            draw_glow(background, (size[0] * 0.9, size[1] * 0.92), int(min(size) * 0.5), self.theme.accent_2, 12, 5)
             self._background_surface = background
             self._background_size = size
         surface.blit(self._background_surface, (0, 0))
-        # soft ambient light blobs
-        from .utils import draw_glow
-
-        draw_glow(surface, (size[0] * 0.16, size[1] * 0.08), int(min(size) * 0.44), self.theme.accent, 18, 5)
-        draw_glow(surface, (size[0] * 0.9, size[1] * 0.92), int(min(size) * 0.5), self.theme.accent_2, 12, 5)
         if self.root is not None:
             self.root.draw(surface)
         if self.debug:

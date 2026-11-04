@@ -16,13 +16,16 @@ import ssl
 import threading
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 import pygame
 
-from .utils import color, draw_icon, get_font, wrap_text
+from reasonable.version import VERSION_LABEL
+
+from .utils import color, draw_icon, ellipsis, get_font, wrap_text
 from .ui import (
     Button,
     Entry,
@@ -137,6 +140,10 @@ class AIConfig:
 
 
 class AIClient:
+    # Stable for the whole app session so OpenCode Go can reuse its routing
+    # and prompt cache between messages.
+    _OPENCODE_SESSION = f"reasonable-app-{uuid.uuid4().hex[:24]}"
+
     def __init__(self, config: AIConfig, *, timeout: float = 90.0) -> None:
         self.config = config
         self.timeout = timeout
@@ -160,8 +167,10 @@ class AIClient:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "ReasonableEngine-Runtime/0.1",
+            "User-Agent": f"ReasonableEngine/{VERSION_LABEL}",
         }
+        if "opencode.ai" in self.config.base_url.lower():
+            headers["x-opencode-session"] = self._OPENCODE_SESSION
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         request = urllib.request.Request(self._url(), data=data, headers=headers, method="POST")
@@ -297,7 +306,14 @@ class AIChatPanel(Panel):
         )
         spacer = Widget(expand_x=True)
         header.add(spacer)
-        self.status_label = Label(self.config.model, size=11, color_value=self.theme.faint)
+        self.status_label = Label(
+            self._short_model(self.config.model),
+            size=11,
+            color_value=self.theme.faint,
+            wrap=False,
+            width=112,
+            align="right",
+        )
         header.add(self.status_label)
         self.settings_button = IconButton("settings", self._open_setup, size=36, variant="ghost")
         header.add(self.settings_button)
@@ -363,8 +379,13 @@ class AIChatPanel(Panel):
             self.status_label.text = _tr("thinking…", "думает…")
             self.status_label.color_value = color(self.theme.accent_2)
         else:
-            self.status_label.text = self.config.model
+            self.status_label.text = self._short_model(self.config.model)
             self.status_label.color_value = color(self.theme.faint)
+
+    @staticmethod
+    def _short_model(model: str) -> str:
+        """Keep long provider ids from pushing the header buttons off-screen."""
+        return ellipsis(str(model or ""), get_font(11), 108)
 
     def _open_setup(self) -> None:
         self.setup_url.set_value(self.config.base_url)

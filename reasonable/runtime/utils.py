@@ -295,20 +295,14 @@ def gradient_surface(size: tuple[int, int], top_color, bottom_color) -> pygame.S
     return result
 
 
-def draw_glow(surface: pygame.Surface, center, radius: int, glow_color, alpha: int = 60, layers: int = 5) -> None:
-    """Draw a soft radial glow.
-
-    The falloff is rendered at low resolution and smoothly upscaled. This avoids
-    the visible concentric banding of naive layered circles and is much faster.
-    """
-    radius = int(radius)
-    if radius <= 1 or alpha <= 0:
-        return
-    cx, cy = int(center[0]), int(center[1])
+@functools.lru_cache(maxsize=64)
+def _glow_surface(radius: int, rgba: tuple, alpha: int, layers: int) -> pygame.Surface:
+    """Build one scaled glow image; repeated frames reuse it."""
     scale = 6
     small_radius = max(2, radius // scale)
     small = pygame.Surface((small_radius * 2, small_radius * 2), pygame.SRCALPHA)
     steps = max(24, layers * 8)
+    base = pygame.Color(*rgba)
     for step in range(steps, 0, -1):
         r = small_radius * step / steps
         # outer rings are faint, inner rings approach the requested alpha
@@ -316,9 +310,29 @@ def draw_glow(surface: pygame.Surface, center, radius: int, glow_color, alpha: i
         a = int(alpha * strength)
         if a <= 0 or r <= 0:
             continue
-        pygame.draw.circle(small, with_alpha(glow_color, a), (small_radius, small_radius), max(1, int(r)))
-    big = pygame.transform.smoothscale(small, (radius * 2, radius * 2))
-    surface.blit(big, (cx - radius, cy - radius))
+        pygame.draw.circle(
+            small,
+            pygame.Color(base.r, base.g, base.b, a),
+            (small_radius, small_radius),
+            max(1, int(r)),
+        )
+    return pygame.transform.smoothscale(small, (radius * 2, radius * 2))
+
+
+def draw_glow(surface: pygame.Surface, center, radius: int, glow_color, alpha: int = 60, layers: int = 5) -> None:
+    """Draw a soft radial glow.
+
+    The falloff is rendered at low resolution and smoothly upscaled. The
+    finished image is cached per (radius, colour, alpha), so a static backdrop
+    glow costs one blit instead of a full rasterisation every frame.
+    """
+    radius = int(radius)
+    if radius <= 1 or alpha <= 0:
+        return
+    cx, cy = int(center[0]), int(center[1])
+    c = color(glow_color)
+    glow = _glow_surface(radius, (c.r, c.g, c.b, c.a), int(alpha), int(layers))
+    surface.blit(glow, (cx - radius, cy - radius))
 
 
 def draw_shadow_text(
@@ -352,7 +366,12 @@ def draw_shadow_text(
     return rect
 
 
-def wrap_text(font: pygame.font.Font, text: str, max_width: int) -> list[str]:
+@functools.lru_cache(maxsize=512)
+def _wrapped_lines(
+    font: pygame.font.Font,
+    text: str,
+    max_width: int,
+) -> tuple[str, ...]:
     lines: list[str] = []
     for paragraph in str(text).split("\n"):
         if not paragraph:
@@ -368,7 +387,29 @@ def wrap_text(font: pygame.font.Font, text: str, max_width: int) -> list[str]:
                 lines.append(current)
                 current = word
         lines.append(current)
-    return lines
+    return tuple(lines)
+
+
+def wrap_text(font: pygame.font.Font, text: str, max_width: int) -> list[str]:
+    # Wrapping runs during both layout and drawing, so cache the result:
+    # unchanged labels are re-measured every frame.
+    return list(_wrapped_lines(font, str(text), max(1, int(max_width))))
+
+
+@functools.lru_cache(maxsize=2048)
+def cached_text(
+    text: str,
+    size: int,
+    text_color: tuple,
+    bold: bool = False,
+    display: bool = False,
+) -> pygame.Surface:
+    """Render text once and reuse the surface on later frames.
+
+    Text is static in the vast majority of widgets; re-rendering it inside the
+    draw loop was the single most expensive operation of the pygame UI.
+    """
+    return get_font(size, bold, display).render(str(text), True, text_color)
 
 
 def draw_wrapped_text(
@@ -385,13 +426,14 @@ def draw_wrapped_text(
 ) -> int:
     rect = pygame.Rect(rect)
     font = get_font(size, bold, display)
-    lines = wrap_text(font, text, rect.width)
+    lines = _wrapped_lines(font, str(text), max(1, rect.width))
+    color_key = tuple(color(text_color))
     y = rect.y
     step = int(size * line_height)
     for line in lines:
         if y + step > rect.bottom + step:
             break
-        image = font.render(line, True, color(text_color))
+        image = cached_text(line, size, color_key, bold, display)
         if align == "center":
             x = rect.centerx - image.get_width() // 2
         elif align == "right":

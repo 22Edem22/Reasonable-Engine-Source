@@ -15,6 +15,7 @@ Example:
 
 from __future__ import annotations
 
+import functools
 import math
 import os
 import time
@@ -30,6 +31,7 @@ except Exception:  # exported builds may run without the bundled core package
         return en
 
 from .utils import (
+    cached_text,
     color,
     draw_gradient,
     draw_icon,
@@ -607,7 +609,13 @@ class Label(Widget):
         if not self.visible:
             return
         if not self.wrap:
-            image = self._font.render(self.text, True, self.color_value)
+            image = cached_text(
+                self.text,
+                self.size,
+                tuple(self.color_value),
+                self.bold,
+                self.display,
+            )
             if self.align == "center":
                 x = self.rect.centerx - image.get_width() // 2
             elif self.align == "right":
@@ -801,6 +809,21 @@ class ImageWidget(Widget):
 # ----------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=64)
+def _button_shadow(width: int, height: int, rgba: tuple, radius: int) -> pygame.Surface:
+    """Cached accent halo behind a primary button."""
+    shadow = pygame.Surface((width + 24, height + 32), pygame.SRCALPHA)
+    tint = (rgba[0], rgba[1], rgba[2], 5)
+    for i in range(5, 0, -1):
+        pygame.draw.rect(
+            shadow,
+            tint,
+            pygame.Rect(12 - i * 4, 12 + i * 2, width + i * 8, height + i * 18),
+            border_radius=radius + i * 3,
+        )
+    return shadow
+
+
 class Button(Widget):
     def __init__(
         self,
@@ -914,18 +937,21 @@ class Button(Widget):
             fill = with_alpha(fill, 120)
             text_color = with_alpha(text_color, 120)
         if self.variant == "primary":
-            shadow = pygame.Surface((rect.width + 24, rect.height + 32), pygame.SRCALPHA)
-            for i in range(5, 0, -1):
-                pygame.draw.rect(
-                    shadow,
-                    with_alpha(self.theme.accent, 5),
-                    pygame.Rect(12 - i * 4, 12 + i * 2, rect.width + i * 8, rect.height + i * 18),
-                    border_radius=self.theme.radius_sm + i * 3,
-                )
+            accent = color(self.theme.accent)
+            shadow = _button_shadow(
+                rect.width,
+                rect.height,
+                (accent.r, accent.g, accent.b, accent.a),
+                self.theme.radius_sm,
+            )
             surface.blit(shadow, (rect.x - 12, rect.y - 8))
         draw_rounded_rect(surface, rect, fill, self.theme.radius_sm, border=border)
-        inner_x = rect.x
-        text_image = self._font.render(self.text, True, color(text_color))
+        text_image = cached_text(
+            self.text,
+            14 if self.text else 16,
+            tuple(color(text_color)),
+            True,
+        )
         content_width = text_image.get_width()
         if self.icon:
             icon_size = 18

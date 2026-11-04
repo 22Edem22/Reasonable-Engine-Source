@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +55,7 @@ from . import theme
 from .assets import AssetsPage
 from .chat import ChatPanel
 from .code import CodePage
+from .scene_editor import SceneEditorPage
 from .convert_dialog import ConvertDialog
 from .export_dialog import ExportDialog
 from .external import ExternalAgentPanel
@@ -81,10 +84,24 @@ def _tl(key: str, fallback: str, **values) -> str:
     return fallback if text == key or not text else text
 
 
-def project_icon_pixmap(path: Path | None, size: int = 52) -> QPixmap:
+def project_icon_pixmap(path: Path | None, size: int = 52, name: str = "") -> QPixmap:
     pixmap = QPixmap(str(path)) if path and path.exists() else QPixmap()
     if pixmap.isNull():
-        return theme.logo_pixmap(size)
+        result = QPixmap(size, size)
+        result.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(result)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#2E3137"))
+        painter.drawRoundedRect(0, 0, size, size, 4, 4)
+        letter = (name or "R").strip()[:1].upper() or "R"
+        font = theme.ui_font(10, 700)
+        font.setPixelSize(max(11, int(size * 0.52)))
+        painter.setFont(font)
+        painter.setPen(QColor("#D97757"))
+        painter.drawText(result.rect(), Qt.AlignmentFlag.AlignCenter, letter)
+        painter.end()
+        return result
     pixmap = pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
     result = QPixmap(size, size)
     result.fill(Qt.GlobalColor.transparent)
@@ -103,6 +120,30 @@ def project_icon_pixmap(path: Path | None, size: int = 52) -> QPixmap:
 def _shorten(text: str, limit: int = 90) -> str:
     text = " ".join(str(text).split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _kill_process_tree(process: QProcess) -> None:
+    """Stop the project and anything it spawned (launchers, Python workers)."""
+    try:
+        pid = int(process.processId() or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    if os.name == "nt" and pid:
+        try:
+            # Fire and forget: waiting for taskkill used to freeze the editor
+            # for several seconds while the process tree shut down.
+            subprocess.Popen(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception:
+            pass
+    try:
+        process.kill()
+    except RuntimeError:
+        pass
 
 
 class ProjectPage(QWidget):
@@ -126,6 +167,7 @@ class ProjectPage(QWidget):
         self._process_output = ""
         self._last_run_code: int | None = None
         self._last_run_error = ""
+        self._stop_requested = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -139,7 +181,7 @@ class ProjectPage(QWidget):
         content = QWidget()
         content.setObjectName("root")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(18, 14, 18, 14)
+        content_layout.setContentsMargins(14, 14, 14, 14)
         content_layout.setSpacing(10)
 
         self.stack = QStackedWidget()
@@ -172,6 +214,14 @@ class ProjectPage(QWidget):
         self.assets_page.open_file_requested.connect(self._open_in_code)
         self.stack.addWidget(self.assets_page)
 
+        # The scene editor is a workspace of its own and is opened from the
+        # sidebar button under the regular sections. It lives at the end of the
+        # stack so section indexes stay stable.
+        self.scene_page = SceneEditorPage(project, self)
+        self.scene_page.status_message.connect(self.status_message)
+        self.scene_page.run_requested.connect(self.run_project)
+        self.stack.addWidget(self.scene_page)
+
         content_layout.addWidget(self.stack, 1)
         content_layout.addWidget(self._build_console())
         body.addWidget(content, 1)
@@ -197,30 +247,31 @@ class ProjectPage(QWidget):
     def _build_header(self) -> QFrame:
         frame = QFrame()
         frame.setObjectName("topbar")
-        frame.setFixedHeight(78)
+        frame.setFixedHeight(56)
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(16, 10, 18, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(10, 8, 12, 8)
+        layout.setSpacing(8)
 
-        back = QPushButton("←")
+        back = QPushButton()
         back.setObjectName("ghost")
-        back.setFixedSize(34, 34)
+        back.setFixedSize(28, 28)
+        back.setIcon(theme.icon("back", 16))
         back.setToolTip(t("projectpage.back_tooltip"))
         back.clicked.connect(self._back)
         layout.addWidget(back)
 
         self.project_icon = QLabel()
-        self.project_icon.setFixedSize(48, 48)
-        self.project_icon.setPixmap(project_icon_pixmap(self.project.icon_path, 48))
+        self.project_icon.setFixedSize(30, 30)
+        self.project_icon.setPixmap(project_icon_pixmap(self.project.icon_path, 30, self.project.name))
         layout.addWidget(self.project_icon)
 
         titles = QVBoxLayout()
-        titles.setSpacing(1)
+        titles.setSpacing(0)
         top = QHBoxLayout()
-        top.setSpacing(7)
+        top.setSpacing(6)
         self.name_label = QLabel(_shorten(self.project.name, 32))
         self.name_label.setObjectName("title")
-        self.name_label.setFont(theme.display_font(13, 700))
+        self.name_label.setFont(theme.ui_font(10, 600))
         self.name_label.setMinimumWidth(100)
         self.name_label.setMaximumWidth(360)
         top.addWidget(self.name_label)
@@ -233,33 +284,36 @@ class ProjectPage(QWidget):
         top.addStretch(1)
         titles.addLayout(top)
         self.goal_label_header = ElidedLabel(self.project.goal or t("projectpage.goal_missing"))
-        self.goal_label_header.setObjectName("muted")
-        self.goal_label_header.setFont(theme.ui_font(9))
-        self.goal_label_header.setFixedHeight(self.goal_label_header.fontMetrics().height() + 8)
+        self.goal_label_header.setObjectName("dim")
+        self.goal_label_header.setFont(theme.ui_font(8))
+        self.goal_label_header.setFixedHeight(self.goal_label_header.fontMetrics().height() + 2)
         titles.addWidget(self.goal_label_header)
         layout.addLayout(titles, 1)
 
         self.header_model = QLabel("")
-        self.header_model.setObjectName("muted")
+        self.header_model.setObjectName("dim")
         self.header_model.setFont(theme.ui_font(8))
-        self.header_model.setMaximumWidth(230)
+        self.header_model.setMaximumWidth(250)
         self.header_model.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.header_model)
 
         self.header_status = Badge(t("projectpage.status_idle"), "default")
         layout.addWidget(self.header_status)
 
-        export = QPushButton("⤴  " + t("projectpage.export_btn"))
-        export.setObjectName("teal")
-        export.setMinimumWidth(120)
-        export.setStyleSheet("font-size: 13px; font-weight: 700; padding: 8px 14px;")
+        export = QPushButton(t("projectpage.export_btn"))
+        export.setObjectName("ghost")
+        export.setIcon(theme.icon("export", 15))
+        export.setIconSize(QSize(15, 15))
         export.setToolTip(t("projectpage.export_tooltip"))
         export.clicked.connect(self._open_export)
-        layout.insertWidget(1, export)
+        layout.addWidget(export)
 
-        self.run_button = QPushButton("▶  " + t("projectpage.run_btn"))
+        self.run_button = QPushButton(t("projectpage.run_btn"))
         self.run_button.setObjectName("primary")
-        self.run_button.setMinimumWidth(132)
+        self.run_button.setIcon(theme.icon("play", 14, "#1B110D"))
+        self.run_button.setIconSize(QSize(14, 14))
+        self.run_button.setMinimumHeight(28)
+        self.run_button.setMinimumWidth(108)
         self.run_button.clicked.connect(self._run_clicked)
         layout.addWidget(self.run_button)
         return frame
@@ -270,87 +324,112 @@ class ProjectPage(QWidget):
     def _build_sidebar(self) -> QWidget:
         frame = QWidget()
         frame.setObjectName("sidebar")
-        frame.setFixedWidth(224)
+        frame.setFixedWidth(192)
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(14, 16, 14, 16)
-        layout.setSpacing(5)
+        layout.setContentsMargins(8, 10, 8, 10)
+        layout.setSpacing(1)
 
         label = QLabel(t("projectpage.sections_label"))
         label.setObjectName("dim")
-        label.setFont(theme.ui_font(8, 700))
+        label.setFont(theme.section_font())
         layout.addWidget(label)
-        layout.addSpacing(2)
+        layout.addSpacing(3)
 
         self.nav_buttons: list[QPushButton] = []
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
-        for index, text in enumerate(
-            (
-                t("projectpage.nav_overview"),
-                t("projectpage.nav_agent"),
-                t("projectpage.nav_code"),
-                t("projectpage.nav_assets"),
+        nav_icons = ("grid", "sparkles", "code", "image")
+        for index, (text, icon_name) in enumerate(
+            zip(
+                (
+                    t("projectpage.nav_overview"),
+                    t("projectpage.nav_agent"),
+                    t("projectpage.nav_code"),
+                    t("projectpage.nav_assets"),
+                ),
+                nav_icons,
             )
         ):
             button = QPushButton(text)
             button.setObjectName("nav")
             button.setCheckable(True)
+            button.setIcon(theme.icon(icon_name, 14))
+            button.setIconSize(QSize(14, 14))
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.clicked.connect(lambda checked=False, i=index: self._show_page(i))
             self.nav_group.addButton(button)
             self.nav_buttons.append(button)
             layout.addWidget(button)
         self.nav_buttons[0].setChecked(True)
-        layout.addSpacing(12)
+
+        # Scene editor: a separate workspace, so it is not part of the four
+        # section buttons above (their order is part of the editor contract).
+        self.scene_button = QPushButton(t("projectpage.nav_scene"))
+        self.scene_button.setObjectName("nav")
+        self.scene_button.setCheckable(True)
+        self.scene_button.setIcon(theme.icon("layers", 14))
+        self.scene_button.setIconSize(QSize(14, 14))
+        self.scene_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.scene_button.clicked.connect(self._show_scene)
+        self.nav_group.addButton(self.scene_button)
+        layout.addWidget(self.scene_button)
+        layout.addSpacing(14)
 
         label = QLabel(t("projectpage.project_label"))
         label.setObjectName("dim")
-        label.setFont(theme.ui_font(8, 700))
+        label.setFont(theme.section_font())
         layout.addWidget(label)
-        self.side_meta = muted("", size=9)
+        self.side_meta = muted("", size=8)
         self.side_meta.setWordWrap(True)
         layout.addWidget(self.side_meta)
-        layout.addSpacing(6)
-        edit = QPushButton(t("projectpage.project_settings_btn"))
-        edit.setObjectName("ghost")
-        edit.clicked.connect(self._open_project_settings)
-        layout.addWidget(edit)
-        self.history_sidebar = QPushButton(t("projectpage.history_btn"))
-        self.history_sidebar.setObjectName("ghost")
-        self.history_sidebar.setToolTip(t("projectpage.history_tooltip"))
-        self.history_sidebar.clicked.connect(self.open_history)
-        layout.addWidget(self.history_sidebar)
-        folder = QPushButton(t("projectpage.open_folder_btn"))
-        folder.setObjectName("ghost")
-        folder.clicked.connect(self._open_folder)
-        layout.addWidget(folder)
-        convert = QPushButton(t("projectpage.convert_btn"))
-        convert.setObjectName("ghost")
-        convert.setToolTip(t("projectpage.convert_tooltip"))
-        convert.clicked.connect(self._open_convert)
-        self.convert_button = convert
-        layout.addWidget(convert)
+        layout.addSpacing(4)
+
+        for text, icon_name, slot, tooltip in (
+            (t("projectpage.project_settings_btn"), "settings", self._open_project_settings, ""),
+            (t("projectpage.history_btn"), "history", self.open_history, t("projectpage.history_tooltip")),
+            (t("projectpage.open_folder_btn"), "folder", self._open_folder, ""),
+            (t("projectpage.convert_btn"), "import", self._open_convert, t("projectpage.convert_tooltip")),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("ghost")
+            button.setIcon(theme.icon(icon_name, 14))
+            button.setIconSize(QSize(14, 14))
+            button.setStyleSheet("text-align: left; padding: 4px 7px;")
+            if tooltip:
+                button.setToolTip(tooltip)
+            button.clicked.connect(slot)
+            if icon_name == "import":
+                self.convert_button = button
+            elif icon_name == "history":
+                self.history_sidebar = button
+            layout.addWidget(button)
+
         delete = QPushButton(t("projectpage.delete_btn"))
         delete.setObjectName("danger")
+        delete.setIcon(theme.icon("trash", 14, "#C47F86"))
+        delete.setIconSize(QSize(14, 14))
+        delete.setStyleSheet("text-align: left; padding: 4px 7px;")
         delete.setToolTip(t("projectpage.delete_tooltip"))
         delete.clicked.connect(self.delete_requested)
         layout.addWidget(delete)
         layout.addStretch(1)
 
-        ai = Card(soft=True, padding=12)
-        ai.layout().addWidget(title_label(t("projectpage.ai_project_title"), 10))
+        ai = Card(soft=True, padding=9)
+        ai.layout().setSpacing(6)
+        ai.layout().addWidget(title_label(t("projectpage.ai_project_title"), 9))
         self.side_ai = muted("", size=8)
         self.side_ai.setWordWrap(True)
         ai.layout().addWidget(self.side_ai)
         guide = QPushButton(t("projectpage.guide_btn"))
         guide.setObjectName("teal")
+        guide.setStyleSheet("padding: 4px 8px;")
         guide.clicked.connect(self._open_guide)
         ai.layout().addWidget(guide)
         layout.addWidget(ai)
 
         version = QLabel(f"Reasonable Engine · {self.project.manifest.get('engine_version') or ''}")
         version.setObjectName("dim")
-        version.setFont(theme.ui_font(8))
+        version.setFont(theme.ui_font(7))
         layout.addWidget(version)
         return frame
 
@@ -358,12 +437,12 @@ class ProjectPage(QWidget):
     # Overview
     # ------------------------------------------------------------------
     def _build_run_result_card(self) -> Card:
-        card = Card(padding=16)
+        card = Card(padding=12)
         top = QHBoxLayout()
-        top.setSpacing(9)
+        top.setSpacing(8)
         label = QLabel(t("projectpage.run_result_label"))
         label.setObjectName("title")
-        label.setFont(theme.display_font(12, 700))
+        label.setFont(theme.ui_font(10, 600))
         top.addWidget(label)
         self.run_result_badge = Badge(t("projectpage.badge_not_run"), "default")
         top.addWidget(self.run_result_badge)
@@ -373,8 +452,8 @@ class ProjectPage(QWidget):
         card.layout().addLayout(top)
 
         self.run_result_title = QLabel(t("projectpage.run_result_idle_title"))
-        self.run_result_title.setFont(theme.ui_font(10, 700))
-        self.run_result_title.setStyleSheet("color: #E7E9EC;")
+        self.run_result_title.setFont(theme.ui_font(9, 600))
+        self.run_result_title.setStyleSheet("color: #D7DAE0;")
         card.layout().addWidget(self.run_result_title)
         self.run_result_detail = muted(
             t("projectpage.run_result_idle_detail"),
@@ -385,27 +464,30 @@ class ProjectPage(QWidget):
         self.run_result_error = QLabel("")
         self.run_result_error.setWordWrap(True)
         self.run_result_error.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.run_result_error.setFont(theme.ui_font(9))
+        self.run_result_error.setFont(theme.ui_font(8))
         self.run_result_error.setStyleSheet(
-            "background: #20191B; color: #D7B0B4; border: 1px solid #4A3034; "
-            "border-radius: 7px; padding: 8px;"
+            "background: #2A1E20; color: #D7B0B4; border: 1px solid #4A3034; "
+            "border-radius: 3px; padding: 6px;"
         )
         self.run_result_error.hide()
         card.layout().addWidget(self.run_result_error)
 
         actions = QHBoxLayout()
         actions.setSpacing(7)
-        self.run_again_button = QPushButton("▶  " + t("projectpage.run_again_btn"))
+        self.run_again_button = QPushButton(t("projectpage.run_again_btn"))
         self.run_again_button.setObjectName("primary")
+        self.run_again_button.setIcon(theme.icon("play", 13, "#1B110D"))
         self.run_again_button.clicked.connect(self.run_project)
         actions.addWidget(self.run_again_button)
-        self.fix_ai_button = QPushButton("✎  " + t("projectpage.fix_ai_btn"))
+        self.fix_ai_button = QPushButton(t("projectpage.fix_ai_btn"))
         self.fix_ai_button.setObjectName("teal")
+        self.fix_ai_button.setIcon(theme.icon("sparkles", 14))
         self.fix_ai_button.setToolTip(t("projectpage.fix_ai_tooltip"))
         self.fix_ai_button.clicked.connect(self._fix_failed_run_with_ai)
         actions.addWidget(self.fix_ai_button)
-        self.rollback_button = QPushButton("↶  " + t("projectpage.rollback_btn"))
+        self.rollback_button = QPushButton(t("projectpage.rollback_btn"))
         self.rollback_button.setObjectName("ghost")
+        self.rollback_button.setIcon(theme.icon("undo", 14))
         self.rollback_button.setToolTip(t("projectpage.rollback_tooltip"))
         self.rollback_button.clicked.connect(self._rollback_last_run)
         actions.addWidget(self.rollback_button)
@@ -445,9 +527,16 @@ class ProjectPage(QWidget):
         self.run_result_when.setText(when)
         self.fix_ai_button.setVisible(state == "failure")
         self.rollback_button.setVisible(state == "failure" and self._has_restorable_snapshot())
+        running = state == "running"
         self.run_again_button.setText(
-            "■  " + t("projectpage.stop_btn") if state == "running" else "▶  " + t("projectpage.run_again_btn")
+            t("projectpage.stop_btn") if running else t("projectpage.run_again_btn")
         )
+        self.run_again_button.setIcon(
+            theme.icon("stop" if running else "play", 13, "#C47F86" if running else "#1B110D")
+        )
+        self.run_again_button.setObjectName("danger" if running else "primary")
+        self.run_again_button.style().unpolish(self.run_again_button)
+        self.run_again_button.style().polish(self.run_again_button)
         if state == "running":
             try:
                 self.run_again_button.clicked.disconnect()
@@ -474,18 +563,18 @@ class ProjectPage(QWidget):
         host = QWidget()
         host.setObjectName("root")
         layout = QVBoxLayout(host)
-        layout.setContentsMargins(0, 0, 10, 4)
-        layout.setSpacing(13)
+        layout.setContentsMargins(0, 0, 8, 4)
+        layout.setSpacing(10)
         scroll.setWidget(host)
 
         self.run_result_card = self._build_run_result_card()
         layout.addWidget(self.run_result_card)
 
-        hero = Card(padding=20)
+        hero = Card(padding=14)
         top = QHBoxLayout()
         title = QLabel(t("projectpage.progress_title"))
         title.setObjectName("title")
-        title.setFont(theme.display_font(14, 700))
+        title.setFont(theme.ui_font(10, 600))
         top.addWidget(title)
         top.addStretch(1)
         self.overview_status = Badge(t("projectpage.status_idle"), "default")
@@ -493,15 +582,15 @@ class ProjectPage(QWidget):
         hero.layout().addLayout(top)
 
         progress_row = QHBoxLayout()
-        progress_row.setSpacing(18)
+        progress_row.setSpacing(16)
         left = QVBoxLayout()
-        left.setSpacing(4)
+        left.setSpacing(3)
         self.percent_label = QLabel("0%")
-        self.percent_label.setFont(theme.display_font(34, 700))
-        self.percent_label.setStyleSheet("color: #FFFFFF; padding-bottom: 8px;")
+        self.percent_label.setFont(theme.display_font(22, 700))
+        self.percent_label.setStyleSheet("color: #F0F2F5;")
         left.addWidget(self.percent_label)
         self.stage_label = QLabel(t("progress.idle_stage"))
-        self.stage_label.setFont(theme.ui_font(11, 700))
+        self.stage_label.setFont(theme.ui_font(9, 600))
         self.stage_label.setStyleSheet("color: #B7BDC6;")
         left.addWidget(self.stage_label)
         self.message_label = muted("", size=9)
@@ -535,6 +624,10 @@ class ProjectPage(QWidget):
         sprite_button = QPushButton(t("projectpage.sprites_btn"))
         sprite_button.clicked.connect(lambda: self._show_page(3))
         action_row.addWidget(sprite_button)
+        scene_button = QPushButton(t("projectpage.scene_btn"))
+        scene_button.setToolTip(t("projectpage.scene_btn_tip"))
+        scene_button.clicked.connect(self._show_scene)
+        action_row.addWidget(scene_button)
         action_row.addStretch(1)
         self.last_activity_label = muted("", size=9)
         action_row.addWidget(self.last_activity_label)
@@ -692,6 +785,11 @@ class ProjectPage(QWidget):
             self.code_page.refresh_tree()
         if index == 3:
             self.assets_page.refresh()
+
+    def _show_scene(self) -> None:
+        self.stack.setCurrentWidget(self.scene_page)
+        self.scene_button.setChecked(True)
+        self.scene_page.viewport.setFocus()
 
     def _back(self) -> None:
         if self.process is not None and self.process.state() != QProcess.ProcessState.NotRunning:
@@ -941,7 +1039,7 @@ class ProjectPage(QWidget):
         self.type_badge.setText(t("projectpage.badge_game") if self.project.project_type == "game" else t("projectpage.badge_app"))
         self.platform_badge.setText("WINDOWS" if self.project.platform == "windows" else "ANDROID")
         self.mode_badge.setText(t("projectpage.badge_mode_builtin") if self.project.mode == "builtin" else t("projectpage.badge_mode_external"))
-        self.project_icon.setPixmap(project_icon_pixmap(self.project.icon_path, 48))
+        self.project_icon.setPixmap(project_icon_pixmap(self.project.icon_path, 30, self.project.name))
         levels = ", ".join(_tl(f"project.ui_{level}", UI_LEVEL_LABELS.get(level, level)) for level in self.project.ui_levels)
         orientation = (
             t("projectpage.orientation_portrait")
@@ -949,11 +1047,9 @@ class ProjectPage(QWidget):
             else t("projectpage.orientation_landscape")
         )
         self.side_meta.setText(
-            f"{'Windows' if self.project.platform == 'windows' else 'Android'} · "
-            f"{orientation}\n"
+            f"{'Windows' if self.project.platform == 'windows' else 'Android'} · {orientation}\n"
             f"{t('projectpage.meta_ui_line', levels=levels)}\n"
-            f"{'Python/pygame' if self.project.project_type == 'game' else 'Python/pygame UI'} · "
-            + t("projectpage.meta_window_note")
+            f"{'Python/pygame' if self.project.project_type == 'game' else 'Python/pygame UI'}"
         )
         self._update_header_model()
         self._update_side_ai()
@@ -973,7 +1069,7 @@ class ProjectPage(QWidget):
         text = self._model_text()
         config = self.settings.get_provider_config()
         full = str(config.get("name") or config.get("id") or t("projectpage.fallback_ai"))
-        self.header_model.setText(_shorten(text, 46))
+        self.header_model.setText(_shorten(text, 36))
         self.header_model.setToolTip(
             t(
                 "projectpage.active_model_tooltip",
@@ -1096,6 +1192,7 @@ class ProjectPage(QWidget):
             return
         if not self.code_page.save_all():
             return
+        self.scene_page.flush()
         if not self.project.entry.exists():
             QMessageBox.warning(self, t("projectpage.no_entry_title"), t("projectpage.no_entry_text", name=self.project.entry.name))
             return
@@ -1106,6 +1203,7 @@ class ProjectPage(QWidget):
         self._process_output = ""
         self._last_run_code = None
         self._last_run_error = ""
+        self._stop_requested = False
         self.console.clear()
         self.console_frame.show()
         self.console_title.setText(t("projectpage.console_title_splash"))
@@ -1117,7 +1215,7 @@ class ProjectPage(QWidget):
         self.process.readyReadStandardOutput.connect(self._read_process_output)
         self.process.finished.connect(self._process_finished)
         self.process.errorOccurred.connect(self._process_error)
-        command = self.project.run_command()
+        command = self.project.run_command(splash_wrapper=True)
         self.process.start(command[0], command[1:])
         if not self.process.waitForStarted(5000):
             self._append_console(t("projectpage.start_failed_console"))
@@ -1130,10 +1228,7 @@ class ProjectPage(QWidget):
             )
             return
         self._append_console(t("projectpage.console_project", name=self.project.name, folder=self.project.root))
-        self.run_button.setText("■  " + t("projectpage.stop_btn"))
-        self.run_button.setObjectName("danger")
-        self.run_button.style().unpolish(self.run_button)
-        self.run_button.style().polish(self.run_button)
+        self._update_run_button(True)
         self._set_running_result()
         self.status_message.emit(t("projectpage.run_started_status"))
         self._show_page(0)
@@ -1153,6 +1248,11 @@ class ProjectPage(QWidget):
         bar.setValue(bar.maximum())
 
     def _process_finished(self, code: int, _status) -> None:
+        if self._stop_requested:
+            self._stop_requested = False
+            self.process = None
+            self._apply_stopped_state()
+            return
         self._append_console(t("projectpage.exit_console", code=code))
         self._last_run_code = int(code)
         state, title, detail, error = self._analyze_run(int(code), self._process_output)
@@ -1164,10 +1264,7 @@ class ProjectPage(QWidget):
             error,
             when=datetime.now().strftime("%H:%M"),
         )
-        self.run_button.setText("▶  " + t("projectpage.run_btn"))
-        self.run_button.setObjectName("primary")
-        self.run_button.style().unpolish(self.run_button)
-        self.run_button.style().polish(self.run_button)
+        self._update_run_button(False)
         self.console_stop.setEnabled(False)
         self.console_title.setText(
             t("projectpage.console_finished") if code == 0 else t("projectpage.console_finished_error", code=code)
@@ -1189,6 +1286,8 @@ class ProjectPage(QWidget):
         self._tick_refresh(force=True)
 
     def _process_error(self, error) -> None:
+        if self._stop_requested:
+            return
         self._append_console(t("projectpage.process_error_console", error=error))
         self._last_run_error = str(error)
         if self._last_run_code is None:
@@ -1200,21 +1299,54 @@ class ProjectPage(QWidget):
                 when=datetime.now().strftime("%H:%M"),
             )
 
-    def stop_project(self) -> None:
-        if self.process is not None and self.process.state() != QProcess.ProcessState.NotRunning:
-            self._append_console(t("projectpage.stopping_console"))
-            self.process.kill()
-        self.run_button.setText("▶  " + t("projectpage.run_btn"))
-        self.run_button.setObjectName("primary")
+    def _update_run_button(self, running: bool) -> None:
+        self.run_button.setText(
+            t("projectpage.stop_btn") if running else t("projectpage.run_btn")
+        )
+        self.run_button.setObjectName("danger" if running else "primary")
+        self.run_button.setIcon(
+            theme.icon(
+                "stop" if running else "play",
+                14,
+                "#C47F86" if running else "#1B110D",
+            )
+        )
         self.run_button.style().unpolish(self.run_button)
         self.run_button.style().polish(self.run_button)
-        if self._last_run_code is None:
-            self._set_run_result(
-                "idle",
-                t("projectpage.stopped_title"),
-                t("projectpage.stopped_detail"),
-                when=datetime.now().strftime("%H:%M"),
-            )
+
+    def _apply_stopped_state(self) -> None:
+        self._update_run_button(False)
+        self.console_stop.setEnabled(False)
+        self.console_title.setText(t("projectpage.console_stopped"))
+        self._set_run_result(
+            "idle",
+            t("projectpage.stopped_title"),
+            t("projectpage.stopped_detail"),
+            when=datetime.now().strftime("%H:%M"),
+        )
+        self.status_message.emit(t("projectpage.stopped_status"))
+
+    def stop_project(self) -> None:
+        process = self.process
+        if process is None or process.state() == QProcess.ProcessState.NotRunning:
+            self.process = None
+            self._apply_stopped_state()
+            return
+        self._stop_requested = True
+        self._append_console(t("projectpage.stopping_console"))
+        # QProcess.kill() only terminates the direct child. Launchers such as
+        # Play.bat or a player executable may own the real game process, so on
+        # Windows the whole tree is terminated by PID.
+        _kill_process_tree(process)
+        if not process.waitForFinished(800):
+            process.terminate()
+            if not process.waitForFinished(600):
+                process.kill()
+                process.waitForFinished(600)
+        if self._stop_requested:
+            self._stop_requested = False
+            self.process = None
+            self._apply_stopped_state()
 
     def _hide_console(self) -> None:
         self.console_frame.hide()
@@ -1228,7 +1360,10 @@ class ProjectPage(QWidget):
         self._refresh_state(state, force)
         self._refresh_tasks(state, force)
         self._refresh_events(force)
-        self._refresh_files(force)
+        # Walking the project tree is the most expensive refresh step, so the
+        # recent-files list is refreshed every ~6 s instead of every tick.
+        if force or self._tick % 4 == 0:
+            self._refresh_files(force)
         if force or self._tick % 6 == 0:
             self._refresh_history_card(force=force)
 
@@ -1262,7 +1397,7 @@ class ProjectPage(QWidget):
         done = sum(1 for task in tasks if task.get("status") == "done")
         self.tasks_stat.set_value(f"{done}/{len(tasks)}", t("projectpage.stat_tasks_value"))
         self.last_activity_label.setText(t("projectpage.activity", time=human_time(state.get("last_event_at"))))
-        if force or self._file_count == 0 or self._tick % 6 == 0:
+        if force or self._file_count == 0 or self._tick % 8 == 0:
             self._file_count = len(self.project.list_files(limit=2000))
         self.files_stat.set_value(str(self._file_count), t("projectpage.stat_files_value"))
         self.goal_label.setText(self.project.goal or t("projectpage.goal_missing_long"))
@@ -1396,6 +1531,7 @@ class ProjectPage(QWidget):
     # ------------------------------------------------------------------
     def shutdown(self) -> None:
         self.timer.stop()
+        self.scene_page.shutdown()
         if self.chat is not None:
             self.chat.shutdown()
         if self.external is not None:

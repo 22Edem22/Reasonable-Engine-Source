@@ -48,18 +48,60 @@ class AgentWorker(QThread):
     failed = Signal(str)
     cancelled = Signal()
 
-    def __init__(self, project: Project, settings, message: str | None = None) -> None:
+    def __init__(
+        self,
+        project: Project,
+        settings,
+        message: str | None = None,
+        *,
+        chat_id: str | None = None,
+        hidden_message: bool = False,
+        analysis: bool = False,
+        reply_language: str | None = None,
+        persist_messages: bool = True,
+    ) -> None:
         super().__init__()
         self.project = project
         self.settings = settings
         self.message = message
         self.cancel_flag = threading.Event()
-        self.agent = Agent(
-            project,
-            settings,
-            on_event=self._on_event,
-            cancel=self.cancel_flag,
+        agent_settings = settings.data.get("agent", {}) or {}
+        try:
+            parallel_workers = int(agent_settings.get("parallel_workers", 3) or 3)
+        except (TypeError, ValueError):
+            parallel_workers = 3
+        use_parallel = (
+            not analysis
+            and bool(agent_settings.get("parallel", True))
+            and parallel_workers > 1
         )
+        if use_parallel:
+            from reasonable.ai.orchestrator import Orchestrator
+
+            self.agent = Orchestrator(
+                project,
+                settings,
+                message=message,
+                on_event=self._on_event,
+                cancel=self.cancel_flag,
+                chat_id=chat_id,
+                hidden_message=hidden_message,
+                analysis=analysis,
+                reply_language=reply_language,
+                persist_messages=persist_messages,
+            )
+        else:
+            self.agent = Agent(
+                project,
+                settings,
+                on_event=self._on_event,
+                cancel=self.cancel_flag,
+                chat_id=chat_id,
+                hidden_message=hidden_message,
+                analysis=analysis,
+                reply_language=reply_language,
+                persist_messages=persist_messages,
+            )
 
     def _on_event(self, event: AgentEvent) -> None:
         self.event.emit(event)
@@ -120,6 +162,7 @@ class SpriteWorker(QThread):
         background: bool = False,
         width: int = 1280,
         height: int = 720,
+        context: str = "",
     ) -> None:
         super().__init__()
         self.prompt = prompt
@@ -131,6 +174,7 @@ class SpriteWorker(QThread):
         self.background = background
         self.width = width
         self.height = height
+        self.context = context
 
     def run(self) -> None:  # noqa: D401
         try:
@@ -145,6 +189,7 @@ class SpriteWorker(QThread):
                     height=self.height,
                     image_config=self.image_config,
                     seed=self.seed,
+                    context=self.context,
                 )
             else:
                 result = generate_sprite(
@@ -154,6 +199,7 @@ class SpriteWorker(QThread):
                     size=self.size,
                     image_config=self.image_config,
                     seed=self.seed,
+                    context=self.context,
                 )
             self.done.emit(result)
         except Exception as exc:  # pragma: no cover - GUI path

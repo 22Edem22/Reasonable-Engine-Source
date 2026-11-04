@@ -15,18 +15,35 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from reasonable.core.agent_errors import http_error_kind
 from reasonable.core.i18n import tr as _tr
+from reasonable.version import VERSION_LABEL
+
+# A process-wide fallback session id for OpenCode Go. The editor passes the
+# stable chat id instead (see Agent), so prompt caching survives restarts; this
+# value only covers one-off test/model-list requests.
+_OPENCODE_FALLBACK_SESSION = f"reasonable-{uuid.uuid4().hex[:24]}"
+_USER_AGENT = f"ReasonableEngine/{VERSION_LABEL}"
 
 
 class AIError(RuntimeError):
-    def __init__(self, message: str, *, status: int | None = None, detail: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        detail: str = "",
+        kind: str = "",
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.status = status
         self.detail = detail
+        self.kind = kind
 
 
 @dataclass
@@ -85,7 +102,7 @@ def parse_tool_arguments(raw: str) -> dict[str, Any]:
 def _join_url(base: str, suffix: str) -> str:
     base = (base or "").strip().rstrip("/")
     if not base:
-        raise AIError(_tr("The Base URL is not set.", "Не задан Base URL."))
+        raise AIError(_tr("The Base URL is not set.", "Не задан Base URL."), kind="config")
     if base.endswith(suffix):
         return base
     return base + suffix
@@ -130,6 +147,7 @@ class HTTPTransport:
                         raise AIError(
                             _tr("The server returned non-JSON. The endpoint may be wrong.", "Сервер вернул не JSON. Возможно, endpoint указан неверно."),
                             detail=raw[:800],
+                            kind="bad_response",
                         )
             except urllib.error.HTTPError as error:
                 body = error.read().decode("utf-8", errors="replace")
@@ -137,6 +155,7 @@ class HTTPTransport:
                     self._friendly_http_error(error.code, body),
                     status=error.code,
                     detail=body[:2000],
+                    kind=http_error_kind(error.code),
                 )
                 if error.code in {429, 500, 502, 503, 504} and attempt < self.retries:
                     time.sleep(2.2 + attempt * 2.5)
@@ -144,7 +163,9 @@ class HTTPTransport:
                 raise last_error
             except urllib.error.URLError as error:
                 reason = error.reason
+                kind = "network"
                 if isinstance(reason, (TimeoutError, socket.timeout)):
+                    kind = "timeout"
                     message = _tr("Connection to the AI server timed out. Try again or pick another model.", "Таймаут соединения с ИИ-сервером. Попробуйте ещё раз или другую модель.")
                 elif isinstance(reason, ConnectionRefusedError) or "refused" in str(reason).lower():
                     message = _tr(
@@ -155,7 +176,7 @@ class HTTPTransport:
                     )
                 else:
                     message = _tr("Network error: {reason}", "Сетевая ошибка: {reason}", reason=reason)
-                last_error = AIError(message, detail=str(reason))
+                last_error = AIError(message, detail=str(reason), kind=kind)
                 if attempt < self.retries:
                     time.sleep(1.5)
                     continue
@@ -165,19 +186,20 @@ class HTTPTransport:
                     _tr(
                         "The AI server did not respond in time. Free models are sometimes overloaded — try again later.",
                         "ИИ-сервер не ответил вовремя. Бесплатные модели иногда перегружены — попробуйте позже.",
-                    )
+                    ),
+                    kind="timeout",
                 )
                 if attempt < self.retries:
                     time.sleep(1.5)
                     continue
                 raise last_error
             except OSError as error:
-                last_error = AIError(_tr("Network error: {error}", "Ошибка сети: {error}", error=error), detail=str(error))
+                last_error = AIError(_tr("Network error: {error}", "Ошибка сети: {error}", error=error), detail=str(error), kind="network")
                 if attempt < self.retries:
                     time.sleep(1.5)
                     continue
                 raise last_error
-        raise last_error or AIError(_tr("Unknown network error", "Неизвестная ошибка сети"))
+        raise last_error or AIError(_tr("Unknown network error", "Неизвестная ошибка сети"), kind="network")
 
     @staticmethod
     def _friendly_http_error(code: int, body: str) -> str:
@@ -217,7 +239,16 @@ class AIClient:
         self.base_url = str(config.get("base_url", "")).strip()
         self.api_key = str(config.get("api_key", "")).strip()
         self.model = str(config.get("model", "")).strip()
+        self.models_url = str(config.get("models_url", "")).strip()
         self.headers = dict(config.get("headers") or {})
+        # Console/Go asks clients to identify themselves and to send a stable
+        # conversation id. Both headers are harmless for every other provider.
+        self.headers.setdefault("User-Agent", _USER_AGENT)
+        if (
+            "opencode.ai" in self.base_url.lower()
+            or str(config.get("id") or "") == "opencode"
+        ):
+            self.headers.setdefault("x-opencode-session", _OPENCODE_FALLBACK_SESSION)
         self.timeout = timeout
         self.retries = retries
         self.http = HTTPTransport(timeout=timeout, retries=retries)
@@ -244,6 +275,8 @@ class AIClient:
         return base + "/chat/completions"
 
     def _models_url(self) -> str:
+        if self.models_url:
+            return self.models_url
         base = self.base_url.rstrip("/")
         if base.endswith("/chat/completions"):
             base = base[: -len("/chat/completions")]
@@ -261,9 +294,9 @@ class AIClient:
         max_tokens: int = 8192,
     ) -> ChatResult:
         if not self.base_url:
-            raise AIError(_tr("The provider Base URL is not set.", "Не задан Base URL провайдера."))
+            raise AIError(_tr("The provider Base URL is not set.", "Не задан Base URL провайдера."), kind="config")
         if not self.model:
-            raise AIError(_tr("No AI model is selected.", "Не выбрана модель ИИ."))
+            raise AIError(_tr("No AI model is selected.", "Не выбрана модель ИИ."), kind="config")
         if self.kind == "anthropic":
             return self._chat_anthropic(messages, tools, temperature, max_tokens)
         return self._chat_openai(messages, tools, temperature, max_tokens)
@@ -319,7 +352,7 @@ class AIClient:
             message = _tr("The provider returned an empty response.", "Провайдер вернул пустой ответ.")
             if data.get("error"):
                 message += f" {data['error']}"
-            raise AIError(message, detail=json.dumps(data, ensure_ascii=False)[:1500])
+            raise AIError(message, detail=json.dumps(data, ensure_ascii=False)[:1500], kind="bad_response")
         message = choices[0].get("message") or {}
         content = message.get("content") or ""
         if isinstance(content, list):

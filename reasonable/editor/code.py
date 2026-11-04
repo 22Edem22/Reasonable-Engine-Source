@@ -394,6 +394,7 @@ class CodePage(QWidget):
             "{}",
             t("code.empty_title"),
             t("code.empty_text"),
+            pixmap=theme.icon_pixmap("code", 44, theme.COLORS["dim"]),
         )
         self.stack.addWidget(self.placeholder)
         self.editor = CodeEditor()

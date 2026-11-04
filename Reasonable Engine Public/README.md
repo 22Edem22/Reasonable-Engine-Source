@@ -2,7 +2,7 @@
   <img src="assets/brand/logo_512.png" width="120" alt="Reasonable Engine">
 </p>
 
-<h1 align="center">Reasonable Engine 1</h1>
+<h1 align="center">Reasonable Engine 2</h1>
 
 <p align="center">
   <b>The reasonable engine for bold ideas.</b><br>
@@ -32,7 +32,7 @@
 ## 📥 Download
 
 The current build is always here: **[Releases](../../releases/latest)** — download
-`ReasonableEngine-Setup-RE-1.01.exe`, run it, and get to work. Installation is simple:
+`ReasonableEngine-Setup-RE-2.01.exe`, run it, and get to work. Installation is simple:
 the engine places the editor, a portable Python, and the runtime itself; there is
 nothing extra to configure. Your projects are stored in the `Projects` folder inside
 the installation and are not removed on update.
@@ -52,10 +52,25 @@ the installation and are not removed on update.
   milestone.
 - No step limit: the agent works until there is a result, not until "sorry, the
   steps have run out".
-- Conversation history is kept per project — come back a week later and continue
-  right where you left off.
+- Conversation history is kept per project together with the agent's answers —
+  come back a week later and see the whole conversation, not only your own
+  messages.
 - Live progress: the task plan, completion percentage, and event feed update in
   real time.
+- **Independent task check**: before the final answer a separate pass compares
+  the user's exact request with the code, validation and run result. If anything
+  is missing, the agent keeps working instead of declaring success.
+- **Parallel development**: a master agent plans and controls while code and
+  asset specialists work simultaneously in disjoint files. The master then
+  verifies the launch, audits the result and dispatches fixes.
+- **UI language = agent language**: Russian or English chosen in settings is used
+  for plans, progress and replies even when the task is written in another
+  language.
+- **Interactive first-launch tutorial**: six hands-on steps ask you to create a
+  project, give the agent a task, visit the workspaces, run it, undo changes and
+  choose an export. The next step unlocks only after the action. Replay it from
+  Help → Quick start, the settings dialog, or the Tutorial button on the start
+  screen.
 
 ### Interface levels
 When creating a project, pick one or more levels — the project receives only the
@@ -67,9 +82,36 @@ tools and templates it needs, with nothing extra:
 | **Standard** | Apps and game menus: panels, lists, scrolling, tabs | Ready-made engine widgets |
 | **Advanced** | Games and rich graphics: scenes, camera, particles, animations | Custom renderer on pygame |
 
+### Real examples, not empty stubs
+- **Game**: a title menu, a how-to-play screen, enemy waves, a combo multiplier,
+  an invulnerable dash, four power-ups, procedural sound, a saved high score and a
+  results screen. Controls work with mouse, keyboard and an on-screen joystick.
+  Its starter scene opens in the editor, and markers there define where the
+  player, stars and slimes spawn.
+- **App**: a genuine planner with priorities, tags, search, sorting, weekly
+  statistics, a day streak, undo-delete and a context-aware AI assistant. Data
+  lives in a plain `data.json` next to the project.
+- Both examples run the moment the project is created and are a working base:
+  keep building on them yourself or hand them to the agent as a starting point.
+
 ### Assets without a designer
-Generate sprites, backgrounds, and the project icon from a text description —
-procedurally offline or through your own image model.
+The agent draws any sprite itself — from a pixel grid or vector primitives chosen
+for that object — or uses your own image model when one is configured. There is
+no generic "default character" template.
+
+### Scene editor
+- **Place objects with the mouse**: a grid canvas with snapping, rectangles,
+  circles, text, panels and images from assets; drag out a shape, resize it by
+  handles and zoom with the wheel.
+- **Multiple scenes**: tabs, creating an empty scene, a level, a menu or an app
+  screen, duplicating, renaming, deleting, and size/background/grid settings.
+  Apps immediately get a ready screen layout.
+- **Inspector right beside it**: position, size, rotation, layer, colour and
+  visibility for every object — no hand-editing JSON.
+- **The scene goes straight into the game**: the saved `scenes/main.json` is
+  loaded by the `add_scene_objects` call, so the layout from the editor reaches
+  the running project. In the starter game markers define where the player, stars
+  and slimes appear.
 
 ### Export
 - **Windows folder** — a self-contained folder with `Play.bat` and the engine built in.
@@ -82,7 +124,9 @@ procedurally offline or through your own image model.
 ### Splash screen
 Every product created in Reasonable Engine opens with the signature minimalist
 splash (like Unity or Godot): a dark screen, the logo, a second and a half. It is
-part of the engine and cannot be disabled.
+part of the engine and cannot be disabled: `splash=False` is ignored, and the
+editor/player show it before project code runs. The splash displays the current
+generation — **Reasonable Engine 2**.
 
 ## 🖼 Screenshots
 
@@ -100,21 +144,21 @@ part of the engine and cannot be disabled.
 
 Reasonable Engine uses **two-level** numbering:
 
-- **Generation** — the engine's global version: *Reasonable Engine 1* (short for
-  **RE 1**). It changes only when the engine undergoes a global shift: a new
+- **Generation** — the engine's global version: *Reasonable Engine 2* (short for
+  **RE 2**). It changes only when the engine undergoes a global shift: a new
   architecture, a new project format, backward-incompatible changes.
-- **Release** — a specific build within a generation: **RE-1.01**, **RE-1.02**,
-  **RE-1.03**…
+- **Release** — a specific build within a generation: **RE-2.01**, **RE-2.02**,
+  **RE-2.03**…
 
 Rules:
 
 1. Releases within a generation are numbered **starting with .01**: the first
-   release of a generation is RE-1.01, then RE-1.02, and so on. A version like
+   release of a generation is RE-2.01, then RE-2.02, and so on. A version like
    "RE-2.00" **does not exist**.
-2. Numbers go in order and never skip: after RE-1.09 comes RE-1.10, and after
-   RE-1.99 comes RE-1.100.
-3. When moving to a new generation, the count starts over: Reasonable Engine 2
-   begins with RE-2.01, then RE-2.02…RE-2.12, and so on.
+2. Numbers go in order and never skip: after RE-2.09 comes RE-2.10, and after
+   RE-2.99 comes RE-2.100.
+3. When moving to a new generation, the count starts over: Reasonable Engine 3
+   begins with RE-3.01, then RE-3.02…RE-3.12, and so on.
 4. A generation never "rolls back": Reasonable Engine 2 cannot ship an RE-1.xx
    release, and RE 1 cannot ship an RE-2.xx release.
 5. The current release is shown in the header of [CHANGELOG.md](CHANGELOG.md) and
@@ -127,7 +171,7 @@ Rules:
 - ~700 MB of disk space for the installation + room for projects
 - A GPU with OpenGL 2.1 support (any from the last 15 years)
 - The internet is only needed for cloud AI providers and downloading the installer;
-  procedural assets and local models work offline
+  agent-drawn sprites and local models work offline
 
 ## 📚 Documentation
 

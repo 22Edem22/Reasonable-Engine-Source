@@ -184,11 +184,7 @@ class GenerateImageDialog(QDialog):
         return box
 
     def _provider_changed(self) -> None:
-        provider = self.provider_combo.currentData()
-        if provider == "procedural":
-            self.provider_note.setText(t("assets.note_procedural"))
-        else:
-            self.provider_note.setText(t("assets.note_openai"))
+        self.provider_note.setText(t("assets.note_openai"))
 
     def _generate(self) -> None:
         prompt = self.prompt.toPlainText().strip()
@@ -205,11 +201,7 @@ class GenerateImageDialog(QDialog):
         target.parent.mkdir(parents=True, exist_ok=True)
 
         config = self.settings.image_config()
-        provider = self.provider_combo.currentData()
-        config["provider"] = provider
-        if provider == "procedural":
-            config["base_url"] = ""
-            config["api_key"] = ""
+        config["provider"] = self.provider_combo.currentData()
         self.generate_button.setEnabled(False)
         self.progress.show()
         self.status.setText(t("assets.status_generating"))
@@ -223,6 +215,7 @@ class GenerateImageDialog(QDialog):
             background=self.background,
             width=int((self.project.window or {}).get("width", 1280)),
             height=int((self.project.window or {}).get("height", 720)),
+            context=self.project.goal or self.project.name,
         )
         self.worker.stage.connect(self.status.setText)
         self.worker.done.connect(self._done)

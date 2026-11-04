@@ -7,6 +7,7 @@ CLI (for example ``re validate``) and by tests.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -147,7 +148,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "generate_sprite",
-        "Generate a sprite (one object, transparent background) and save it into assets/.",
+        "Ask the configured external image model for a sprite (one object, transparent background). "
+        "Requires an image model with an /images/generations endpoint. Without one it fails honestly; "
+        "use draw_sprite instead of retrying.",
         {
             "prompt": {"type": "string", "description": "What to draw, in English or Russian"},
             "path": {"type": "string", "description": "For example assets/sprites/player.png"},
@@ -155,6 +158,59 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "size": {"type": "integer", "default": 256, "minimum": 64, "maximum": 1024},
         },
         ["prompt", "path"],
+    ),
+    _schema(
+        "draw_sprite",
+        "Draw any sprite yourself from a description and save it as a PNG under assets/. "
+        "Use this when no image model is configured or when you need a specific object the model "
+        "would miss. There are no subject templates: you decide every shape and color. "
+        "Coordinates use a 0..100 space (x grows right, y grows down), independent of output size. "
+        "Keep one palette, one outline color and one level of detail across all assets in the project. "
+        "Pixel mode: pass rows of characters in `pixels` and a character-to-color `palette`; "
+        "characters '.', '_' and space are transparent. Shape mode: pass a list of primitives in "
+        "`shapes`; each item has `type` (ellipse, circle, rect, rounded_rect, polygon, polyline, "
+        "line, arc), geometry, `fill`, optional `outline`/`outline_width` and `opacity`. "
+        "`fill` can be a color string or a gradient object {type: linear|radial, from, to, angle, center, radius, stops}. "
+        "Shapes are drawn in list order, later items on top. Call inspect_image afterwards and fix mistakes.",
+        {
+            "path": {"type": "string", "description": "For example assets/sprites/heart.png"},
+            "mode": {"type": "string", "enum": ["shapes", "pixels"], "description": "Inferred from pixels/shapes when omitted"},
+            "size": {"type": "integer", "default": 256, "minimum": 16, "maximum": 1024},
+            "pixels": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Pixel mode rows of equal length, e.g. ['..XX..', '.XOOX.', '..XX..']",
+            },
+            "palette": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "description": "Pixel mode: one character per color, e.g. {'X': '#3a2418', 'O': '#ff6b4a'}",
+            },
+            "shapes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["ellipse", "circle", "rect", "rounded_rect", "polygon", "polyline", "line", "arc"]},
+                        "center": {"type": "array", "items": {"type": "number"}, "description": "[x, y] in 0..100"},
+                        "radius": {"type": ["number", "array"], "description": "Number or [rx, ry] in 0..100"},
+                        "box": {"type": "array", "items": {"type": "number"}, "description": "[x0, y0, x1, y1] in 0..100"},
+                        "points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+                        "start": {"type": "number", "description": "Line/arc start angle in degrees"},
+                        "end": {"type": "number", "description": "Arc end angle in degrees"},
+                        "width": {"type": "number", "description": "Line or arc width in 0..100 units"},
+                        "fill": {"type": ["string", "object"], "description": "Color string or gradient object"},
+                        "outline": {"type": "string"},
+                        "outline_width": {"type": "number"},
+                        "opacity": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                    },
+                    "required": ["type"],
+                },
+            },
+            "background": {"type": "string", "description": "Optional solid background color; default transparent"},
+            "trim": {"type": "boolean", "default": True, "description": "Trim empty margins and center the subject"},
+        },
+        ["path"],
     ),
     _schema(
         "generate_background",
@@ -217,11 +273,37 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
 ]
 
+# The "Improve project" chat only needs to inspect the project. Keeping a
+# separate schema list means the model cannot accidentally edit files or
+# start a run while it is preparing suggestions for the user.
+ANALYSIS_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "list_files",
+        "read_file",
+        "search_text",
+        "validate_project",
+        "inspect_image",
+        "get_progress",
+    }
+)
+ANALYSIS_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    schema for schema in TOOL_SCHEMAS if schema.get("name") in ANALYSIS_TOOL_NAMES
+]
+
 
 class AgentTools:
-    def __init__(self, project: Project, *, image_config: dict | None = None) -> None:
+    def __init__(
+        self,
+        project: Project,
+        *,
+        image_config: dict | None = None,
+        write_scope: tuple[str, ...] | None = None,
+    ) -> None:
         self.project = project
         self.image_config = image_config or {}
+        # Specialist agents work on disjoint files. The scope is enforced for
+        # every mutating tool; reads still see the whole project.
+        self.write_scope = tuple(write_scope or ()) or None
         # Work evidence used to decide whether ``finish`` is allowed. Installing
         # a library or reading files does not count as completing the task.
         self.files_changed = 0
@@ -283,7 +365,7 @@ class AgentTools:
         }
 
     # -- helpers ----------------------------------------------------------
-    def _path(self, relative: str, *, allow_protected: bool = True) -> Path:
+    def _path(self, relative: str, *, allow_protected: bool = True, write: bool = False) -> Path:
         if not str(relative).strip():
             raise ToolError(_t("Empty path.", "Пустой путь."))
         path = self.project.ensure_inside(relative)
@@ -293,6 +375,28 @@ class AgentTools:
         rel = "/".join(parts)
         if not allow_protected and rel in PROTECTED:
             raise ToolError(_t("Protected file: {rel}", "Файл защищён: {rel}", rel=rel))
+        if write and self.write_scope is not None:
+            allowed = False
+            for scope in self.write_scope:
+                scope = str(scope).strip().strip("/")
+                if not scope:
+                    continue
+                if (
+                    rel == scope
+                    or rel.startswith(scope + "/")
+                    or ("*" in scope or "?" in scope or "[" in scope)
+                    and fnmatch.fnmatch(rel, scope)
+                ):
+                    allowed = True
+                    break
+            if not allowed:
+                raise ToolError(
+                    _t(
+                        "This specialist may only change: {scope}",
+                        "Этот специалист может менять только: {scope}",
+                        scope=", ".join(self.write_scope),
+                    )
+                )
         return path
 
     def _relative(self, path: Path) -> str:
@@ -408,7 +512,7 @@ class AgentTools:
     def tool_write_file(self, path: str, content: str) -> str:
         if len(content.encode("utf-8")) > MAX_WRITE_BYTES:
             raise ToolError(_t("File too large. Split it into several files.", "Слишком большой файл. Разделите его на несколько."))
-        file_path = self._path(path)
+        file_path = self._path(path, write=True)
         if file_path.suffix.lower() == ".json":
             try:
                 json.loads(content)
@@ -426,7 +530,7 @@ class AgentTools:
     def tool_edit_file(self, path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
         if not old_text:
             raise ToolError(_t("old_text must not be empty.", "old_text не может быть пустым."))
-        file_path = self._path(path)
+        file_path = self._path(path, write=True)
         if not file_path.is_file():
             raise ToolError(_t("File not found: {path}", "Файл не найден: {path}", path=path))
         text = file_path.read_text(encoding="utf-8")
@@ -448,7 +552,7 @@ class AgentTools:
         )
 
     def tool_delete_path(self, path: str, recursive: bool = False) -> str:
-        file_path = self._path(path, allow_protected=False)
+        file_path = self._path(path, allow_protected=False, write=True)
         rel = self._relative(file_path)
         if rel in {"assets", "progress", "_engine"}:
             raise ToolError(_t("This folder is protected.", "Эта папка защищена."))
@@ -518,7 +622,7 @@ class AgentTools:
         env["RE_FRAMES"] = str(max(1, min(600, int(frames))))
         timeout = max(10, min(240, int(timeout)))
         started = time.perf_counter()
-        command = self.project.run_command()
+        command = self.project.run_command(splash_wrapper=True)
         self.run_attempts += 1
         try:
             result = subprocess.run(
@@ -566,7 +670,7 @@ class AgentTools:
     def tool_generate_sprite(self, prompt: str, path: str, style: str = "flat", size: int = 256) -> str:
         from reasonable.ai.sprites import generate_sprite
 
-        target = self._path(path)
+        target = self._path(path, write=True)
         assets = self.project.root / "assets"
         if not is_relative_to(target, assets):
             raise ToolError(_t("Save sprites only under assets/.", "Спрайты сохраняйте только в assets/."))
@@ -576,14 +680,43 @@ class AgentTools:
             style=style,
             size=size,
             image_config=self.image_config,
-            allow_fallback=True,
+            context=self.project.goal or self.project.name,
         )
-        if result.get("fallback"):
-            record_event(self.project.root, "asset", _t("Sprite created offline: {path}", "Спрайт создан офлайн: {path}", path=self._relative(target)))
-        else:
-            record_event(self.project.root, "asset", _t("Sprite generated: {path}", "Спрайт сгенерирован: {path}", path=self._relative(target)))
+        record_event(self.project.root, "asset", _t("Sprite generated: {path}", "Спрайт сгенерирован: {path}", path=self._relative(target)))
         self.files_changed += 1
         self._record_change(target, "generate", kind="sprite", prompt=prompt)
+        return self._ok(**result)
+
+    def tool_draw_sprite(
+        self,
+        path: str,
+        mode: str = "",
+        size: int = 256,
+        pixels: list[str] | None = None,
+        palette: dict[str, Any] | None = None,
+        shapes: list[dict[str, Any]] | None = None,
+        background: str | None = None,
+        trim: bool = True,
+    ) -> str:
+        from reasonable.ai.drawing import draw_sprite
+
+        target = self._path(path, write=True)
+        assets = self.project.root / "assets"
+        if not is_relative_to(target, assets):
+            raise ToolError(_t("Save sprites only under assets/.", "Спрайты сохраняйте только в assets/."))
+        result = draw_sprite(
+            target,
+            mode=mode or None,
+            size=size,
+            pixels=pixels,
+            palette=palette,
+            shapes=shapes,
+            background=background,
+            trim=trim,
+        )
+        record_event(self.project.root, "asset", _t("Sprite drawn: {path}", "Спрайт нарисован: {path}", path=self._relative(target)))
+        self.files_changed += 1
+        self._record_change(target, "generate", kind="sprite", prompt=mode)
         return self._ok(**result)
 
     def tool_generate_background(
@@ -595,7 +728,7 @@ class AgentTools:
     ) -> str:
         from reasonable.ai.sprites import generate_background
 
-        target = self._path(path)
+        target = self._path(path, write=True)
         assets = self.project.root / "assets"
         if not is_relative_to(target, assets):
             raise ToolError(_t("Save backgrounds only under assets/.", "Фоны сохраняйте только в assets/."))
@@ -605,7 +738,7 @@ class AgentTools:
             width=width,
             height=height,
             image_config=self.image_config,
-            allow_fallback=True,
+            context=self.project.goal or self.project.name,
         )
         record_event(self.project.root, "asset", _t("Background created: {path}", "Фон создан: {path}", path=self._relative(target)))
         self.files_changed += 1

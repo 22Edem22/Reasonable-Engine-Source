@@ -9,7 +9,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QProcess, Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -34,6 +34,7 @@ from . import theme
 from .new_project import NewProjectDialog
 from .project_page import ProjectPage
 from .settings_dialog import SettingsDialog
+from .tutorial import maybe_show_tutorial, show_tutorial
 from .welcome import WelcomePage
 
 LOGGER = logging.getLogger("reasonable.editor")
@@ -46,7 +47,9 @@ class MainWindow(QMainWindow):
         self.current_page: ProjectPage | None = None
         self.setWindowTitle(t("app.title", tagline=i18n.tagline()))
         self.setMinimumSize(1120, 750)
-        self.resize(1380, 900)
+        # The built-in agent chat benefits from a wide reading area; the window
+        # can still be resized freely by the user.
+        self.resize(1560, 920)
         icon_path = BRAND_DIR / "logo.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -62,6 +65,7 @@ class MainWindow(QMainWindow):
         self.welcome.configure_ai.connect(self.open_ai_settings)
         self.welcome.open_recent.connect(self.open_project)
         self.welcome.delete_project.connect(self.delete_project)
+        self.welcome.open_tutorial.connect(self.open_tutorial)
         self.stack.addWidget(self.welcome)
         self.setCentralWidget(self.stack)
 
@@ -70,6 +74,32 @@ class MainWindow(QMainWindow):
 
         self._build_menus()
         self._update_actions()
+        # The first launch is a guided one: the tour opens after the window is
+        # actually visible, and only once (the flag lives in settings.json).
+        QTimer.singleShot(420, self._maybe_tutorial)
+
+    # ------------------------------------------------------------------
+    def _maybe_tutorial(self) -> None:
+        try:
+            action = maybe_show_tutorial(self.settings, self)
+        except Exception:
+            LOGGER.exception("Could not show the quick start")
+            return
+        self._handle_tutorial_action(action)
+
+    def open_tutorial(self) -> None:
+        """Replay the quick start (welcome page and Help menu)."""
+        try:
+            action = show_tutorial(self.settings, self)
+        except Exception:
+            LOGGER.exception("Could not open the quick start")
+            return
+        self._handle_tutorial_action(action)
+
+    def _handle_tutorial_action(self, action: str) -> None:
+        """The tour's final button can take the user straight to the wizard."""
+        if action == "new_project":
+            self.new_project()
 
     # ------------------------------------------------------------------
     def _build_menus(self) -> None:
@@ -140,6 +170,10 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked=False, i=index - 1: self._show_section(i))
             project_menu.addAction(action)
             self.section_actions.append(action)
+        self.scene_action = QAction(f"{t('projectpage.nav_scene')}  (Ctrl+5)", self)
+        self.scene_action.setShortcut(QKeySequence("Ctrl+5"))
+        self.scene_action.triggered.connect(self._show_scene)
+        project_menu.addAction(self.scene_action)
         project_menu.addSeparator()
         self.delete_action = QAction(t("menu.delete_project"), self)
         self.delete_action.setShortcut(QKeySequence("Ctrl+Shift+Delete"))
@@ -152,6 +186,11 @@ class MainWindow(QMainWindow):
         project_menu.addAction(self.back_action)
 
         help_menu = self.menuBar().addMenu(t("menu.help"))
+        tutorial_action = QAction(t("menu.tutorial"), self)
+        tutorial_action.setShortcut(QKeySequence("F1"))
+        tutorial_action.triggered.connect(self.open_tutorial)
+        help_menu.addAction(tutorial_action)
+        help_menu.addSeparator()
         about = QAction(t("menu.about"), self)
         about.triggered.connect(self._about)
         help_menu.addAction(about)
@@ -177,6 +216,7 @@ class MainWindow(QMainWindow):
             self.history_action,
             self.delete_action,
             self.back_action,
+            self.scene_action,
             *self.section_actions,
         ):
             action.setEnabled(active)
@@ -337,6 +377,10 @@ class MainWindow(QMainWindow):
     def _show_section(self, index: int) -> None:
         if self.current_page is not None:
             self.current_page._show_page(index)
+
+    def _show_scene(self) -> None:
+        if self.current_page is not None:
+            self.current_page._show_scene()
 
     def _open_history_current(self) -> None:
         if self.current_page is not None:

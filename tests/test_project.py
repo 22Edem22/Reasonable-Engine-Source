@@ -105,6 +105,13 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(paths[1], str(self.root))
         self.assertEqual(self.project.run_command()[-1], str(self.root / "main.py"))
 
+    def test_splash_wrapper_runs_through_the_engine_launcher(self) -> None:
+        (self.root / "_engine" / "reasonable").mkdir(parents=True, exist_ok=True)
+        command = self.project.run_command(splash_wrapper=True)
+        self.assertIn("-m", command)
+        self.assertIn("reasonable.runtime.launch", command)
+        self.assertEqual(command[-1], str(self.root / "main.py"))
+
 
 if __name__ == "__main__":
     unittest.main()
