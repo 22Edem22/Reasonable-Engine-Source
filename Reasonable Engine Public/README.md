@@ -12,6 +12,10 @@
 </p>
 
 <p align="center">
+  <b>Released version: RE-2.01</b> · RE-2.02 has not started yet (in development)
+</p>
+
+<p align="center">
   🌐 English · <a href="README.ru.md">Русский</a>
 </p>
 
@@ -36,6 +40,10 @@ The current build is always here: **[Releases](../../releases/latest)** — down
 the engine places the editor, a portable Python, and the runtime itself; there is
 nothing extra to configure. Your projects are stored in the `Projects` folder inside
 the installation and are not removed on update.
+
+> **Current release — RE-2.01** (released November 4, 2026). Everything described
+> below is already part of this released version. **RE-2.02 has not started yet** —
+> it is in development, so its changelog section is still empty.
 
 | | |
 |---|---|
@@ -161,8 +169,9 @@ Rules:
    begins with RE-3.01, then RE-3.02…RE-3.12, and so on.
 4. A generation never "rolls back": Reasonable Engine 2 cannot ship an RE-1.xx
    release, and RE 1 cannot ship an RE-2.xx release.
-5. The current release is shown in the header of [CHANGELOG.md](CHANGELOG.md) and
-   in the editor's "About" window.
+5. The current **released** version is **RE-2.01**; the next version, **RE-2.02,
+   has not started yet** and is in development. The live status is always shown in
+   the header of [CHANGELOG.md](CHANGELOG.md) and in the editor's "About" window.
 
 ## 🖥 System Requirements
 

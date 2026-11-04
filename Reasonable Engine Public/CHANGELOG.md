@@ -8,7 +8,40 @@ The first release of a generation is always .01; versions like "RE-2.00" do not 
 
 ## [RE-2.02] — in development
 
+**RE-2.02 has not started yet** — it is in development. All changes from the
+current development are included in RE-2.01.
+
+## [RE-2.01] — 2026-11-04
+
+The first release of **Reasonable Engine 2**. The main change: the agent draws
+assets itself instead of substituting one template for unrelated objects.
+
 ### Added
+- **The `draw_sprite` tool**: the agent describes the image itself — as a pixel
+  grid with a palette or as a list of primitives (ellipses, polygons, lines,
+  arcs, rounded rectangles, gradients). The engine only renders that description
+  with supersampling, trims empty margins and saves a PNG.
+- **Result inspection**: after drawing, the agent calls `inspect_image` to see
+  size, transparency, bounds and dominant colors, and can immediately redraw an
+  object that does not read well.
+- **Project context in external-model prompts**: the request now includes the
+  project's purpose, the chosen style and the exact target size, so the model
+  draws a specific game asset rather than a generic picture.
+- **Lifetime token and generation-time counter**: the built-in agent chat shows
+  cumulative tokens and total generation time for the whole project. The totals
+  are stored in the project and survive restarts, new agent runs and chat
+  clearing.
+- **Continue after a server error**: if the agent stops because the AI server
+  failed, the chat offers a “Continue” button that sends the same word to the
+  model. Automatic continuation can also be allowed for selected error types;
+  the list is managed in the agent settings.
+- **Multiple AI chats**: every project can now keep any number of separate
+  conversations with the agent. The chat switcher sits in the panel header,
+  next to the create and delete buttons; each conversation has its own history.
+- **The “Improve” button**: creates a new chat and runs a hidden read-only
+  review of the whole project. The agent studies the code, returns a list of
+  concrete improvements and asks what to implement, while the service prompt
+  stays invisible in the chat.
 - **Visual scene editor**: projects now have a “Scene” workspace — a grid canvas,
   an object list and an inspector. Rectangles, circles, text and images from
   assets are added from the toolbar, dragged with the mouse, resized by handles,
@@ -114,43 +147,6 @@ The first release of a generation is always .01; versions like "RE-2.00" do not 
   about seven times lighter.
 
 ### Changed
-- **A new look for the editor**: a dense grid, a neutral palette, compact panels
-  with hairline borders, consistent typography and flat controls — the window now
-  reads as a working tool rather than a landing page.
-
-## [RE-2.01] — 2026-11-04
-
-The first release of **Reasonable Engine 2**. The main change: the agent draws
-assets itself instead of substituting one template for unrelated objects.
-
-### Added
-- **The `draw_sprite` tool**: the agent describes the image itself — as a pixel
-  grid with a palette or as a list of primitives (ellipses, polygons, lines,
-  arcs, rounded rectangles, gradients). The engine only renders that description
-  with supersampling, trims empty margins and saves a PNG.
-- **Result inspection**: after drawing, the agent calls `inspect_image` to see
-  size, transparency, bounds and dominant colors, and can immediately redraw an
-  object that does not read well.
-- **Project context in external-model prompts**: the request now includes the
-  project's purpose, the chosen style and the exact target size, so the model
-  draws a specific game asset rather than a generic picture.
-- **Lifetime token and generation-time counter**: the built-in agent chat shows
-  cumulative tokens and total generation time for the whole project. The totals
-  are stored in the project and survive restarts, new agent runs and chat
-  clearing.
-- **Continue after a server error**: if the agent stops because the AI server
-  failed, the chat offers a “Continue” button that sends the same word to the
-  model. Automatic continuation can also be allowed for selected error types;
-  the list is managed in the agent settings.
-- **Multiple AI chats**: every project can now keep any number of separate
-  conversations with the agent. The chat switcher sits in the panel header,
-  next to the create and delete buttons; each conversation has its own history.
-- **The “Improve” button**: creates a new chat and runs a hidden read-only
-  review of the whole project. The agent studies the code, returns a list of
-  concrete improvements and asks what to implement, while the service prompt
-  stays invisible in the chat.
-
-### Changed
 - **`generate_sprite` no longer substitutes templates**: without a configured
   external model the tool says so honestly and points to `draw_sprite`. There is
   no silent "default character" fallback.
@@ -172,6 +168,9 @@ assets itself instead of substituting one template for unrelated objects.
   external image model remains; without it the agent draws by itself.
 - The sample game's starter assets (hero, star, slime) are now drawn from
   separate descriptions instead of one universal silhouette.
+- **A new look for the editor**: a dense grid, a neutral palette, compact panels
+  with hairline borders, consistent typography and flat controls — the window now
+  reads as a working tool rather than a landing page.
 
 ## [RE-1.01] — 2026-11-01
 
