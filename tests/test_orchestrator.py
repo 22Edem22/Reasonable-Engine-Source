@@ -82,6 +82,53 @@ class OrchestratorTests(unittest.TestCase):
         self.assertIn("Add the menu.", code_tasks[0]["instructions"])
         self.assertIn("Add keyboard input.", code_tasks[0]["instructions"])
 
+    def test_dependent_test_task_is_merged_with_the_module_it_imports(self) -> None:
+        orchestrator = self._orchestrator()
+        tasks = orchestrator._normalise_tasks(
+            [
+                {
+                    "id": "code-1",
+                    "role": "code",
+                    "title": "Create math_utils",
+                    "files": ["math_utils.py"],
+                    "instructions": "Create math_utils.py with add and sub.",
+                },
+                {
+                    "id": "code-2",
+                    "role": "code",
+                    "title": "Create tests",
+                    "files": ["test_math_utils.py"],
+                    "instructions": "Import add and sub from math_utils.py and test them.",
+                },
+            ]
+        )
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["id"], "code-1")
+        self.assertIn("test_math_utils.py", tasks[0]["files"])
+        self.assertIn("Import add and sub", tasks[0]["instructions"])
+
+    def test_verification_only_plan_items_are_dropped(self) -> None:
+        orchestrator = self._orchestrator()
+        tasks = orchestrator._normalise_tasks(
+            [
+                {
+                    "id": "verify",
+                    "role": "code",
+                    "title": "validate_project",
+                    "files": ["main.py"],
+                    "instructions": "Run validate_project and report the result.",
+                },
+                {
+                    "id": "create",
+                    "role": "code",
+                    "title": "Create the menu",
+                    "files": ["main.py"],
+                    "instructions": "Create the main menu screen.",
+                },
+            ]
+        )
+        self.assertEqual([item["id"] for item in tasks], ["create"])
+
     def test_specialist_write_scope_is_enforced(self) -> None:
         tools = AgentTools(self.project, write_scope=("main.py",))
         allowed = json.loads(tools.call("write_file", {"path": "main.py", "content": "print(1)\n"}))
@@ -89,6 +136,81 @@ class OrchestratorTests(unittest.TestCase):
         denied = json.loads(tools.call("write_file", {"path": "other.py", "content": "print(2)\n"}))
         self.assertFalse(denied["ok"])
         self.assertIn("main.py", denied["error"])
+
+    def test_specialist_usage_and_progress_reach_the_chat(self) -> None:
+        from unittest import mock
+
+        from reasonable.ai.agent import AgentEvent
+
+        orchestrator = self._orchestrator()
+        events: list[AgentEvent] = []
+        orchestrator.on_event = events.append
+
+        class FakeAgent:
+            def __init__(self, *args, **kwargs):
+                self.tools = type(
+                    "Tools",
+                    (),
+                    {"changed_files": [], "files_changed": 0},
+                )()
+                self.last_error = ""
+                self._emit = kwargs.get("on_event")
+
+            def run(self, message):
+                self._emit(
+                    AgentEvent(
+                        "usage",
+                        data={
+                            "usage": {
+                                "prompt_tokens": 10,
+                                "completion_tokens": 5,
+                                "total_tokens": 15,
+                                "seconds": 1.0,
+                            }
+                        },
+                    )
+                )
+                self._emit(AgentEvent("assistant", "Working on the task"))
+                self._emit(
+                    AgentEvent(
+                        "tool_start",
+                        data={
+                            "tool": "write_file",
+                            "arguments": {"path": "main.py"},
+                        },
+                    )
+                )
+                return "done"
+
+        with mock.patch("reasonable.ai.orchestrator.Agent", FakeAgent), mock.patch(
+            "reasonable.ai.orchestrator.update_task"
+        ):
+            orchestrator._run_specialist(
+                {
+                    "id": "code-1",
+                    "role": "code",
+                    "title": "Implement",
+                    "files": ["main.py"],
+                    "instructions": "Do it.",
+                },
+                "Task",
+            )
+
+        usage = [event for event in events if event.kind == "usage"]
+        self.assertEqual(len(usage), 1)
+        self.assertEqual(usage[0].data["usage"]["total_tokens"], 15)
+        self.assertTrue(
+            any(
+                event.kind == "assistant" and "Working on the task" in event.text
+                for event in events
+            )
+        )
+        self.assertTrue(
+            any(
+                event.kind == "status" and "write_file" in event.text
+                for event in events
+            )
+        )
 
     def test_independent_specialists_run_in_parallel(self) -> None:
         orchestrator = self._orchestrator()

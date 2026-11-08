@@ -11,8 +11,8 @@ body:
     id: version
     attributes:
       label: Reasonable Engine version
-      description: "The About window or python -m reasonable --version. Example: RE-2.01"
-      placeholder: "RE-2.01"
+      description: "The About window or python -m reasonable --version. Example: RE-2.02"
+      placeholder: "RE-2.02"
     validations:
       required: true
   - type: dropdown

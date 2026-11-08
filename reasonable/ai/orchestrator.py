@@ -36,7 +36,7 @@ from reasonable.core.progress import (
     update_task,
 )
 
-from .agent import Agent, AgentEvent, SUPERVISOR_PROMPT, _extract_json_object
+from .agent import Agent, AgentEvent, SUPERVISOR_PROMPT, _extract_json_object, _looks_degenerate
 from .client import AIClient, AIError, ChatResult
 from .prompts import build_initial_user_message
 from .tools import AgentTools, TOOL_SCHEMAS
@@ -73,12 +73,18 @@ Return exactly one JSON object:
 }
 
 Rules:
-- 2 to {max_tasks} tasks. A small task may use one task.
+- 2 to {max_tasks} tasks. A small task may use one task; prefer one task when
+  the work is a small feature that fits in one coherent change.
 - role is only "code" or "assets".
 - Code tasks must have disjoint file lists. If two features need the same file,
   merge them into one task.
+- Independent means "can be finished without seeing the other task's output".
+  A test, a screen, or a module that imports code created by another task is
+  NOT independent: merge it into the task that creates that code. Never split
+  "create the code" and "test/use the code" into parallel tasks.
 - Assets tasks may only target files under assets/.
-- Do not create review/validate/finish tasks — the lead agent does that.
+- Do not create review/validate/run/test/finish tasks — the lead agent does
+  that after all specialists finish.
 - Each instruction must be complete enough for a specialist that does not see
   the other tasks: what to build, where, and how it connects to the whole.
 - The starter example is a base, not the specification. Follow the user task.
@@ -392,7 +398,94 @@ class Orchestrator:
                     "instructions": str(item.get("instructions") or item.get("title") or ""),
                 }
             )
+        tasks = [task for task in tasks if not self._verification_only(task)]
+        tasks = self._merge_dependencies(tasks)
         return self._merge_conflicts(tasks)
+
+    @staticmethod
+    def _merge_dependencies(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Merge a task into another one when it uses files that task creates.
+
+        File-disjoint work is not necessarily independent: a test module that
+        imports the module from the previous task cannot run in parallel with
+        it. The planner is told this, but models still split such work, so the
+        dependency is detected from the mentioned file names.
+        """
+        merged = list(tasks)
+        changed = True
+        while changed:
+            changed = False
+            result: list[dict[str, Any]] = []
+            for task in merged:
+                text = f"{task.get('title') or ''} {task.get('instructions') or ''}".lower()
+                target = None
+                if task.get("role") == "code":
+                    for existing in result:
+                        if existing.get("role") != "code":
+                            continue
+                        for path in existing.get("files") or []:
+                            name = str(path).replace("\\", "/").rsplit("/", 1)[-1].lower()
+                            if name and name in text:
+                                target = existing
+                                break
+                        if target is not None:
+                            break
+                if target is None:
+                    result.append(task)
+                else:
+                    target["files"] = list(
+                        dict.fromkeys(list(target.get("files") or []) + list(task.get("files") or []))
+                    )
+                    target["title"] = f"{target.get('title')} + {task.get('title')}"
+                    target["instructions"] = (
+                        f"{target.get('instructions')}\n\n{task.get('instructions')}"
+                    )
+                    changed = True
+            merged = result
+        return merged
+
+    @staticmethod
+    def _verification_only(task: dict[str, Any]) -> bool:
+        """True for planner items that only run checks instead of writing code.
+
+        The lead agent validates and runs the merged project itself, so such
+        items would only duplicate work and race with the specialists.
+        """
+        text = f"{task.get('title') or ''} {task.get('instructions') or ''}".lower()
+        checks = (
+            "validate_project",
+            "run_project",
+            "run the test",
+            "run test",
+            "run tests",
+            "проверь",
+            "проверить",
+            "запусти",
+            "запустить",
+            "валид",
+            "заверш",
+            "finish",
+        )
+        actions = (
+            "create",
+            "add",
+            "implement",
+            "write",
+            "fix",
+            "change",
+            "edit",
+            "update",
+            "созда",
+            "добав",
+            "реализ",
+            "напиш",
+            "исправ",
+            "измен",
+            "обнов",
+        )
+        return any(marker in text for marker in checks) and not any(
+            marker in text for marker in actions
+        )
 
     @staticmethod
     def _merge_conflicts(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -436,14 +529,18 @@ class Orchestrator:
     def _specialist_prompt(self, task: dict[str, Any]) -> str:
         scope = ", ".join(task["files"])
         return (
+            "ROLE OVERRIDES — these replace the global rules 3, 5 and 7 above.\n"
+            "You are a specialist, not the lead agent. The lead agent owns the "
+            "global plan, progress, validation, run and finish.\n"
+            "The following tools are NOT available in this role and every call "
+            "to them is rejected: finish, set_plan, update_task, report_progress, "
+            "validate_project, run_project. Do not try them.\n\n"
             "MULTI-AGENT SPECIALIST ROLE\n"
             f"You are the {task['role']} specialist. Work only on this item:\n"
             f"{task['instructions']}\n\n"
             f"Write scope (the only files you may change): {scope}.\n"
-            "You may read the whole project with read/list/search tools.\n"
-            "Do not call finish, set_plan, update_task, report_progress, "
-            "validate_project or run_project: the lead agent owns global progress "
-            "and validates the merged result after all specialists finish.\n"
+            "You may read the whole project with read/list/search tools. You may "
+            "use run_command for local checks (for example the new test file).\n"
             "Work until this item is implemented, then reply with a short factual "
             "report of files changed and remaining concerns."
         )
@@ -458,18 +555,43 @@ class Orchestrator:
         label_prefix = f"{task['role']}: {label}"
 
         def forward(event: AgentEvent) -> None:
+            # Token usage and generation time are real even when the work
+            # happens inside a specialist. Dropping them here made the chat
+            # counter look frozen during long parallel runs.
+            if event.kind == "usage":
+                self.emit("usage", usage=event.data.get("usage") or {})
+                return
+            if event.kind == "assistant":
+                text = (event.text or "").strip()
+                if text:
+                    prefix = _tr(
+                        "Specialist “{label}”",
+                        "Специалист «{label}»",
+                        label=label,
+                    )
+                    self.emit("assistant", f"{prefix}:\n{text}")
+                return
+            if event.kind == "tool_start":
+                tool = str(event.data.get("tool") or "")
+                if tool:
+                    self.emit("status", f"{label_prefix} — {tool}")
+                return
             if event.kind == "status":
                 self.emit("status", f"{label_prefix} — {event.text}")
             elif event.kind == "error":
                 self.emit("status", f"{label_prefix} — {event.text}")
-            # Tool/assistant/changes events stay inside the specialist; the
-            # master emits the final changes card and answer.
+            # Tool results and changes stay inside the specialist; the master
+            # emits the final changes card and answer.
 
+        specialist_chat_id = (
+            f"{self.chat_id}:{task.get('id')}" if self.chat_id else None
+        )
         agent = Agent(
             self.project,
             self.settings,
             on_event=forward,
             cancel=self.cancel,
+            chat_id=specialist_chat_id,
             hidden_message=False,
             analysis=False,
             reply_language=self.reply_language or i18n.current_language(),
@@ -734,7 +856,7 @@ class Orchestrator:
                 temperature=0.2,
             )
             text = (result.content or "").strip()
-            if text:
+            if text and not _looks_degenerate(text):
                 return text
         except Exception:
             pass

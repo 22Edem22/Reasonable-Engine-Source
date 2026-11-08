@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <b>Released version: RE-2.01</b> · RE-2.02 has not started yet (in development)
+  <b>Released version: RE-2.02</b>
 </p>
 
 <p align="center">
@@ -36,14 +36,13 @@
 ## 📥 Download
 
 The current build is always here: **[Releases](../../releases/latest)** — download
-`ReasonableEngine-Setup-RE-2.01.exe`, run it, and get to work. Installation is simple:
+`ReasonableEngine-Setup-RE-2.02.exe`, run it, and get to work. Installation is simple:
 the engine places the editor, a portable Python, and the runtime itself; there is
 nothing extra to configure. Your projects are stored in the `Projects` folder inside
 the installation and are not removed on update.
 
-> **Current release — RE-2.01** (released November 4, 2026). Everything described
-> below is already part of this released version. **RE-2.02 has not started yet** —
-> it is in development, so its changelog section is still empty.
+> **Current release — RE-2.02** (released November 6, 2026). Everything described
+> below is already part of this released version.
 
 | | |
 |---|---|
@@ -58,8 +57,14 @@ the installation and are not removed on update.
 - Describe the task in plain words — the agent will study the project, draw up a
   plan, execute it step by step, and **verify the launch itself** after every major
   milestone.
-- No step limit: the agent works until there is a result, not until "sorry, the
-  steps have run out".
+- No hard step limit by default: the agent works until there is a result. If it
+  gets stuck repeating the same action, it changes its approach; a hard
+  no-progress stop is opt-in, so a long but productive run is never killed by
+  mistake.
+- Long runs keep their memory: older steps are compressed into a short summary
+  instead of being dropped, so the agent does not forget the task halfway.
+- Prompt caching keeps long runs affordable: the stable system prompt and tools
+  are cached by the provider, and the chat shows how many tokens came from cache.
 - Conversation history is kept per project together with the agent's answers —
   come back a week later and see the whole conversation, not only your own
   messages.
@@ -169,9 +174,8 @@ Rules:
    begins with RE-3.01, then RE-3.02…RE-3.12, and so on.
 4. A generation never "rolls back": Reasonable Engine 2 cannot ship an RE-1.xx
    release, and RE 1 cannot ship an RE-2.xx release.
-5. The current **released** version is **RE-2.01**; the next version, **RE-2.02,
-   has not started yet** and is in development. The live status is always shown in
-   the header of [CHANGELOG.md](CHANGELOG.md) and in the editor's "About" window.
+5. The current **released** version is **RE-2.02**. The live status is always shown
+   in the header of [CHANGELOG.md](CHANGELOG.md) and in the editor's "About" window.
 
 ## 🖥 System Requirements
 

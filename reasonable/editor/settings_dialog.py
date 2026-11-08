@@ -874,6 +874,14 @@ class SettingsDialog(QDialog):
         self.context_messages = QSpinBox()
         self.context_messages.setRange(12, 120)
         form.addRow(self._label(t("settings.label_context")), self.context_messages)
+        self.context_tokens = QSpinBox()
+        self.context_tokens.setRange(0, 200_000)
+        self.context_tokens.setSingleStep(2_000)
+        self.context_tokens.setSpecialValueText(t("settings.context_tokens_auto"))
+        form.addRow(self._label(t("settings.label_context_tokens")), self.context_tokens)
+        self.compaction_box = QCheckBox(t("settings.compaction_check"))
+        self.compaction_box.setToolTip(t("settings.compaction_tip"))
+        form.addRow(self.compaction_box)
         card.layout().addLayout(form)
         layout.addWidget(card)
 
@@ -967,8 +975,10 @@ class SettingsDialog(QDialog):
 
     def _load_agent(self) -> None:
         agent = self.settings.data.get("agent", {})
-        self.temperature.setValue(float(agent.get("temperature", 0.65)))
+        self.temperature.setValue(float(agent.get("temperature", 0.3)))
         self.context_messages.setValue(int(agent.get("context_messages", 36)))
+        self.context_tokens.setValue(int(agent.get("context_tokens", 0) or 0))
+        self.compaction_box.setChecked(bool(agent.get("compaction", True)))
         enabled = set(self.settings.auto_continue_kinds())
         for kind, box in self.auto_continue_boxes.items():
             box.setChecked(kind in enabled)
@@ -991,6 +1001,8 @@ class SettingsDialog(QDialog):
             {
                 "temperature": float(self.temperature.value()),
                 "context_messages": int(self.context_messages.value()),
+                "context_tokens": int(self.context_tokens.value()),
+                "compaction": self.compaction_box.isChecked(),
                 "auto_continue_errors": [
                     kind
                     for kind, box in self.auto_continue_boxes.items()

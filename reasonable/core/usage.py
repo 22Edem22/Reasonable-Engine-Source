@@ -45,6 +45,8 @@ def empty_usage() -> dict[str, Any]:
         "total_tokens": 0,
         "prompt_tokens": 0,
         "completion_tokens": 0,
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
         "requests": 0,
         "seconds": 0.0,
         "updated": "",
@@ -60,6 +62,8 @@ def load_usage(project_dir: Path) -> dict[str, Any]:
                 "total_tokens": _safe_int(data.get("total_tokens")),
                 "prompt_tokens": _safe_int(data.get("prompt_tokens")),
                 "completion_tokens": _safe_int(data.get("completion_tokens")),
+                "cached_tokens": _safe_int(data.get("cached_tokens")),
+                "cache_write_tokens": _safe_int(data.get("cache_write_tokens")),
                 "requests": _safe_int(data.get("requests")),
                 "seconds": round(_safe_float(data.get("seconds")), 3),
                 "updated": str(data.get("updated") or ""),
@@ -74,6 +78,8 @@ def add_usage(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     total_tokens: int | None = None,
+    cached_tokens: int = 0,
+    cache_write_tokens: int = 0,
     seconds: float = 0.0,
     requests: int = 1,
 ) -> dict[str, Any]:
@@ -87,6 +93,8 @@ def add_usage(
         data = load_usage(project_dir)
         data["prompt_tokens"] += prompt
         data["completion_tokens"] += completion
+        data["cached_tokens"] += _safe_int(cached_tokens)
+        data["cache_write_tokens"] += _safe_int(cache_write_tokens)
         data["total_tokens"] += total
         data["requests"] += _safe_int(requests)
         data["seconds"] = round(float(data.get("seconds") or 0.0) + _safe_float(seconds), 3)

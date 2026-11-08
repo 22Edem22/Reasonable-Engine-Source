@@ -6,10 +6,51 @@ Version format: **RE-<generation>.<release>** — for example RE-2.01, RE-2.02.
 The generation changes only on a major engine overhaul (Reasonable Engine 1 → 2).
 The first release of a generation is always .01; versions like "RE-2.00" do not exist.
 
-## [RE-2.02] — in development
+## [RE-2.02] — 2026-11-06
 
-**RE-2.02 has not started yet** — it is in development. All changes from the
-current development are included in RE-2.01.
+### Added
+- **Older context is compressed instead of discarded**: when history no longer
+  fits, the agent summarizes older steps into a short note and continues from it.
+  The context budget is measured in tokens and calibrated from the chosen model's
+  real usage; compression can be disabled in the agent settings.
+- **Prompt caching is used and visible in the chat**: the stable system prompt and
+  tools are not rebuilt unnecessarily, Anthropic gets explicit cache blocks, and
+  OpenCode/DeepSeek/OpenAI cache the stable prefix. The usage tooltip shows how
+  many sent tokens were read from cache.
+
+### Fixed
+- **The agent no longer loses the task in a long run**: the original request stays
+  in context on every step, and history is trimmed in complete call/result groups
+  with a size budget. Previously, after about 18 steps the model kept working
+  without remembering what was asked and repeated the same calls forever.
+- **The agent no longer stops with a false “no progress” error**: reading
+  different parts of the same file, checks and runs now count as progress, and
+  when the project already passes verification the agent is asked to finish
+  instead of being failed. The hard `stall_steps` threshold is off by default;
+  repeated identical actions are still detected separately.
+- **Questions about the project work again**: when a task needs no edits, the agent
+  answers and finishes after an independent check of the answer instead of forcing
+  itself to edit files, run checks and repeat them in a loop.
+- **Truncated replies and broken tool arguments are not executed**: if the provider
+  cuts the reply at the output limit, the agent asks for a smaller step and stops
+  after the second cut. The default output limit is now 16k tokens, and a 400 error
+  no longer disables tool calling entirely.
+- **Specialists no longer take over the global plan**: in parallel mode a role can
+  no longer call tools owned by the lead (plan, progress, validation, finish).
+  Verification-only tasks and tasks that depend on another task's files are merged
+  instead of running at the same time.
+- **The token/time counter no longer freezes in parallel mode**: specialist usage
+  and messages now reach the chat. Previously a long parallel run stayed silent
+  while the counter showed only a few service requests from the master.
+- **The agent no longer gets stuck repeating its own “thoughts”**: if the model
+  returns the same fragment instead of work, the agent discards it, retries at a
+  lower temperature and stops after the second attempt with a clear message. The
+  chat and history are no longer flooded with repetitions.
+
+### Changed
+- **The agent is more focused by default**: the temperature is lowered from 0.65
+  to 0.3 for more stable tool calls; a saved 0.65 setting is migrated
+  automatically.
 
 ## [RE-2.01] — 2026-11-04
 
@@ -223,5 +264,6 @@ The first public release of Reasonable Engine 1.
 - Agent instructions and skills have been rewritten: a project receives only the
   skills it needs (based on its type and interface levels).
 
+[RE-2.02]: ../../releases/tag/RE-2.02
 [RE-2.01]: ../../releases/tag/RE-2.01
 [RE-1.01]: ../../releases/tag/RE-1.01

@@ -42,6 +42,25 @@ class UsageTests(unittest.TestCase):
         data = add_usage(self.root, prompt_tokens=7, completion_tokens=5)
         self.assertEqual(data["total_tokens"], 12)
 
+    def test_cached_tokens_accumulate(self) -> None:
+        add_usage(
+            self.root,
+            prompt_tokens=100,
+            completion_tokens=10,
+            cached_tokens=80,
+            cache_write_tokens=5,
+        )
+        data = add_usage(
+            self.root,
+            prompt_tokens=50,
+            completion_tokens=5,
+            cached_tokens=40,
+            cache_write_tokens=3,
+        )
+        self.assertEqual(data["cached_tokens"], 120)
+        self.assertEqual(data["cache_write_tokens"], 8)
+        self.assertEqual(load_usage(self.root)["cached_tokens"], 120)
+
     def test_duration_is_shown_in_minutes_and_hours(self) -> None:
         self.assertEqual(format_duration(20), "меньше минуты")
         self.assertEqual(format_duration(125), "2 мин")

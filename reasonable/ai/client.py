@@ -60,6 +60,9 @@ class ChatResult:
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    # ``length``/``max_tokens`` means the provider cut the reply off. Tool
+    # arguments from such a reply are unreliable and must not be executed.
+    finish_reason: str = ""
 
 
 def _strip_fences(text: str) -> str:
@@ -251,6 +254,17 @@ class AIClient:
             self.headers.setdefault("x-opencode-session", _OPENCODE_FALLBACK_SESSION)
         self.timeout = timeout
         self.retries = retries
+        # Coding turns write whole files inside a tool call, so the historical
+        # 8192-token cap could cut a write_file argument in half and make every
+        # retry fail the same way. Providers that reject the value are handled
+        # by the 400 fallback below.
+        try:
+            self.default_max_tokens = int(
+                config.get("max_output_tokens") or config.get("max_tokens") or 16384
+            )
+        except (TypeError, ValueError):
+            self.default_max_tokens = 16384
+        self.default_max_tokens = max(256, min(65536, self.default_max_tokens))
         self.http = HTTPTransport(timeout=timeout, retries=retries)
 
     # ------------------------------------------------------------------
@@ -291,15 +305,16 @@ class AIClient:
         tools: list[dict[str, Any]] | None = None,
         *,
         temperature: float = 0.65,
-        max_tokens: int = 8192,
+        max_tokens: int | None = None,
     ) -> ChatResult:
         if not self.base_url:
             raise AIError(_tr("The provider Base URL is not set.", "Не задан Base URL провайдера."), kind="config")
         if not self.model:
             raise AIError(_tr("No AI model is selected.", "Не выбрана модель ИИ."), kind="config")
+        limit = int(max_tokens or self.default_max_tokens)
         if self.kind == "anthropic":
-            return self._chat_anthropic(messages, tools, temperature, max_tokens)
-        return self._chat_openai(messages, tools, temperature, max_tokens)
+            return self._chat_anthropic(messages, tools, temperature, limit)
+        return self._chat_openai(messages, tools, temperature, limit)
 
     def _chat_openai(
         self,
@@ -334,26 +349,51 @@ class AIClient:
                 self._chat_url(), method="POST", headers=self._auth_headers(), payload=payload
             )
         except AIError as error:
-            if error.status == 400 and tools:
+            if error.status not in {400, 422}:
+                raise
+            # A 400 does not automatically mean "this endpoint has no tool
+            # support". Dropping tools on every 400 used to silently downgrade
+            # a working agent to the text fallback. Remove only the parameter
+            # the provider actually complains about.
+            detail = f"{error.message} {error.detail}".lower()
+            changed = False
+            if any(
+                marker in detail
+                for marker in ("max_tokens", "max_completion_tokens", "max output", "output tokens")
+            ) and "max_tokens" in payload:
+                payload.pop("max_tokens", None)
+                changed = True
+            elif "temperature" in detail and "temperature" in payload:
+                payload.pop("temperature", None)
+                changed = True
+            elif any(marker in detail for marker in ("tool", "function")) and tools:
                 payload.pop("tools", None)
                 payload.pop("tool_choice", None)
-                data = self.http.request(
-                    self._chat_url(), method="POST", headers=self._auth_headers(), payload=payload
-                )
-            elif error.status == 400 and "temperature" in error.detail.lower():
+                changed = True
+            elif "max_tokens" in payload or "temperature" in payload:
+                # Generic "invalid request": retry without optional sampling
+                # limits, but keep tool calling enabled.
+                payload.pop("max_tokens", None)
                 payload.pop("temperature", None)
-                data = self.http.request(
-                    self._chat_url(), method="POST", headers=self._auth_headers(), payload=payload
-                )
-            else:
+                changed = True
+            elif tools:
+                payload.pop("tools", None)
+                payload.pop("tool_choice", None)
+                changed = True
+            if not changed:
                 raise
+            data = self.http.request(
+                self._chat_url(), method="POST", headers=self._auth_headers(), payload=payload
+            )
         choices = data.get("choices") or []
         if not choices:
             message = _tr("The provider returned an empty response.", "Провайдер вернул пустой ответ.")
             if data.get("error"):
                 message += f" {data['error']}"
             raise AIError(message, detail=json.dumps(data, ensure_ascii=False)[:1500], kind="bad_response")
-        message = choices[0].get("message") or {}
+        choice = choices[0] if isinstance(choices[0], dict) else {}
+        message = choice.get("message") or {}
+        finish_reason = str(choice.get("finish_reason") or "")
         content = message.get("content") or ""
         if isinstance(content, list):
             content = "".join(
@@ -379,6 +419,7 @@ class AIClient:
             tool_calls=calls,
             usage=usage if isinstance(usage, dict) else {},
             raw=data,
+            finish_reason=finish_reason,
         )
 
     def _chat_anthropic(
@@ -440,7 +481,16 @@ class AIClient:
             "temperature": temperature,
         }
         if system_parts:
-            payload["system"] = "\n\n".join(system_parts)
+            # Anthropic needs an explicit breakpoint for prompt caching. The
+            # system block comes after the tools, so this caches the tools and
+            # the long agent prompt together; both are stable for the whole run.
+            payload["system"] = [
+                {
+                    "type": "text",
+                    "text": "\n\n".join(system_parts),
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
         if tools:
             payload["tools"] = [
                 {
@@ -476,6 +526,7 @@ class AIClient:
             tool_calls=calls,
             usage=usage if isinstance(usage, dict) else {},
             raw=data,
+            finish_reason=str(data.get("stop_reason") or ""),
         )
 
     # ------------------------------------------------------------------

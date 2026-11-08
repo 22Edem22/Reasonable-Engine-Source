@@ -1240,18 +1240,31 @@ class ChatPanel(QWidget):
             self.usage_label.hide()
             return
         duration = format_duration(seconds)
-        self.usage_label.setText(
-            t(
-                "chat.usage_total",
-                tokens=format_tokens(tokens),
-                time=duration,
+        cached = int(self.usage.get("cached_tokens") or 0)
+        if cached > 0:
+            self.usage_label.setText(
+                t(
+                    "chat.usage_total_cached",
+                    tokens=format_tokens(tokens),
+                    cached=format_tokens(cached),
+                    time=duration,
+                )
             )
-        )
+        else:
+            self.usage_label.setText(
+                t(
+                    "chat.usage_total",
+                    tokens=format_tokens(tokens),
+                    time=duration,
+                )
+            )
         self.usage_label.setToolTip(
             t(
                 "chat.usage_tooltip",
                 requests=int(self.usage.get("requests") or 0),
                 prompt=format_tokens(int(self.usage.get("prompt_tokens") or 0)),
+                cached=format_tokens(int(self.usage.get("cached_tokens") or 0)),
+                cache_write=format_tokens(int(self.usage.get("cache_write_tokens") or 0)),
                 completion=format_tokens(int(self.usage.get("completion_tokens") or 0)),
                 time=duration,
             )
@@ -1423,6 +1436,8 @@ class ChatPanel(QWidget):
                 prompt_tokens=int(usage.get("prompt_tokens") or 0),
                 completion_tokens=int(usage.get("completion_tokens") or 0),
                 total_tokens=int(usage.get("total_tokens") or 0),
+                cached_tokens=int(usage.get("cached_tokens") or 0),
+                cache_write_tokens=int(usage.get("cache_write_tokens") or 0),
                 seconds=float(usage.get("seconds") or 0.0),
                 requests=1,
             )

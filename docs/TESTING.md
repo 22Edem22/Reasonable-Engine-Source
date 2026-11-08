@@ -12,7 +12,7 @@
 python -m unittest discover -s tests -v
 ```
 
-Ожидаемый результат на версии RE-2.01: **137 тестов, OK**.
+Ожидаемый результат на версии RE-2.02: **245 тестов, OK**.
 
 Для читаемого вывода в Windows PowerShell:
 
@@ -101,7 +101,7 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_editor -v
 
 ### Установщик на чистой машине
 
-- [ ] `build_installer.bat` создаёт `dist\ReasonableEngine-Setup-RE-2.01.exe`.
+- [ ] `build_installer.bat` создаёт `dist\ReasonableEngine-Setup-RE-2.02.exe`.
 - [ ] Установщик показывает лицензию (`installer\EULA.txt`) и не требует прав администратора.
 - [ ] После установки в `%LOCALAPPDATA%\Programs\Reasonable Engine` есть `ReasonableEngine.exe`, `ReasonablePlayer.exe`, `runtime\python\python.exe` и `Projects`.
 - [ ] `ReasonableEngine.exe --self-test` в папке установки проходит все проверки.
@@ -259,10 +259,16 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_editor -v
 
 Для слабых моделей:
 
-- увеличьте `max_steps`;
-- уменьшите `context_messages`;
+- задайте явный `max_steps` (по умолчанию `0` — без жёсткого предела);
+- при необходимости включите `stall_steps` (по умолчанию `0` — выключено) и
+  уменьшите `context_messages` / `context_chars`;
 - выберите модель с tool calling;
 - дайте более узкую задачу.
+
+Регрессии цикла агента проверяет `tests/test_agent_harness.py`: сохранение
+исходной задачи при обрезке истории, сжатие старого контекста в резюме,
+калибровка бюджета токенов, лимит шагов, остановка без прогресса, ответ на
+вопрос без правок, обрыв ответа и запрет инструментов вне роли.
 
 ---
 

@@ -11,8 +11,8 @@ body:
     id: version
     attributes:
       label: Версия Reasonable Engine
-      description: "Окно «О программе» или python -m reasonable --version. Пример: RE-2.01"
-      placeholder: "RE-2.01"
+      description: "Окно «О программе» или python -m reasonable --version. Пример: RE-2.02"
+      placeholder: "RE-2.02"
     validations:
       required: true
   - type: dropdown

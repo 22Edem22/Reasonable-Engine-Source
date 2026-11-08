@@ -33,6 +33,10 @@ class ProviderPreset:
     # Optional override for the model-list endpoint. Most providers expose
     # ``{base_url}/models``; some gateways use a different path.
     models_url: str = ""
+    # Conservative context window for the provider's default models. The
+    # agent uses it to size its prompt-token budget; a user override can
+    # raise or lower it per provider.
+    context_window: int = 128_000
 
     @property
     def is_local(self) -> bool:
@@ -79,6 +83,7 @@ PROVIDERS: tuple[ProviderPreset, ...] = (
         docs_url="https://ollama.com/download",
         models_hint=("qwen2.5-coder:7b", "llama3.2", "deepseek-coder-v2", "mistral"),
         note="Для агентной работы рекомендуем модель от 7B параметров с поддержкой tool calling.",
+        context_window=32_768,
     ),
     ProviderPreset(
         id="lmstudio",
@@ -95,6 +100,7 @@ PROVIDERS: tuple[ProviderPreset, ...] = (
         docs_url="https://lmstudio.ai",
         models_hint=("local-model",),
         note="Название модели можно получить кнопкой «Загрузить модели».",
+        context_window=32_768,
     ),
     ProviderPreset(
         id="openrouter",
@@ -147,6 +153,7 @@ PROVIDERS: tuple[ProviderPreset, ...] = (
         docs_url="https://ai.google.dev/gemini-api/docs/openai",
         models_hint=("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"),
         note="Используйте проект Google AI Studio, а не ключ Google Cloud, если хотите бесплатный тариф.",
+        context_window=1_000_000,
     ),
     ProviderPreset(
         id="cerebras",
@@ -244,6 +251,7 @@ PROVIDERS: tuple[ProviderPreset, ...] = (
         key_url="https://console.anthropic.com/settings/keys",
         docs_url="https://docs.anthropic.com",
         models_hint=("claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1"),
+        context_window=200_000,
     ),
     ProviderPreset(
         id="opencode",
@@ -618,12 +626,19 @@ def merge_provider_config(settings, provider_id: str) -> dict:
     """Return effective provider settings (preset + user override)."""
     preset = get_provider(provider_id)
     override = settings.data.get("provider_overrides", {}).get(provider_id, {}) if settings else {}
+    try:
+        context_window = max(
+            4_000, int(override.get("context_window") or preset.context_window or 128_000)
+        )
+    except (TypeError, ValueError):
+        context_window = 128_000
     return {
         "id": preset.id,
         "name": preset.display_name,
         "kind": override.get("kind", preset.kind),
         "base_url": (override.get("base_url") or preset.base_url).strip(),
         "models_url": str(override.get("models_url") or preset.models_url).strip(),
+        "context_window": context_window,
         "model": (override.get("model") or preset.default_model).strip(),
         "api_key": (override.get("api_key") or "").strip(),
         "requires_key": preset.requires_key,

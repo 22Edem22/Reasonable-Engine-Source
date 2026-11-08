@@ -7,8 +7,8 @@ calling, executes tools inside the project, and mirrors its state into
 
 from __future__ import annotations
 
+import hashlib
 import json
-import queue
 import re
 import threading
 import time
@@ -20,7 +20,7 @@ from reasonable.core import i18n
 from reasonable.core.agent_errors import classify_agent_error
 from reasonable.core.history import create_snapshot, update_snapshot
 from reasonable.core.i18n import tr as _tr
-from reasonable.core.progress import record_event, set_progress, set_status
+from reasonable.core.progress import read_state, record_event, set_status
 from reasonable.core.settings import Settings
 
 from .client import AIClient, AIError, ChatResult, ToolCall
@@ -44,6 +44,26 @@ class AgentCancelled(RuntimeError):
 
 
 _FALLBACK_TOOL_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+# A single tool result larger than this is truncated before it goes into the
+# conversation. read_file defaults to 800 lines, which is easily 100k+ tokens
+# for generated code; feeding that back on every step was one of the reasons a
+# long run lost its task and kept repeating itself.
+MAX_TOOL_RESULT_CHARS = 20_000
+
+
+def _shorten_tool_output(text: str) -> str:
+    value = str(text or "")
+    if len(value) <= MAX_TOOL_RESULT_CHARS:
+        return value
+    head = MAX_TOOL_RESULT_CHARS - 2_500
+    return (
+        value[:head]
+        + f"\n... [output truncated: {len(value)} characters total; "
+        "request a smaller range with start_line/end_line] ...\n"
+        + value[-2_000:]
+    )
+
 
 # Independent completion audit. This is AI-facing material and therefore
 # English-only, like tools and skills. It runs as a separate request after the
@@ -70,6 +90,18 @@ Rules:
 - Write the values of "missing" and "next" in the language given by
   "reply_language" (ru → Russian, en → English). JSON keys stay English.
 - Never ask for secrets, never propose changes outside the project."""
+
+# Older turns are compressed instead of being thrown away. The summary is
+# AI-facing material, so it is English-only like the other prompts.
+COMPACTION_PROMPT = """You compress the older part of an AI coding-agent conversation.
+Return a compact factual summary that lets the agent continue without the original messages.
+
+Keep: the user's goal, decisions and constraints, files created or edited, important
+commands and their results, unresolved errors, the current plan, and the next step.
+Drop: greetings, repeated reasoning, full file contents, successful command output,
+and anything that is already superseded.
+
+Write in English. Use short bullet points. Return only the summary, no preamble."""
 
 
 def _extract_json_object(text: str) -> dict | None:
@@ -103,6 +135,48 @@ def _parse_fallback_tool(content: str) -> tuple[str, dict] | None:
         if isinstance(name, str) and isinstance(arguments, dict):
             return name, arguments
     return None
+
+
+def _looks_degenerate(text: str) -> bool:
+    """Catch a model that is stuck repeating the same words or lines.
+
+    Some providers occasionally return a "thought loop" such as
+    ``Ok. Go. Done. Write. Emit.`` repeated dozens of times. Showing that as
+    the assistant's answer fills the chat and, worse, feeds the loop back into
+    the next request. A reply is treated as degenerate when it is made of many
+    short repeated lines or contains the same four-word phrase many times.
+    Code blocks are ignored: generated code legitimately repeats patterns.
+    """
+    value = (text or "").strip()
+    if not value or "```" in value:
+        return False
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    if len(lines) >= 6:
+        unique = len(set(lines))
+        if unique / len(lines) < 0.45:
+            return True
+        counts: dict[str, int] = {}
+        for line in lines:
+            counts[line] = counts.get(line, 0) + 1
+        if max(counts.values()) >= 4:
+            return True
+        # A repeated block of consecutive lines is just as telling as a
+        # repeated single line ("Ok. / Go. / Done." over and over).
+        seen_blocks: set[tuple[str, ...]] = set()
+        for index in range(len(lines) - 2):
+            block = tuple(lines[index : index + 3])
+            if block in seen_blocks:
+                return True
+            seen_blocks.add(block)
+    words = re.findall(r"\S+", value.lower())
+    if len(words) >= 40:
+        grams: dict[tuple[str, ...], int] = {}
+        for index in range(len(words) - 3):
+            gram = tuple(words[index : index + 4])
+            grams[gram] = grams.get(gram, 0) + 1
+        if grams and max(grams.values()) >= 6:
+            return True
+    return False
 
 
 def _assistant_message(result: ChatResult) -> dict[str, Any]:
@@ -162,6 +236,19 @@ class Agent:
             headers = dict(self.config.get("headers") or {})
             headers["x-opencode-session"] = f"reasonable-{chat_id}"
             self.config["headers"] = headers
+        try:
+            agent_cfg = self.settings.data.get("agent", {}) or {}
+            self.config.setdefault(
+                "max_output_tokens", int(agent_cfg.get("max_output_tokens", 16384) or 16384)
+            )
+        except (TypeError, ValueError):
+            self.config["max_output_tokens"] = 16384
+        try:
+            self._context_window = max(
+                4_000, int(self.config.get("context_window") or 128_000)
+            )
+        except (TypeError, ValueError):
+            self._context_window = 128_000
         self.client = AIClient(self.config, timeout=180, retries=2)
         self.image_config = image_config or self.settings.image_config()
         self.tools = AgentTools(
@@ -188,6 +275,14 @@ class Agent:
             if self.tool_schemas_override is not None
             else (ANALYSIS_TOOL_SCHEMAS if self.analysis else TOOL_SCHEMAS)
         )
+        # Advertising a tool is not enough: models sometimes call tools they
+        # were told not to use. Specialists must not touch global plan/progress
+        # or finish the whole project behind the orchestrator's back.
+        self._allowed_tool_names = {
+            str(schema.get("name"))
+            for schema in self.tool_schemas
+            if schema.get("name")
+        }
         self.messages: list[dict[str, Any]] = []
         self.finished = False
         self.final_text = ""
@@ -198,6 +293,31 @@ class Agent:
         self.outcome = ""
         self._nudges = 0
         self._install_nudged = False
+        self._degenerate_repeats = 0
+        self._truncated_repeats = 0
+        self._task_message: dict[str, Any] | None = None
+        self._context_chars = 120_000
+        self._stall_limit = 0
+        self._stall_signature: tuple | None = None
+        self._stall_counter = 0
+        self._stall_warned = False
+        self._evidence_paths: set[str] = set()
+        # Context compaction: real prompt tokens are unknown without the
+        # model's tokenizer, so the ratio is calibrated from the provider's
+        # reported prompt_tokens after every call.
+        self._chars_per_token = 3.6
+        self._context_tokens = 48_000
+        self._compaction_enabled = False
+        self._compaction_failures = 0
+        self._summary = ""
+        self._summary_message: dict[str, Any] | None = None
+        self._pending_dropped: list[dict[str, Any]] = []
+        try:
+            self._tool_schema_chars = len(
+                json.dumps(self.tool_schemas, ensure_ascii=False)
+            )
+        except (TypeError, ValueError):
+            self._tool_schema_chars = 0
         self.supervisor_enabled = self._supervisor_setting()
         self._supervisor_signature: tuple | None = None
         self._supervisor_repeats = 0
@@ -228,7 +348,12 @@ class Agent:
 
     @staticmethod
     def _usage_payload(usage: dict[str, Any] | None, seconds: float) -> dict[str, Any]:
-        """Normalize OpenAI/Anthropic usage and attach the call duration."""
+        """Normalize OpenAI/Anthropic/DeepSeek/OpenCode usage.
+
+        Besides plain prompt/completion counts, providers report prompt-cache
+        hits in different places. They are normalized here so the chat can show
+        how much of the expensive prompt was actually read from cache.
+        """
         raw = usage or {}
 
         def number(*keys: str) -> int:
@@ -241,13 +366,52 @@ class Agent:
                     return value
             return 0
 
+        cached = number(
+            "cached_tokens",
+            "cache_read_input_tokens",
+            "prompt_cache_hit_tokens",
+            "cache_read_tokens",
+        )
+        if not cached:
+            details = raw.get("prompt_tokens_details")
+            if isinstance(details, dict):
+                try:
+                    cached = int(details.get("cached_tokens") or 0)
+                except (TypeError, ValueError):
+                    cached = 0
+        opencode = raw.get("opencode")
+        opencode_tokens = opencode.get("tokens") if isinstance(opencode, dict) else None
+        if not cached and isinstance(opencode_tokens, dict):
+            try:
+                cached = int(opencode_tokens.get("cache_read") or 0)
+            except (TypeError, ValueError):
+                cached = 0
+
+        cache_write = number(
+            "cache_creation_input_tokens",
+            "cache_write_tokens",
+        )
+        if not cache_write and isinstance(opencode_tokens, dict):
+            try:
+                cache_write = int(opencode_tokens.get("cache_write_5m") or 0) + int(
+                    opencode_tokens.get("cache_write_1h") or 0
+                )
+            except (TypeError, ValueError):
+                cache_write = 0
+
         prompt = number("prompt_tokens", "input_tokens")
+        # Anthropic's input_tokens exclude cache reads/writes; OpenAI-style
+        # prompt_tokens already include them.
+        if "prompt_tokens" not in raw and raw.get("input_tokens") is not None:
+            prompt += cached + cache_write
         completion = number("completion_tokens", "output_tokens")
         total = number("total_tokens", "total") or prompt + completion
         return {
             "prompt_tokens": prompt,
             "completion_tokens": completion,
             "total_tokens": total,
+            "cached_tokens": cached,
+            "cache_write_tokens": cache_write,
             "seconds": round(max(0.0, float(seconds)), 3),
         }
 
@@ -267,25 +431,251 @@ class Agent:
             self.emit("usage", usage=self._usage_payload(None, time.perf_counter() - started))
             raise
         elapsed = time.perf_counter() - started
+        self._calibrate_tokens(messages, tools, result.usage)
         # Emit even when the provider omits usage: generation time is still a
         # real cost and belongs in the lifetime counter.
         self.emit("usage", usage=self._usage_payload(result.usage, elapsed))
         return result
 
-    def _trim_history(self) -> None:
+    @staticmethod
+    def _message_chars(item: dict[str, Any]) -> int:
+        chars = len(str(item.get("content") or ""))
+        if item.get("tool_calls"):
+            try:
+                chars += len(json.dumps(item["tool_calls"], ensure_ascii=False))
+            except (TypeError, ValueError):
+                pass
+        return chars
+
+    def _estimate_messages_tokens(self, messages: list[dict[str, Any]]) -> int:
+        chars = sum(self._message_chars(item) for item in messages)
+        chars += int(getattr(self, "_tool_schema_chars", 0) or 0)
+        ratio = max(1.5, float(getattr(self, "_chars_per_token", 3.6) or 3.6))
+        return max(1, int(chars / ratio))
+
+    def _calibrate_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        usage: dict[str, Any] | None,
+    ) -> None:
+        """Learn this model's characters-per-token ratio from real usage.
+
+        A real tokenizer is model-specific and the engine must stay
+        dependency-free, so the estimate is calibrated from the provider's
+        ``prompt_tokens`` instead of staying a blind character count.
+        """
         try:
-            limit = max(12, int(self.settings.data.get("agent", {}).get("context_messages", 36)))
-        except Exception:
-            limit = 36
-        if len(self.messages) <= limit + 1:
+            prompt_tokens = int((usage or {}).get("prompt_tokens") or 0)
+        except (TypeError, ValueError):
+            prompt_tokens = 0
+        if prompt_tokens <= 0:
             return
+        chars = sum(self._message_chars(item) for item in messages)
+        if tools:
+            try:
+                chars += len(json.dumps(tools, ensure_ascii=False))
+            except (TypeError, ValueError):
+                pass
+        if chars <= 0:
+            return
+        observed = chars / prompt_tokens
+        if not 1.2 <= observed <= 9.0:
+            return
+        current = max(1.5, float(getattr(self, "_chars_per_token", 3.6) or 3.6))
+        self._chars_per_token = max(1.5, min(9.0, current * 0.75 + observed * 0.25))
+
+    def _compact_messages(self, messages: list[dict[str, Any]]) -> str:
+        """Merge a chunk of old messages into the running summary."""
+        if (
+            not self._compaction_enabled
+            or self._compaction_failures >= 2
+            or not messages
+        ):
+            return ""
+        self._check_cancel()
+        parts: list[str] = []
+        for item in messages[-80:]:
+            role = str(item.get("role") or "")
+            if role == "system":
+                continue
+            text = str(item.get("content") or "")
+            if item.get("tool_calls"):
+                names: list[str] = []
+                for call in item.get("tool_calls") or []:
+                    function = call.get("function") if isinstance(call, dict) else None
+                    if isinstance(function, dict) and function.get("name"):
+                        names.append(str(function["name"]))
+                if names:
+                    text = f"[called: {', '.join(names)}]\n{text}"
+            limit = 1_200 if role == "tool" else 2_500
+            text = text.strip()[:limit]
+            if text:
+                parts.append(f"{role.upper()}: {text}")
+        payload = "\n\n".join(parts)
+        if len(payload) < 3_000:
+            return ""
+        payload = payload[:60_000]
+        user_content = ""
+        previous = self._summary.strip()
+        if previous:
+            user_content += f"Previous summary:\n{previous}\n\n"
+        user_content += "New conversation messages:\n" + payload
+        self.emit(
+            "status",
+            _tr(
+                "Compressing older conversation context…",
+                "Сжимаю старый контекст разговора…",
+            ),
+        )
+        try:
+            result = self._call_model(
+                [
+                    {"role": "system", "content": COMPACTION_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                None,
+                temperature=0.0,
+            )
+        except AgentCancelled:
+            raise
+        except Exception:
+            self._compaction_failures += 1
+            return ""
+        self._check_cancel()
+        summary = (result.content or "").strip()
+        if (
+            not summary
+            or result.finish_reason in {"length", "max_tokens"}
+            or _looks_degenerate(summary)
+        ):
+            self._compaction_failures += 1
+            return ""
+        self._compaction_failures = 0
+        self._summary = summary[:6_000]
+        self._summary_message = {
+            "role": "user",
+            "content": (
+                "CONVERSATION SUMMARY (older context, do not reply):\n"
+                + self._summary
+            ),
+        }
+        return self._summary
+
+    def _queue_dropped(self, dropped: list[dict[str, Any]]) -> None:
+        if not dropped or not self._compaction_enabled or self._compaction_failures >= 2:
+            return
+        self._pending_dropped.extend(dropped)
+        if len(self._pending_dropped) > 80:
+            self._pending_dropped = self._pending_dropped[-80:]
+        chars = sum(self._message_chars(item) for item in self._pending_dropped)
+        # Small tool results should accumulate instead of triggering a summary
+        # call for a handful of characters.
+        if len(self._pending_dropped) < 40 and chars < 24_000:
+            return
+        if chars < 3_000 and len(self._pending_dropped) < 80:
+            return
+        chunk = self._pending_dropped
+        self._pending_dropped = []
+        self._compact_messages(chunk)
+
+    def _trim_history(self) -> None:
+        """Keep the task and a bounded, structurally valid recent window.
+
+        The old implementation popped leading assistant/tool messages until it
+        found a ``user`` message. In a normal tool-calling run the only user
+        message is the original task, so after ~18 steps the whole window was
+        discarded and the model was called with the system prompt only. It then
+        made random tool calls forever because it no longer knew the task.
+        Here the original task is pinned, older turns are compressed into a
+        running summary when possible, and the recent window is trimmed from the
+        front in complete assistant/tool groups. Both a token budget and a
+        character budget keep one huge ``read_file`` from blowing the context.
+        """
+        if not self.messages:
+            return
+        try:
+            agent_settings = self.settings.data.get("agent", {}) or {}
+            limit = max(12, int(agent_settings.get("context_messages", 36) or 36))
+            context_chars = max(
+                20_000, int(agent_settings.get("context_chars", 120_000) or 120_000)
+            )
+        except (TypeError, ValueError):
+            limit = 36
+            context_chars = 120_000
+
+        # Keep the exact message list while it fits. Rebuilding it reorders the
+        # history note and the task, which invalidates the provider's prompt
+        # cache for no reason.
+        if len(self.messages) <= limit + 2:
+            chars = sum(self._message_chars(item) for item in self.messages)
+            if (
+                chars <= context_chars
+                and self._estimate_messages_tokens(self.messages) <= self._context_tokens
+            ):
+                return
+
         system = self.messages[0]
-        recent = self.messages[-limit:]
-        # Anthropic requires a tool_result to follow its tool_use; start at a
-        # clean user message so trimming never creates an orphan.
-        while recent and recent[0].get("role") in {"tool", "assistant"}:
+        pinned = self._task_message
+        if pinned is None:
+            # Tests and one-off callers sometimes set ``messages`` directly.
+            pinned = next(
+                (
+                    item
+                    for item in self.messages[1:]
+                    if item.get("role") == "user"
+                ),
+                None,
+            )
+            self._task_message = pinned
+        summary_message = self._summary_message
+        if summary_message is not None and not any(
+            item is summary_message for item in self.messages
+        ):
+            summary_message = None
+        body = [
+            item
+            for item in self.messages[1:]
+            if item is not pinned and item is not summary_message
+        ]
+        recent = body[-limit:]
+        # A tool result without the assistant tool_call that produced it is an
+        # invalid conversation for every provider.
+        while recent and recent[0].get("role") == "tool":
             recent.pop(0)
-        self.messages = [system] + recent
+
+        def over_budget() -> bool:
+            prompt = [system]
+            if pinned is not None and pinned is not system:
+                prompt.append(pinned)
+            if summary_message is not None:
+                prompt.append(summary_message)
+            prompt.extend(recent)
+            chars = sum(self._message_chars(item) for item in prompt)
+            tokens = self._estimate_messages_tokens(prompt)
+            return tokens > self._context_tokens or chars > context_chars
+
+        while over_budget() and len(recent) > 1:
+            first = recent.pop(0)
+            # Dropping an assistant tool_call also drops its results, otherwise
+            # the next request contains orphaned tool messages.
+            if first.get("role") == "assistant" and first.get("tool_calls"):
+                while recent and recent[0].get("role") == "tool":
+                    recent.pop(0)
+            while recent and recent[0].get("role") == "tool":
+                recent.pop(0)
+
+        dropped = body[: len(body) - len(recent)]
+        self._queue_dropped(dropped)
+        summary_message = self._summary_message
+
+        trimmed = [system]
+        if pinned is not None and pinned is not system:
+            trimmed.append(pinned)
+        if summary_message is not None:
+            trimmed.append(summary_message)
+        trimmed.extend(recent)
+        self.messages = trimmed
 
     def _supervisor_payload(self, task_text: str, final_text: str) -> dict[str, Any]:
         changed: list[dict[str, Any]] = []
@@ -535,6 +925,171 @@ class Agent:
         return getattr(self, "_repeat_count", 0) >= allowed
 
     # ------------------------------------------------------------------
+    # Context and progress guards
+    # ------------------------------------------------------------------
+    def _tool_message(self, call: ToolCall, output: str) -> dict[str, Any]:
+        return {
+            "role": "tool",
+            "tool_call_id": call.id,
+            "name": call.name,
+            "content": _shorten_tool_output(output),
+        }
+
+    def _remember_evidence(self, name: str, output: str) -> None:
+        """Track which files the model has actually looked at.
+
+        Exploration is progress even before the first edit, so it must reset
+        the no-progress counter; otherwise a careful agent would be stopped
+        while still reading a large project.
+        """
+        if name not in {"read_file", "list_files", "search_text", "inspect_image"}:
+            return
+        try:
+            parsed = json.loads(output)
+        except (TypeError, ValueError):
+            return
+        if not isinstance(parsed, dict):
+            return
+        path = parsed.get("path")
+        if isinstance(path, str) and path:
+            key = path
+            if name == "read_file":
+                # Reading different ranges of the same file is still progress.
+                key = f"{path}:{parsed.get('start_line')}-{parsed.get('end_line')}"
+            elif name == "search_text":
+                key = f"search:{parsed.get('query') or ''}:{path}"
+            self._evidence_paths.add(key)
+        for match in parsed.get("matches") or []:
+            if isinstance(match, dict) and isinstance(match.get("path"), str):
+                self._evidence_paths.add(str(match["path"]))
+
+    def _files_signature(self) -> tuple:
+        """Cheap fingerprint of the changed files' actual contents."""
+        rows: list[tuple[str, int, str]] = []
+        for item in self.tools.changed_files[:12]:
+            path = str(item.get("path") or "")
+            if not path:
+                continue
+            try:
+                data = (self.project.root / path).read_bytes()[:200_000]
+            except OSError:
+                data = b""
+            rows.append(
+                (path, len(data), hashlib.blake2b(data, digest_size=8).hexdigest())
+            )
+        return tuple(rows)
+
+    def _progress_signature(self) -> tuple:
+        readiness = self.tools.readiness()
+        try:
+            state = read_state(self.project.root)
+            done = sum(
+                1
+                for task in state.get("tasks", [])
+                if str(task.get("status") or "") == "done"
+            )
+        except Exception:
+            done = 0
+        return (
+            self._files_signature(),
+            bool(readiness.get("validation_passed")),
+            bool(readiness.get("run_passed")),
+            done,
+            len(self._evidence_paths),
+        )
+
+    def _stop_incomplete(self, reason: str) -> None:
+        self.incomplete_reason = reason
+        set_status(self.project.root, "idle", reason[:300], event_type="agent")
+        self.emit("incomplete", reason)
+
+    def _track_stall(self) -> bool:
+        """Stop a run that keeps spending tokens without changing anything.
+
+        Returns ``True`` when the caller must end the loop. The first time the
+        threshold is reached the model gets one explicit recovery prompt; only
+        a second full window without progress ends the run honestly.
+        """
+        if self._stall_limit <= 0:
+            return False
+        signature = self._progress_signature()
+        if signature == self._stall_signature:
+            self._stall_counter += 1
+        else:
+            self._stall_signature = signature
+            self._stall_counter = 0
+            self._stall_warned = False
+        if self._stall_counter < self._stall_limit:
+            return False
+        readiness = self.tools.readiness()
+        if readiness.get("ready"):
+            # Everything the engine can verify already passes. The agent may
+            # still be polishing, so never end with a false "not completed";
+            # ask it once to finish instead.
+            if not self._stall_warned:
+                self._stall_warned = True
+                self._stall_counter = 0
+                self.emit(
+                    "status",
+                    _tr(
+                        "The project already passes the checks — asking the agent to finish…",
+                        "Проект уже проходит проверки — прошу агента завершить…",
+                    ),
+                )
+                self.messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Validation and the smoke run already pass. Do not keep "
+                            "polishing indefinitely: call finish now with a short factual "
+                            "report, or state the one concrete thing that is still missing."
+                        ),
+                    }
+                )
+            return False
+        if not self._stall_warned:
+            self._stall_warned = True
+            self._stall_counter = 0
+            self.emit(
+                "status",
+                _tr(
+                    "No progress for {count} steps — asking the agent to change its approach…",
+                    "Нет прогресса {count} шагов — прошу агента сменить подход…",
+                    count=self._stall_limit,
+                ),
+            )
+            # AI-facing material stays English-only.
+            self.messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "NO PROGRESS DETECTED. Your last steps did not change any file, "
+                        "did not pass validation or a run, and did not inspect a new file. "
+                        "Stop repeating the current action. Re-read the exact error, then "
+                        "either edit a real file with write_file/edit_file or, if the task "
+                        "is informational, answer it directly. Do not call the same tool "
+                        "with the same arguments again."
+                    ),
+                }
+            )
+            return False
+        missing = "; ".join(readiness.get("missing") or [])
+        reason = _tr(
+            "The agent spent {count} steps in a row without progress and was stopped. "
+            "Still missing: {missing}. Try another model or make the task more specific.",
+            "Агент потратил {count} шагов подряд без прогресса и был остановлен. "
+            "Не выполнено: {missing}. Попробуйте другую модель или уточните задачу.",
+            count=self._stall_limit,
+            missing=missing
+            or _tr(
+                "the project still does not pass validation and a smoke run",
+                "проект всё ещё не проходит проверку и пробный запуск",
+            ),
+        )
+        self._stop_incomplete(reason)
+        return True
+
+    # ------------------------------------------------------------------
     # Durable chat history
     # ------------------------------------------------------------------
     def _seed_chat_history(self) -> None:
@@ -701,6 +1256,18 @@ class Agent:
         self.outcome = ""
         self._nudges = 0
         self._install_nudged = False
+        self._degenerate_repeats = 0
+        self._truncated_repeats = 0
+        self._task_message = None
+        self._evidence_paths = set()
+        self._stall_signature = None
+        self._stall_counter = 0
+        self._stall_warned = False
+        self._summary = ""
+        self._summary_message = None
+        self._pending_dropped = []
+        self._compaction_failures = 0
+        self._chars_per_token = 3.6
         self.supervisor_enabled = self._supervisor_setting()
         self._supervisor_signature = None
         self._supervisor_repeats = 0
@@ -734,18 +1301,50 @@ class Agent:
                 "content": f"{note}\n\n{task_text}",
             }
         )
+        # The original task survives every history trim. Without this anchor a
+        # long tool-calling run eventually forgot what it was doing.
+        self._task_message = self.messages[-1]
         # Every run is reversible: the snapshot is taken before the first tool
         # call and its metadata is extended with the files that changed. The
         # read-only improvement review changes nothing, so it needs no snapshot.
         if not self.analysis and self.create_snapshot:
             self._create_snapshot(user_message)
         # 0 = unlimited: the agent works until the task is really done. The
-        # old 60-step cap only produced «Работа не завершена» noise.
+        # no-progress guard still stops a run that keeps spending tokens
+        # without changing anything.
+        agent_settings = self.settings.data.get("agent", {}) or {}
         try:
-            max_steps = int(self.settings.data.get("agent", {}).get("max_steps") or 0)
+            max_steps = int(agent_settings.get("max_steps") or 0)
         except (TypeError, ValueError):
             max_steps = 0
-        temperature = float(self.settings.data.get("agent", {}).get("temperature", 0.65))
+        try:
+            raw_stall = agent_settings.get("stall_steps", 0)
+            stall_value = int(0 if raw_stall is None else raw_stall)
+            # 8 was the old default that caused false "no progress" stops.
+            if stall_value == 8:
+                stall_value = 0
+            self._stall_limit = max(0, min(50, stall_value))
+        except (TypeError, ValueError):
+            self._stall_limit = 0
+        try:
+            self._context_chars = max(
+                20_000, int(agent_settings.get("context_chars", 120_000) or 120_000)
+            )
+        except (TypeError, ValueError):
+            self._context_chars = 120_000
+        self._compaction_enabled = bool(agent_settings.get("compaction", True))
+        try:
+            configured_tokens = int(agent_settings.get("context_tokens") or 0)
+            if configured_tokens <= 0:
+                configured_tokens = min(48_000, int(self._context_window * 0.6))
+            self._context_tokens = max(
+                2_000, min(int(self._context_window * 0.85), configured_tokens)
+            )
+        except (TypeError, ValueError):
+            self._context_tokens = max(
+                2_000, min(48_000, int(self._context_window * 0.6))
+            )
+        temperature = float(agent_settings.get("temperature", 0.3))
         # Restore the conversation from previous sessions so the agent
         # remembers what the user already asked and what was answered.
         if self.seed_history:
@@ -759,6 +1358,19 @@ class Agent:
             while True:
                 step += 1
                 self._check_cancel()
+                if max_steps and step > max_steps:
+                    self._stop_incomplete(
+                        _tr(
+                            "The agent reached the step limit ({max}) and stopped. "
+                            "The result is not verified — continue the task or raise the limit.",
+                            "Агент достиг лимита шагов ({max}) и остановился. "
+                            "Результат не проверен — продолжите задачу или увеличьте лимит.",
+                            max=max_steps,
+                        )
+                    )
+                    break
+                if step > 1 and self._track_stall():
+                    break
                 limit_label = _tr(" of {max}", " из {max}", max=max_steps) if max_steps else ""
                 self.emit("step", _tr("Step {step}", "Шаг {step}", step=step) + limit_label, step=step, max_steps=max_steps)
                 self._trim_history()
@@ -778,6 +1390,39 @@ class Agent:
                     else:
                         raise
 
+                if result.finish_reason in {"length", "max_tokens"}:
+                    self._truncated_repeats += 1
+                    if self._truncated_repeats >= 2:
+                        self._stop_incomplete(
+                            _tr(
+                                "The model's reply was cut off by the output limit twice. "
+                                "It cannot write the file in one piece — try another model or ask for a smaller change.",
+                                "Ответ модели дважды обрезался лимитом вывода. "
+                                "Она не может записать файл целиком — смените модель или попросите меньшее изменение.",
+                            )
+                        )
+                        break
+                    self.emit(
+                        "status",
+                        _tr(
+                            "The reply was cut off by the output limit — asking for a smaller step…",
+                            "Ответ обрезан лимитом вывода — прошу сделать шаг меньше…",
+                        ),
+                    )
+                    self.messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your previous reply was cut off by the output limit, so it was "
+                                "discarded. Do not repeat it. Make a smaller step: write one file "
+                                "at a time, use edit_file for targeted changes, and never put a "
+                                "whole large file into a single tool call."
+                            ),
+                        }
+                    )
+                    continue
+                self._truncated_repeats = 0
+
                 calls = list(result.tool_calls)
                 if not calls:
                     fallback = _parse_fallback_tool(result.content)
@@ -794,9 +1439,46 @@ class Agent:
                             ]
                             result.tool_calls = calls
 
-                if result.content:
+                degenerate = bool(result.content) and _looks_degenerate(result.content)
+                if degenerate and not calls:
+                    self._degenerate_repeats += 1
+                    if self._degenerate_repeats >= 2:
+                        self._stop_incomplete(
+                            _tr(
+                                "The model kept returning a repetitive fragment instead of doing the work. Stop the run, switch to another model and try again.",
+                                "Модель повторяла один и тот же фрагмент вместо работы. Остановите запуск, смените модель и попробуйте снова.",
+                            )
+                        )
+                        break
+                    self.emit(
+                        "status",
+                        _tr(
+                            "The model returned a repetitive fragment — asking it to continue…",
+                            "Модель вернула повторяющийся фрагмент — прошу продолжить…",
+                        ),
+                    )
+                    # Discard the garbage instead of feeding it back into the
+                    # next request, and make the retry more deterministic.
+                    temperature = max(0.05, min(temperature, 0.45) - 0.15)
+                    self.messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your previous reply was a repetitive loop and was discarded. "
+                                "Do not repeat words or lines. Continue the task now with one "
+                                "concrete tool call."
+                            ),
+                        }
+                    )
+                    continue
+                self._degenerate_repeats = 0
+                if result.content and not degenerate:
                     self.emit("assistant", result.content)
-                self.messages.append(_assistant_message(result))
+                message = _assistant_message(result)
+                if degenerate:
+                    # Keep useful tool calls but never store the loop in history.
+                    message["content"] = ""
+                self.messages.append(message)
 
                 if not calls:
                     if self.analysis:
@@ -833,6 +1515,32 @@ class Agent:
                         self.finished = True
                         break
                     readiness = self.tools.readiness()
+                    answer = (result.content or "").strip()
+                    # Not every task changes files: a question about the
+                    # project is complete when answered. The auditor checks the
+                    # answer against the request, so a lazy "done" without any
+                    # work is still rejected and sent back as a recovery task.
+                    if (
+                        answer
+                        and not readiness["ready"]
+                        and int(readiness.get("files_changed") or 0) == 0
+                        and self.supervisor_enabled
+                    ):
+                        complete, feedback, _stalled = self._supervise_completion(
+                            task_text, answer
+                        )
+                        if complete:
+                            self.final_text = answer
+                            self.finished = True
+                            set_status(
+                                self.project.root,
+                                "idle",
+                                _tr("The answer is ready.", "Ответ готов."),
+                                event_type="agent",
+                            )
+                            break
+                        self.messages.append({"role": "user", "content": feedback})
+                        continue
                     if readiness["ready"]:
                         message = result.content.strip() or _tr("Done.", "Готово.")
                         complete, feedback, stalled = self._supervise_completion(
@@ -889,6 +1597,53 @@ class Agent:
                         _tr("Tool: {name}", "Инструмент: {name}", name=call.name),
                         event_type="tool",
                     )
+                    if call.arguments.get("_parse_error"):
+                        # A cut-off or malformed JSON argument used to reach the
+                        # tool as stray keyword arguments and fail with a
+                        # meaningless TypeError. Tell the model exactly what to
+                        # do instead of letting it retry the same huge call.
+                        output = json.dumps(
+                            {
+                                "ok": False,
+                                "error": (
+                                    "Tool arguments were not valid JSON. The reply was probably "
+                                    "cut off by the output limit. Retry with a smaller, complete "
+                                    "call: one file at a time and prefer edit_file."
+                                ),
+                            },
+                            ensure_ascii=False,
+                        )
+                        self.messages.append(self._tool_message(call, output))
+                        self.emit(
+                            "tool_result",
+                            call.name,
+                            tool=call.name,
+                            success=False,
+                            result=output[:5000],
+                        )
+                        continue
+                    if call.name not in self._allowed_tool_names:
+                        available = ", ".join(sorted(self._allowed_tool_names))
+                        output = json.dumps(
+                            {
+                                "ok": False,
+                                "error": (
+                                    f"Tool '{call.name}' is not available in this role. "
+                                    f"Use only: {available}. The lead agent owns global "
+                                    "plan/progress, validation and finish."
+                                ),
+                            },
+                            ensure_ascii=False,
+                        )
+                        self.messages.append(self._tool_message(call, output))
+                        self.emit(
+                            "tool_result",
+                            call.name,
+                            tool=call.name,
+                            success=False,
+                            result=output[:5000],
+                        )
+                        continue
                     if self.analysis and call.name not in ANALYSIS_TOOL_NAMES:
                         output = json.dumps(
                             {
@@ -920,14 +1675,7 @@ class Agent:
                                 },
                                 ensure_ascii=False,
                             )
-                            self.messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": call.id,
-                                    "name": call.name,
-                                    "content": output,
-                                }
-                            )
+                            self.messages.append(self._tool_message(call, output))
                             self.emit(
                                 "tool_result",
                                 call.name,
@@ -949,14 +1697,7 @@ class Agent:
                     # over and over means the model is stuck.
                     self._track_tool_call(call.name, output)
                     if self._stuck_after_repeats():
-                        self.messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": call.id,
-                                "name": call.name,
-                                "content": output,
-                            }
-                        )
+                        self.messages.append(self._tool_message(call, output))
                         self.messages.append(
                             {
                                 "role": "user",
@@ -986,14 +1727,8 @@ class Agent:
                         )
                         self._reset_loop_tracking()
                         break
-                    self.messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call.id,
-                            "name": call.name,
-                            "content": output,
-                        }
-                    )
+                    self.messages.append(self._tool_message(call, output))
+                    self._remember_evidence(call.name, output)
                     try:
                         parsed = json.loads(output)
                     except ValueError:

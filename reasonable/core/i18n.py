@@ -802,6 +802,21 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     ),
     "settings.label_temperature": _pair("Температура", "Temperature"),
     "settings.label_context": _pair("Помнить сообщений", "Messages to remember"),
+    "settings.label_context_tokens": _pair(
+        "Бюджет контекста, токенов (0 — авто)",
+        "Context budget, tokens (0 = auto)",
+    ),
+    "settings.context_tokens_auto": _pair("авто", "auto"),
+    "settings.compaction_check": _pair(
+        "Сжимать старый контекст",
+        "Compress older context",
+    ),
+    "settings.compaction_tip": _pair(
+        "Когда история перестаёт помещаться, агент пересказывает старые шаги "
+        "и продолжает с кратким резюме. Отключите, чтобы оставить только обрезку.",
+        "When history no longer fits, the agent summarizes older steps and "
+        "continues from a short summary. Disable to keep plain trimming.",
+    ),
     "settings.auto_continue_title": _pair(
         "Автопродолжение после ошибок",
         "Automatic continue after errors",
@@ -1665,9 +1680,17 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "Всего: {tokens} токенов · {time}",
         "Total: {tokens} tokens · {time}",
     ),
+    "chat.usage_total_cached": _pair(
+        "Всего: {tokens} токенов · из кэша {cached} · {time}",
+        "Total: {tokens} tokens · {cached} cached · {time}",
+    ),
     "chat.usage_tooltip": _pair(
-        "За всё время в этом проекте\nЗапросов: {requests}\nОтправлено: {prompt}\nПолучено: {completion}\nВремя генерации: {time}",
-        "All time in this project\nRequests: {requests}\nSent: {prompt}\nReceived: {completion}\nGeneration time: {time}",
+        "За всё время в этом проекте\nЗапросов: {requests}\nОтправлено: {prompt} "
+        "(из кэша: {cached})\nЗаписано в кэш: {cache_write}\nПолучено: {completion}\n"
+        "Время генерации: {time}",
+        "All time in this project\nRequests: {requests}\nSent: {prompt} "
+        "(cached: {cached})\nCache written: {cache_write}\nReceived: {completion}\n"
+        "Generation time: {time}",
     ),
     "chat.time_less_minute": _pair("меньше минуты", "less than a minute"),
     "chat.time_minutes": _pair("{minutes} мин", "{minutes} min"),

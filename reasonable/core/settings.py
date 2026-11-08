@@ -24,9 +24,29 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "agent": {
         # 0 means unlimited: the agent works until the task is done or the
         # user stops it. A step cap only produced «Работа не завершена» noise.
+        # The no-progress guard below still stops a genuinely stuck run.
         "max_steps": 0,
-        "temperature": 0.65,
+        # Agentic work needs deterministic tool calls, not creative writing.
+        "temperature": 0.3,
         "context_messages": 36,
+        # Character budget for the recent part of the conversation. A single
+        # read_file can return hundreds of kilobytes; without a budget one
+        # step would push the task itself out of the context window.
+        "context_chars": 120_000,
+        # Approximate prompt-token budget. 0 means "auto": about 60% of the
+        # provider's context window, capped at 48k so a slow local model is
+        # not drowned in context.
+        "context_tokens": 0,
+        # Compress older turns into a short summary instead of dropping them.
+        "compaction": True,
+        # Optional hard stop when this many steps in a row changed nothing.
+        # 0 (default) disables it: reading, checking and thinking are normal
+        # parts of a task, and a false "no progress" stop is worse than a long
+        # run. Repeated identical actions are still handled separately.
+        "stall_steps": 0,
+        # Whole-file tool calls can exceed 8192 tokens; the cut-off argument
+        # used to fail on every retry.
+        "max_output_tokens": 16384,
         # Error categories after which the chat may send "Продолжай" itself.
         # Empty by default: automatic continuation is an explicit opt-in.
         "auto_continue_errors": [],
@@ -132,6 +152,42 @@ class Settings:
                 agent["max_steps"] = 0
         except (TypeError, ValueError):
             agent["max_steps"] = 0
+        # 0.65 was the old default and made tool-calling turns needlessly
+        # creative. Keep a deliberate custom value, migrate only the default.
+        try:
+            if abs(float(agent.get("temperature", 0.3)) - 0.65) < 0.001:
+                agent["temperature"] = 0.3
+        except (TypeError, ValueError):
+            agent["temperature"] = 0.3
+        try:
+            raw_stall = agent.get("stall_steps", 0)
+            value = int(0 if raw_stall is None else raw_stall)
+            # 8 was the old default and produced false "no progress" stops
+            # while the agent was still reading or checking the project.
+            if value == 8:
+                value = 0
+            agent["stall_steps"] = max(0, min(50, value))
+        except (TypeError, ValueError):
+            agent["stall_steps"] = 0
+        try:
+            agent["context_chars"] = max(
+                20_000, min(1_000_000, int(agent.get("context_chars", 120_000) or 120_000))
+            )
+        except (TypeError, ValueError):
+            agent["context_chars"] = 120_000
+        try:
+            agent["context_tokens"] = max(
+                0, min(200_000, int(agent.get("context_tokens", 0) or 0))
+            )
+        except (TypeError, ValueError):
+            agent["context_tokens"] = 0
+        agent["compaction"] = bool(agent.get("compaction", True))
+        try:
+            agent["max_output_tokens"] = max(
+                256, min(65_536, int(agent.get("max_output_tokens", 16384) or 16384))
+            )
+        except (TypeError, ValueError):
+            agent["max_output_tokens"] = 16384
         # Keep only known error categories so an old or hand-edited settings
         # file cannot inject arbitrary values into the auto-continue flow.
         from .agent_errors import AUTO_CONTINUE_KINDS
