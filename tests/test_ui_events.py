@@ -135,5 +135,42 @@ class UiEventTests(unittest.TestCase):
         app.on_event(events[0])
 
 
+    def test_ui_root_is_built_if_a_subclass_forgets_super_on_start(self) -> None:
+        class LazyApp(UIApp):
+            def __init__(self) -> None:
+                super().__init__("Lazy", (640, 480), splash=False)
+                self.builds = 0
+
+            def build_ui(self):
+                self.builds += 1
+                return Panel()
+
+            def on_start(self) -> None:
+                pass
+
+        app = LazyApp()
+        app.on_update(1 / 60)
+        self.assertIsNotNone(app.root)
+        self.assertEqual(app.builds, 1)
+
+    def test_entry_accepts_a_custom_height(self) -> None:
+        entry = Entry("search", width=200, height=40)
+        self.assertEqual(entry.height, 40)
+
+    def test_scrollview_does_not_claim_the_whole_row(self) -> None:
+        root = HStack(spacing=0, expand_x=True, expand_y=True)
+        root.add(Panel(width=240))
+        main = VStack(expand_x=True, expand_y=True)
+        header = HStack(spacing=12, expand_x=True)
+        header.add(Entry("search", width=200, height=40))
+        header.add(Button("Go"))
+        main.add(header)
+        main.add(ScrollView(Panel(expand_x=True), expand_x=True, expand_y=True))
+        root.add(main)
+        root.layout(pygame.Rect(0, 0, 1280, 720))
+        self.assertLessEqual(main.rect.right, 1280)
+        self.assertLessEqual(header.children[-1].rect.right, 1280)
+
+
 if __name__ == "__main__":
     unittest.main()

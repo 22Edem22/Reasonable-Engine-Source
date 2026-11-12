@@ -248,8 +248,23 @@ class NewProjectDialog(QDialog):
             self.type_group.addButton(button)
             self.type_buttons[key] = button
             type_row.addWidget(button)
+        type_row_2 = QHBoxLayout()
+        type_row_2.setSpacing(12)
+        for key, text, hint in (
+            ("site", t("newproj.type_site"), t("newproj.type_site_hint")),
+            ("other", t("newproj.type_other"), t("newproj.type_other_hint")),
+        ):
+            button = QPushButton(f"{text}\n{hint}")
+            button.setObjectName("choice")
+            button.setCheckable(True)
+            button.setMinimumHeight(74)
+            button.setFont(theme.ui_font(10, 700))
+            self.type_group.addButton(button)
+            self.type_buttons[key] = button
+            type_row_2.addWidget(button)
         self.type_buttons["game"].setChecked(True)
         layout.addLayout(type_row)
+        layout.addLayout(type_row_2)
 
         layout.addSpacing(8)
         self.levels_section = self._section(t("newproj.levels_section"))
@@ -276,6 +291,7 @@ class NewProjectDialog(QDialog):
         self._apply_level_defaults()
         for button in self.type_buttons.values():
             button.toggled.connect(self._apply_level_defaults_from_type)
+        self._sync_level_visibility()
 
         layout.addSpacing(8)
         self.mode_section = self._section(t("newproj.mode_section"))
@@ -497,6 +513,15 @@ class NewProjectDialog(QDialog):
 
     def _apply_level_defaults_from_type(self, _checked: bool) -> None:
         self._apply_level_defaults()
+        self._sync_level_visibility()
+
+    def _sync_level_visibility(self) -> None:
+        visible = self.project_type() in {"game", "app"}
+        if hasattr(self, "levels_section"):
+            self.levels_section.setVisible(visible)
+            self.levels_hint.setVisible(visible)
+            for check in self.level_checks.values():
+                check.setVisible(visible)
 
     def _apply_level_defaults(self) -> None:
         """Reset the checkboxes to sensible defaults for the chosen type."""
@@ -663,7 +688,12 @@ class NewProjectDialog(QDialog):
                 t("newproj.ready_text", name=name, model=model, base_url=config.get("base_url") or t("newproj.local_provider"))
             )
 
-        kind = t("newproj.kind_game") if self.project_type() == "game" else t("newproj.kind_app")
+        kind = {
+            "game": t("newproj.kind_game"),
+            "app": t("newproj.kind_app"),
+            "site": t("newproj.kind_site"),
+            "other": t("newproj.kind_other"),
+        }.get(self.project_type(), t("newproj.kind_app"))
         mode = t("convert.mode.builtin") if self.mode() == "builtin" else t("convert.mode.external")
         if self.starter == "blank":
             self.summary_label.setText(

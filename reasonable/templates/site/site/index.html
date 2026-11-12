@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>__APP_TITLE__</title>
+  <meta name="description" content="__APP_TITLE__ — сайт, собранный в Reasonable Engine.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">К содержанию</a>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html">__APP_TITLE__</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">
+        Меню
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Основная навигация">
+        <a href="#features">Возможности</a>
+        <a href="#about">О проекте</a>
+        <a class="button button-small" href="#contact">Связаться</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero container">
+      <p class="eyebrow">Reasonable Engine · Website</p>
+      <h1>Сайт, который выглядит дорого и работает быстро.</h1>
+      <p class="lead">
+        Статический сайт на чистом Python и стандартной библиотеке.
+        Адаптивная вёрстка, доступность и аккуратная типографика уже настроены.
+      </p>
+      <div class="hero-actions">
+        <a class="button" href="#features">Посмотреть возможности</a>
+        <a class="button button-ghost" href="#about">Как это устроено</a>
+      </div>
+    </section>
+
+    <section class="section container" id="features">
+      <div class="section-head">
+        <h2>Готово к развитию</h2>
+        <p>Замените текст и секции своими — структура и стили уже на месте.</p>
+      </div>
+      <div class="grid grid-3">
+        <article class="card">
+          <h3>Быстро</h3>
+          <p>Никаких сборщиков и зависимостей: только HTML, CSS, JS и Python.</p>
+        </article>
+        <article class="card">
+          <h3>Адаптивно</h3>
+          <p>Сетка, отступы и типографика подстраиваются под телефон и десктоп.</p>
+        </article>
+        <article class="card">
+          <h3>Понятно</h3>
+          <p>Семантическая разметка, alt-тексты и видимый фокус для клавиатуры.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section container" id="about">
+      <div class="split">
+        <div>
+          <h2>О проекте</h2>
+          <p>
+            Это стартовая страница сайта. Измените заголовки, добавьте страницы
+            через инструмент site_page и обновите стили в styles.css.
+          </p>
+        </div>
+        <div class="callout">
+          <p class="callout-title">Как запустить</p>
+          <pre><code>python main.py</code></pre>
+          <p>Страница откроется на <code>http://127.0.0.1:8000/</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section container" id="contact">
+      <div class="cta">
+        <div>
+          <h2>Готовы к следующему шагу?</h2>
+          <p>Опишите задачу агенту — он дополнит страницы и контент.</p>
+        </div>
+        <a class="button" href="index.html">Наверх</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <span>© <span id="year">2026</span> __APP_TITLE__</span>
+      <span>Собрано в Reasonable Engine</span>
+    </div>
+  </footer>
+  <script src="app.js" defer></script>
+</body>
+</html>

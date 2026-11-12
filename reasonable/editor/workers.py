@@ -59,11 +59,13 @@ class AgentWorker(QThread):
         analysis: bool = False,
         reply_language: str | None = None,
         persist_messages: bool = True,
+        confirm_write: Callable[[str, str], bool] | None = None,
     ) -> None:
         super().__init__()
         self.project = project
         self.settings = settings
         self.message = message
+        self.confirm_write = confirm_write
         self.cancel_flag = threading.Event()
         agent_settings = settings.data.get("agent", {}) or {}
         try:
@@ -89,6 +91,7 @@ class AgentWorker(QThread):
                 analysis=analysis,
                 reply_language=reply_language,
                 persist_messages=persist_messages,
+                confirm_write=confirm_write,
             )
         else:
             self.agent = Agent(
@@ -101,6 +104,7 @@ class AgentWorker(QThread):
                 analysis=analysis,
                 reply_language=reply_language,
                 persist_messages=persist_messages,
+                confirm_write=confirm_write,
             )
 
     def _on_event(self, event: AgentEvent) -> None:

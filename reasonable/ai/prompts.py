@@ -24,6 +24,7 @@ from .prompts_en import (  # noqa: F401  (re-exported for existing imports)
     SHORT_AGENT_TEMPLATE,
     SKILLS,
     UI_LEVEL_LABELS_EN,
+    WEB_GUIDE,
     build_agent_system_prompt,
     build_agent_system_prompt_body,
     build_improvement_prompt,
@@ -34,21 +35,41 @@ from .prompts_en import (  # noqa: F401  (re-exported for existing imports)
 def skills_for_project(project) -> dict[str, str]:
     """Only the skills this project actually needs — no extra files.
 
-    Base knowledge + a type-specific skill + one skill per selected interface
-    level. A pure-tkinter project never receives the advanced-scenes skill and
-    a game never receives the tkinter skill unless the user picked that level.
+    Base knowledge + type-specific skills + one skill per selected interface
+    level. Website and universal projects never receive pygame-only skills
+    unless their task actually uses them.
     """
     result: dict[str, str] = {}
-    for name in ("engine-basics.md", "sprites-and-assets.md", "progress-and-handoff.md", "android-and-export.md"):
+    kind = project.project_type
+    base = ["progress-and-handoff.md"]
+    if kind in {"game", "app"}:
+        base += ["engine-basics.md", "sprites-and-assets.md", "android-and-export.md"]
+    elif kind == "site":
+        base += ["web-development.md"]
+    else:
+        base += [
+            "web-development.md",
+            "engine-basics.md",
+            "game-development.md",
+            "app-development.md",
+            "other-development.md",
+        ]
+    for name in base:
         if name in SKILLS:
             result[name] = SKILLS[name]
-    type_skill = "game-development.md" if project.project_type == "game" else "app-development.md"
+    type_skill = {
+        "game": "game-development.md",
+        "app": "app-development.md",
+        "site": "web-development.md",
+        "other": "other-development.md",
+    }.get(kind, "app-development.md")
     if type_skill in SKILLS:
         result[type_skill] = SKILLS[type_skill]
-    for level in project.ui_levels:
-        skill = {"simple": "ui-simple-tkinter.md", "standard": "ui-standard-widgets.md", "advanced": "ui-advanced-scenes.md"}.get(level)
-        if skill and skill in SKILLS:
-            result[skill] = SKILLS[skill]
+    if kind in {"game", "app", "other"}:
+        for level in project.ui_levels:
+            skill = {"simple": "ui-simple-tkinter.md", "standard": "ui-standard-widgets.md", "advanced": "ui-advanced-scenes.md"}.get(level)
+            if skill and skill in SKILLS:
+                result[skill] = SKILLS[skill]
     return result
 
 
@@ -56,17 +77,21 @@ def _conversion_note(project) -> str:
     converted = project.manifest.get("converted_from")
     if not isinstance(converted, dict) or not converted.get("name"):
         return ""
-    source_platform = "Android" if converted.get("platform") == "android" else "Windows"
     return (
         f"- Converted from \"{converted.get('name')}\" "
-        f"({source_platform}) {converted.get('at', '')}".rstrip()
+        f"{converted.get('at', '')}".rstrip()
     )
 
 
 def build_external_guide(project) -> str:
-    kind = "game" if project.project_type == "game" else "application"
+    kind = {
+        "game": "game",
+        "app": "application",
+        "site": "website",
+        "other": "universal Python project",
+    }.get(project.project_type, "application")
     mode = "built-in" if project.mode == "builtin" else "external"
-    platform = "Android" if getattr(project, "platform", "windows") == "android" else "Windows"
+    platform = "Python 3 on Windows and Linux"
     skills = "\n".join(f"- [`skills/{name}`](skills/{name})" for name in skills_for_project(project))
     levels = ", ".join(UI_LEVEL_LABELS_EN.get(level, level) for level in project.ui_levels)
     from reasonable.version import VERSION_LABEL
@@ -84,7 +109,7 @@ def build_external_guide(project) -> str:
         root=project.root,
         notes=project.notes or "none",
         skills=skills,
-        api_guide=ENGINE_API_GUIDE,
+        api_guide=WEB_GUIDE if project.project_type == "site" else ENGINE_API_GUIDE,
     )
 
 

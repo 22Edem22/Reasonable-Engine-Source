@@ -156,7 +156,7 @@ class OrchestratorTests(unittest.TestCase):
                 self.last_error = ""
                 self._emit = kwargs.get("on_event")
 
-            def run(self, message):
+            def run(self, message, **kwargs):
                 self._emit(
                     AgentEvent(
                         "usage",
@@ -177,6 +177,7 @@ class OrchestratorTests(unittest.TestCase):
                         data={
                             "tool": "write_file",
                             "arguments": {"path": "main.py"},
+                            "call_id": "call-42",
                         },
                     )
                 )
@@ -207,7 +208,10 @@ class OrchestratorTests(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                event.kind == "status" and "write_file" in event.text
+                event.kind == "tool_start"
+                and event.data.get("agent") == "code-1"
+                and event.data.get("call_id") == "call-42"
+                and event.data.get("arguments") == {"path": "main.py"}
                 for event in events
             )
         )

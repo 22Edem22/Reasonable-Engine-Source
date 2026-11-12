@@ -23,12 +23,12 @@
   #define OutputDir "..\dist"
 #endif
 #ifndef AppVersion
-  #define AppVersion "2.0.2"
+  #define AppVersion "2.0.3"
 #endif
 ; Публичный лейбл релиза (RE-2.01, RE-2.02, ...) — идёт в имя установщика и в
 ; «Установка и удаление программ». VersionInfoVersion остаётся числовой.
 #ifndef ReleaseLabel
-  #define ReleaseLabel "RE-2.02"
+  #define ReleaseLabel "RE-2.03"
 #endif
 
 #define AppName "Reasonable Engine"

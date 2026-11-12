@@ -37,6 +37,31 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         # provider's context window, capped at 48k so a slow local model is
         # not drowned in context.
         "context_tokens": 0,
+        # Cache-friendly context: "auto" boosts the window for large-context
+        # DeepSeek models, "cache" always does, "balanced" keeps 48k.
+        "context_mode": "auto",
+        # Hard cap for one user-visible run, including parallel specialists.
+        # Steps are unlimited by default, so without this a stuck agent could
+        # spend the whole allowance. 0 keeps the old unlimited behaviour.
+        "run_token_budget": 0,
+        # Keep a journal of the current step so a crash or power loss can
+        # resume the same task instead of paying for the whole run again.
+        "resume_runs": True,
+        # Show the answer while it is being generated. Off by default: many
+        # OpenAI-compatible endpoints stream without a usage payload, which
+        # makes the cost counter less accurate.
+        "stream": False,
+        # Ask once before the first file change of a run. Off by default:
+        # snapshots make every run reversible already.
+        "confirm_changes": False,
+        # Specialist-only guards: a work item that keeps reading and running
+        # commands without editing a file is stopped long before it can burn
+        # hours of tokens. 0 disables a particular limit.
+        "write_starvation_warn": 8,
+        "write_starvation_stop": 20,
+        "specialist_timeout_minutes": 15,
+        "specialist_max_steps": 60,
+        "max_run_minutes": 90,
         # Compress older turns into a short summary instead of dropping them.
         "compaction": True,
         # Optional hard stop when this many steps in a row changed nothing.
@@ -52,6 +77,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "auto_continue_errors": [],
         # Independent audit of the user's task before the agent declares success.
         "supervisor": True,
+        # Optional cheaper model for mechanical calls (compaction + audit).
+        # Empty keeps the main model. Example for OpenCode Go: deepseek-v4.1-flash.
+        "aux_model": "",
         # Parallel development: a non-editing master plans work for several
         # scoped specialists, then validates and audits the merged result.
         "parallel": True,
@@ -100,8 +128,37 @@ class Settings:
             self.data = _deep_merge(DEFAULT_SETTINGS, loaded)
         else:
             self.data = copy.deepcopy(DEFAULT_SETTINGS)
+        self._decrypt_secrets()
         self._migrate()
         self._consume_installer_language()
+
+    # -- secrets ----------------------------------------------------------
+    def _decrypt_secrets(self) -> None:
+        """Keep decrypted keys in memory; only the file is protected."""
+        from .secrets import unprotect
+
+        overrides = self.data.get("provider_overrides")
+        if isinstance(overrides, dict):
+            for item in overrides.values():
+                if isinstance(item, dict) and item.get("api_key"):
+                    item["api_key"] = unprotect(item["api_key"])
+        image = self.data.get("image")
+        if isinstance(image, dict) and image.get("api_key"):
+            image["api_key"] = unprotect(image["api_key"])
+
+    def _encrypted_payload(self) -> dict[str, Any]:
+        from .secrets import protect
+
+        payload = copy.deepcopy(self.data)
+        overrides = payload.get("provider_overrides")
+        if isinstance(overrides, dict):
+            for item in overrides.values():
+                if isinstance(item, dict) and item.get("api_key"):
+                    item["api_key"] = protect(item["api_key"])
+        image = payload.get("image")
+        if isinstance(image, dict) and image.get("api_key"):
+            image["api_key"] = protect(image["api_key"])
+        return payload
 
     def _consume_installer_language(self) -> None:
         """Persist the language chosen in the installer, then drop its marker.
@@ -181,7 +238,23 @@ class Settings:
             )
         except (TypeError, ValueError):
             agent["context_tokens"] = 0
+        try:
+            agent["run_token_budget"] = max(
+                0, min(10_000_000, int(agent.get("run_token_budget", 0) or 0))
+            )
+        except (TypeError, ValueError):
+            agent["run_token_budget"] = 0
+        try:
+            steps = int(agent.get("specialist_max_steps", 60) or 0)
+        except (TypeError, ValueError):
+            steps = 60
+        # 30 was the old default and stopped real work mid-task; keep a
+        # deliberate smaller value, but migrate the old default to 60.
+        if steps == 30:
+            steps = 60
+        agent["specialist_max_steps"] = max(0, min(200, steps))
         agent["compaction"] = bool(agent.get("compaction", True))
+        agent["aux_model"] = str(agent.get("aux_model") or "").strip()[:160]
         try:
             agent["max_output_tokens"] = max(
                 256, min(65_536, int(agent.get("max_output_tokens", 16384) or 16384))
@@ -202,7 +275,7 @@ class Settings:
 
     def save(self) -> None:
         self.path = self.path or (app_data_dir() / "settings.json")
-        atomic_write_json(self.path, self.data)
+        atomic_write_json(self.path, self._encrypted_payload())
         from .i18n import invalidate_cache
 
         invalidate_cache()

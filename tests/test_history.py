@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from reasonable.core.history import (
     create_snapshot,
@@ -12,6 +13,7 @@ from reasonable.core.history import (
     snapshot_files,
     update_snapshot,
 )
+from reasonable.core import history as history_module
 
 
 class HistoryTests(unittest.TestCase):
@@ -77,6 +79,14 @@ class HistoryTests(unittest.TestCase):
         self.assertIsNone(get_snapshot(self.root, "../outside"))
         self.assertEqual(snapshot_files(self.root, "../outside"), [])
         self.assertFalse(delete_snapshot(self.root, "../outside"))
+
+    def test_prune_keeps_the_newest_versions_within_the_size_cap(self) -> None:
+        with mock.patch.object(history_module, "MAX_TOTAL_BYTES", 1):
+            for index in range(4):
+                create_snapshot(self.root, label=f"v{index}", record=False)
+        rows = list_snapshots(self.root)
+        # Always keep at least two versions, even when they exceed the cap.
+        self.assertEqual(len(rows), 2)
 
 
 if __name__ == "__main__":

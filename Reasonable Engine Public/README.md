@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <b>Released version: RE-2.02</b>
+  <b>Released version: RE-2.03</b>
 </p>
 
 <p align="center">
@@ -36,12 +36,12 @@
 ## 📥 Download
 
 The current build is always here: **[Releases](../../releases/latest)** — download
-`ReasonableEngine-Setup-RE-2.02.exe`, run it, and get to work. Installation is simple:
+`ReasonableEngine-Setup-RE-2.03.exe`, run it, and get to work. Installation is simple:
 the engine places the editor, a portable Python, and the runtime itself; there is
 nothing extra to configure. Your projects are stored in the `Projects` folder inside
 the installation and are not removed on update.
 
-> **Current release — RE-2.02** (released November 6, 2026). Everything described
+> **Current release — RE-2.03** (released November 8, 2026). Everything described
 > below is already part of this released version.
 
 | | |
@@ -65,6 +65,19 @@ the installation and are not removed on update.
   instead of being dropped, so the agent does not forget the task halfway.
 - Prompt caching keeps long runs affordable: the stable system prompt and tools
   are cached by the provider, and the chat shows how many tokens came from cache.
+- **A budget and an instant stop**: a run can be capped by a token limit; when
+  it is used up the work stops and keeps the changes and the snapshot. The Stop
+  button also aborts the network request instead of waiting for the model.
+- **A diff of the changes in the chat**: after a run you can see line by line
+  what changed in every file, without opening files by hand.
+- **Reliability and speed**: an interrupted run resumes after a crash, and
+  several independent project reads run in parallel. The reply can be shown as
+  it is generated (enabled in the agent settings). A specialist that reads and
+  runs commands for hours without editing is stopped by its time and step
+  limits.
+- **Approval before edits**: agent settings can make the run pause before the
+  first edit and ask for permission. Declining returns control without changing
+  any file.
 - Conversation history is kept per project together with the agent's answers —
   come back a week later and see the whole conversation, not only your own
   messages.
@@ -73,9 +86,11 @@ the installation and are not removed on update.
 - **Independent task check**: before the final answer a separate pass compares
   the user's exact request with the code, validation and run result. If anything
   is missing, the agent keeps working instead of declaring success.
-- **Parallel development**: a master agent plans and controls while code and
-  asset specialists work simultaneously in disjoint files. The master then
-  verifies the launch, audits the result and dispatches fixes.
+- **Captain-led team**: the lead agent builds a dependency graph, runs
+  independent items in waves, and delivers a finished report to the agent that
+  depends on it. Specialists are durable: a member remembers its earlier work
+  and is reused for fixes. The audit reads compact diffs of the changes instead
+  of full files.
 - **UI language = agent language**: Russian or English chosen in settings is used
   for plans, progress and replies even when the task is written in another
   language.
@@ -84,6 +99,17 @@ the installation and are not removed on update.
   choose an export. The next step unlocks only after the action. Replay it from
   Help → Quick start, the settings dialog, or the Tutorial button on the start
   screen.
+
+### Four development modes
+
+- **Game** and **App** — the engine, scenes and ready widgets.
+- **Website** — a responsive `site/`, a design system and a standard-library
+  Python server. The agent checks links, alt text, titles and responsiveness.
+- **Other** — a universal Python project: CLI, script, bot or service; the agent
+  gets the tools of every mode.
+- New projects run as `python main.py` on Windows and Linux; the Windows/Android
+  platform picker is gone. Websites and “Other” projects start without the
+  engine splash.
 
 ### Interface levels
 When creating a project, pick one or more levels — the project receives only the
@@ -174,7 +200,7 @@ Rules:
    begins with RE-3.01, then RE-3.02…RE-3.12, and so on.
 4. A generation never "rolls back": Reasonable Engine 2 cannot ship an RE-1.xx
    release, and RE 1 cannot ship an RE-2.xx release.
-5. The current **released** version is **RE-2.02**. The live status is always shown
+5. The current **released** version is **RE-2.03**. The live status is always shown
    in the header of [CHANGELOG.md](CHANGELOG.md) and in the editor's "About" window.
 
 ## 🖥 System Requirements

@@ -12,6 +12,8 @@ import json
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -21,11 +23,16 @@ from reasonable.core.agent_errors import classify_agent_error
 from reasonable.core.history import create_snapshot, update_snapshot
 from reasonable.core.i18n import tr as _tr
 from reasonable.core.progress import read_state, record_event, set_status
+from reasonable.core.paths import atomic_write_json, now_iso, read_json
 from reasonable.core.settings import Settings
 
 from .client import AIClient, AIError, ChatResult, ToolCall
 from .prompts import build_agent_system_prompt, build_initial_user_message
-from .tools import ANALYSIS_TOOL_NAMES, ANALYSIS_TOOL_SCHEMAS, TOOL_SCHEMAS, AgentTools
+from .tools import (
+    ANALYSIS_TOOL_NAMES,
+    AgentTools,
+    tool_schemas_for,
+)
 
 
 @dataclass
@@ -43,7 +50,43 @@ class AgentCancelled(RuntimeError):
     pass
 
 
+class TokenBudget:
+    """Token cap shared by everything that belongs to one user-visible run.
+
+    A single-agent run and a parallel team both funnel their usage through this
+    object, so ``max_steps = 0`` (the default) can no longer spend without a
+    ceiling. ``limit = 0`` keeps the old unlimited behaviour.
+    """
+
+    def __init__(self, limit: int = 0) -> None:
+        try:
+            self.limit = max(0, int(limit or 0))
+        except (TypeError, ValueError):
+            self.limit = 0
+        self.used = 0
+
+    def add(self, usage: dict[str, Any] | None) -> None:
+        try:
+            self.used += max(0, int((usage or {}).get("total_tokens") or 0))
+        except (TypeError, ValueError):
+            pass
+
+    @property
+    def exceeded(self) -> bool:
+        return self.limit > 0 and self.used >= self.limit
+
+
 _FALLBACK_TOOL_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+# Tools that only read project state. Several calls to these in one assistant
+# turn can safely run in parallel: none of them mutates files or progress.
+PARALLEL_READ_TOOLS = {
+    "list_files",
+    "read_file",
+    "search_text",
+    "inspect_image",
+    "get_progress",
+}
 
 # A single tool result larger than this is truncated before it goes into the
 # conversation. read_file defaults to 800 lines, which is easily 100k+ tokens
@@ -52,11 +95,46 @@ _FALLBACK_TOOL_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 MAX_TOOL_RESULT_CHARS = 20_000
 
 
-def _shorten_tool_output(text: str) -> str:
+def _tool_args_summary(arguments: dict[str, Any] | None) -> dict[str, Any]:
+    """Small, safe trace of a tool call for progress/events diagnostics.
+
+    The full arguments can contain whole file contents and must never be
+    written to progress/events.jsonl. Path, command and range fields are enough
+    to see a repeated read/run loop later.
+    """
+    if not isinstance(arguments, dict):
+        return {}
+    keys = (
+        "path",
+        "start_line",
+        "end_line",
+        "query",
+        "command",
+        "task",
+        "status",
+        "percent",
+        "frames",
+        "timeout",
+        "palette",
+        "mode",
+        "title",
+    )
+    summary: dict[str, Any] = {}
+    for key in keys:
+        value = arguments.get(key)
+        if value is None or value == "":
+            continue
+        text = str(value)
+        summary[key] = text[:200]
+    return summary
+
+
+def _shorten_tool_output(text: str, limit: int = MAX_TOOL_RESULT_CHARS) -> str:
     value = str(text or "")
-    if len(value) <= MAX_TOOL_RESULT_CHARS:
+    limit = max(400, int(limit or MAX_TOOL_RESULT_CHARS))
+    if len(value) <= limit:
         return value
-    head = MAX_TOOL_RESULT_CHARS - 2_500
+    head = max(0, limit - 2_500)
     return (
         value[:head]
         + f"\n... [output truncated: {len(value)} characters total; "
@@ -69,8 +147,10 @@ def _shorten_tool_output(text: str) -> str:
 # English-only, like tools and skills. It runs as a separate request after the
 # agent thinks it is done, so the model cannot simply agree with itself.
 SUPERVISOR_PROMPT = """You are a strict, independent completion auditor for a software project.
-You receive the user's original task, the agent's final report, the changed files
-with their current code, validation/run results and the project's scenes.
+You receive the user's original task, the agent's final report, diffs of the
+changed files (or bounded file content when no baseline exists), validation/run
+results and the project's scenes. A diff shows exactly what the agent added,
+removed or kept; unchanged code is not resent.
 
 Judge ONLY whether the user's exact request is implemented and works. Do not
 reward unrelated polish, do not assume the agent's report is true, and do not
@@ -119,6 +199,36 @@ def _extract_json_object(text: str) -> dict | None:
     except ValueError:
         return None
     return data if isinstance(data, dict) else None
+
+
+def _sanitize_resumed_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop a half-executed tool turn left behind by a crash.
+
+    Providers reject an ``assistant`` message with tool calls that have no
+    matching ``tool`` replies. If the journal was written in the middle of a
+    step, resume from the last fully answered turn instead.
+    """
+    last_assistant = None
+    for index in range(len(messages) - 1, -1, -1):
+        item = messages[index]
+        if item.get("role") == "assistant" and item.get("tool_calls"):
+            last_assistant = index
+            break
+    if last_assistant is None:
+        return messages
+    expected = {
+        str(call.get("id"))
+        for call in messages[last_assistant].get("tool_calls") or []
+        if isinstance(call, dict) and call.get("id")
+    }
+    answered = {
+        str(item.get("tool_call_id"))
+        for item in messages[last_assistant + 1 :]
+        if isinstance(item, dict) and item.get("role") == "tool"
+    }
+    if expected and not expected.issubset(answered):
+        return messages[:last_assistant]
+    return messages
 
 
 def _parse_fallback_tool(content: str) -> tuple[str, dict] | None:
@@ -219,6 +329,13 @@ class Agent:
         require_ready: bool = True,
         tool_schemas_override: list[dict[str, Any]] | None = None,
         sync_history: bool = True,
+        budget: TokenBudget | None = None,
+        confirm_write: Callable[[str, str], bool] | None = None,
+        max_seconds: float = 0,
+        max_steps_override: int | None = None,
+        stall_override: int | None = None,
+        expect_writes: bool | None = None,
+        cache_profile: bool | None = None,
     ) -> None:
         self.project = project
         self.settings = settings or Settings()
@@ -249,23 +366,109 @@ class Agent:
             )
         except (TypeError, ValueError):
             self._context_window = 128_000
-        self.client = AIClient(self.config, timeout=180, retries=2)
+        if budget is not None:
+            self.budget = budget
+        else:
+            try:
+                limit = int(
+                    (self.settings.data.get("agent", {}) or {}).get("run_token_budget", 0)
+                    or 0
+                )
+            except (TypeError, ValueError):
+                limit = 0
+            self.budget = TokenBudget(limit)
+        try:
+            self._stream_enabled = bool(
+                (self.settings.data.get("agent", {}) or {}).get("stream", False)
+            )
+        except Exception:
+            self._stream_enabled = False
+        self.client = AIClient(
+            self.config,
+            timeout=180,
+            retries=2,
+            cancel=self.cancel,
+            stream=self._stream_enabled,
+        )
+        if self._stream_enabled:
+            self.client.stream_callback = self._emit_stream_delta
+        # Mechanical auxiliary calls (context compaction and the independent
+        # completion audit) do not need the strongest model. Routing them to a
+        # cheaper one cuts the OpenCode allowance without touching the main
+        # reasoning loop. Empty means "use the same model as the loop".
+        self.aux_client: AIClient | None = None
+        self._aux_active = False
+        try:
+            aux_model = str(
+                (self.settings.data.get("agent", {}) or {}).get("aux_model") or ""
+            ).strip()
+        except Exception:
+            aux_model = ""
+        if aux_model and aux_model != str(self.config.get("model") or ""):
+            aux_config = dict(self.config)
+            aux_config["model"] = aux_model
+            self.aux_client = AIClient(aux_config, timeout=180, retries=2, cancel=self.cancel)
         self.image_config = image_config or self.settings.image_config()
         self.tools = AgentTools(
             project,
             image_config=self.image_config,
             write_scope=write_scope,
+            confirm_write=confirm_write,
         )
         self.extra_system_prompt = str(extra_system_prompt or "").strip()
         self.seed_history = bool(seed_history)
         self.create_snapshot = bool(create_snapshot)
         self.supervisor_override = supervisor
         self.require_ready = bool(require_ready)
+        # Specialists must produce files; the main agent may legitimately
+        # answer a question without writing. These limits bound a stuck
+        # specialist instead of letting it read and run commands for hours.
+        self.max_seconds = max(0.0, float(max_seconds or 0))
+        if self.max_seconds <= 0:
+            try:
+                minutes = int(
+                    (self.settings.data.get("agent", {}) or {}).get(
+                        "max_run_minutes", 0
+                    )
+                    or 0
+                )
+            except (TypeError, ValueError):
+                minutes = 0
+            self.max_seconds = max(0.0, min(600, minutes) * 60.0)
+        self.max_steps_override = max_steps_override
+        self.stall_override = stall_override
+        self.expect_writes = (
+            (not bool(analysis)) if expect_writes is None else bool(expect_writes)
+        )
+        self._write_starve_warn = 0
+        self._write_starve_limit = 0
+        self._steps_without_write = 0
+        self._write_starve_warned = False
+        self._deadline = 0.0
+        self._context_messages_limit = 0
+        self._tool_result_limit = MAX_TOOL_RESULT_CHARS
+        self._cache_mode = False
+        self.cache_profile = cache_profile
         self.tool_schemas_override = tool_schemas_override
         self.sync_history = bool(sync_history)
         self.hidden_message = bool(hidden_message)
         self.analysis = bool(analysis)
         self.reply_language = reply_language
+        # A journal is useful only for the main single-agent run. Analysis is
+        # read-only, and specialists are owned by the orchestrator, which has
+        # its own recovery flow.
+        try:
+            resume_runs = bool(
+                (self.settings.data.get("agent", {}) or {}).get("resume_runs", True)
+            )
+        except Exception:
+            resume_runs = True
+        self._journal_enabled = bool(
+            resume_runs
+            and not self.analysis
+            and self.require_ready
+            and self.tool_schemas_override is None
+        )
         # The editor UI persists exactly what it renders (user bubbles,
         # assistant replies, errors) as the run happens. Headless callers
         # (CLI, tests) let the agent write the durable history itself.
@@ -273,7 +476,7 @@ class Agent:
         self.tool_schemas = (
             self.tool_schemas_override
             if self.tool_schemas_override is not None
-            else (ANALYSIS_TOOL_SCHEMAS if self.analysis else TOOL_SCHEMAS)
+            else tool_schemas_for(self.project.project_type, analysis=self.analysis)
         )
         # Advertising a tool is not enough: models sometimes call tools they
         # were told not to use. Specialists must not touch global plan/progress
@@ -295,8 +498,20 @@ class Agent:
         self._install_nudged = False
         self._degenerate_repeats = 0
         self._truncated_repeats = 0
+        self._repeat_recoveries = 0
         self._task_message: dict[str, Any] | None = None
-        self._context_chars = 120_000
+        try:
+            self._context_chars = max(
+                20_000,
+                int(
+                    (self.settings.data.get("agent", {}) or {}).get(
+                        "context_chars", 120_000
+                    )
+                    or 120_000
+                ),
+            )
+        except (TypeError, ValueError):
+            self._context_chars = 120_000
         self._stall_limit = 0
         self._stall_signature: tuple | None = None
         self._stall_counter = 0
@@ -307,6 +522,9 @@ class Agent:
         # reported prompt_tokens after every call.
         self._chars_per_token = 3.6
         self._context_tokens = 48_000
+        # Fraction of the context budget kept after a trim. Lower values trade
+        # "just enough room" for a stable prompt prefix and cheap cache hits.
+        self._trim_headroom = 0.65
         self._compaction_enabled = False
         self._compaction_failures = 0
         self._summary = ""
@@ -341,6 +559,11 @@ class Agent:
             self.on_event(AgentEvent(kind, text, data))
         except Exception:
             pass
+
+    def _emit_stream_delta(self, text: str) -> None:
+        """Forward a piece of a streamed reply to the chat panel."""
+        if text:
+            self.emit("delta", text)
 
     def _check_cancel(self) -> None:
         if self.cancel.is_set():
@@ -406,14 +629,56 @@ class Agent:
             prompt += cached + cache_write
         completion = number("completion_tokens", "output_tokens")
         total = number("total_tokens", "total") or prompt + completion
+        # OpenCode Go reports what a request actually charged from the monthly
+        # allowance (``opencode.allowance``) and the list price it maps to.
+        # Token counts alone cannot answer "how much did this run cost me",
+        # because cached reads are ~50x cheaper than fresh input.
+        allowance = 0.0
+        list_cost = 0.0
+        if isinstance(opencode, dict):
+            try:
+                allowance = max(0.0, float(opencode.get("allowance") or 0.0))
+            except (TypeError, ValueError):
+                allowance = 0.0
+            try:
+                list_cost = max(0.0, float(opencode.get("list_cost") or 0.0))
+            except (TypeError, ValueError):
+                list_cost = 0.0
+        if allowance <= 0.0:
+            # Plain OpenAI-compatible providers may report a final "cost".
+            try:
+                allowance = max(0.0, float(raw.get("cost") or 0.0))
+            except (TypeError, ValueError):
+                allowance = 0.0
         return {
             "prompt_tokens": prompt,
             "completion_tokens": completion,
             "total_tokens": total,
             "cached_tokens": cached,
             "cache_write_tokens": cache_write,
+            "allowance": round(allowance, 8),
+            "list_cost": round(list_cost, 8),
             "seconds": round(max(0.0, float(seconds)), 3),
         }
+
+    @contextmanager
+    def _aux_client(self):
+        """Temporarily route mechanical calls to the cheaper auxiliary model.
+
+        ``_call_model`` is frequently replaced by tests, so the switch happens
+        on ``self.client`` instead of through an extra keyword argument.
+        """
+        if self.aux_client is None:
+            yield
+            return
+        original = self.client
+        self.client = self.aux_client
+        self._aux_active = True
+        try:
+            yield
+        finally:
+            self.client = original
+            self._aux_active = False
 
     def _call_model(
         self,
@@ -422,6 +687,7 @@ class Agent:
         *,
         temperature: float,
     ) -> ChatResult:
+        self._check_cancel()
         started = time.perf_counter()
         try:
             result = self.client.chat(messages, tools, temperature=temperature)
@@ -429,12 +695,18 @@ class Agent:
             # Failed requests still consume time; keep the lifetime clock honest
             # even when the provider returns no usage payload.
             self.emit("usage", usage=self._usage_payload(None, time.perf_counter() - started))
+            # The transport aborts a cancelled request with an AIError. Turn it
+            # into AgentCancelled so compaction/supervisor cannot swallow it.
+            self._check_cancel()
             raise
+        self._check_cancel()
         elapsed = time.perf_counter() - started
         self._calibrate_tokens(messages, tools, result.usage)
         # Emit even when the provider omits usage: generation time is still a
         # real cost and belongs in the lifetime counter.
-        self.emit("usage", usage=self._usage_payload(result.usage, elapsed))
+        usage = self._usage_payload(result.usage, elapsed)
+        self.budget.add(usage)
+        self.emit("usage", usage=usage)
         return result
 
     @staticmethod
@@ -465,6 +737,10 @@ class Agent:
         dependency-free, so the estimate is calibrated from the provider's
         ``prompt_tokens`` instead of staying a blind character count.
         """
+        if self._aux_active:
+            # A different auxiliary model has a different tokenizer; mixing
+            # its ratio into the main loop estimate would make trimming worse.
+            return
         try:
             prompt_tokens = int((usage or {}).get("prompt_tokens") or 0)
         except (TypeError, ValueError):
@@ -529,14 +805,15 @@ class Agent:
             ),
         )
         try:
-            result = self._call_model(
-                [
-                    {"role": "system", "content": COMPACTION_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
-                None,
-                temperature=0.0,
-            )
+            with self._aux_client():
+                result = self._call_model(
+                    [
+                        {"role": "system", "content": COMPACTION_PROMPT},
+                        {"role": "user", "content": user_content},
+                    ],
+                    None,
+                    temperature=0.0,
+                )
         except AgentCancelled:
             raise
         except Exception:
@@ -597,9 +874,9 @@ class Agent:
         try:
             agent_settings = self.settings.data.get("agent", {}) or {}
             limit = max(12, int(agent_settings.get("context_messages", 36) or 36))
-            context_chars = max(
-                20_000, int(agent_settings.get("context_chars", 120_000) or 120_000)
-            )
+            if self._context_messages_limit:
+                limit = self._context_messages_limit
+            context_chars = max(20_000, int(self._context_chars or 120_000))
         except (TypeError, ValueError):
             limit = 36
             context_chars = 120_000
@@ -644,7 +921,18 @@ class Agent:
         while recent and recent[0].get("role") == "tool":
             recent.pop(0)
 
-        def over_budget() -> bool:
+        # Trim below the hard limit, not merely to it. Popping one message per
+        # step rewrites the prompt prefix on every request, and a cache miss is
+        # billed roughly 50x higher than a cache hit (OpenCode Go, DeepSeek
+        # V4.1 Flash: $0.15 vs $0.003 per 1M input tokens). Headroom keeps the
+        # prefix stable for several steps after each trim.
+        headroom = min(
+            1.0, max(0.5, float(getattr(self, "_trim_headroom", 0.65) or 0.65))
+        )
+        target_tokens = max(1_000, int(self._context_tokens * headroom))
+        target_chars = max(10_000, int(context_chars * headroom))
+
+        def over_target() -> bool:
             prompt = [system]
             if pinned is not None and pinned is not system:
                 prompt.append(pinned)
@@ -653,9 +941,9 @@ class Agent:
             prompt.extend(recent)
             chars = sum(self._message_chars(item) for item in prompt)
             tokens = self._estimate_messages_tokens(prompt)
-            return tokens > self._context_tokens or chars > context_chars
+            return tokens > target_tokens or chars > target_chars
 
-        while over_budget() and len(recent) > 1:
+        while over_target() and len(recent) > 1:
             first = recent.pop(0)
             # Dropping an assistant tool_call also drops its results, otherwise
             # the next request contains orphaned tool messages.
@@ -678,31 +966,16 @@ class Agent:
         self.messages = trimmed
 
     def _supervisor_payload(self, task_text: str, final_text: str) -> dict[str, Any]:
-        changed: list[dict[str, Any]] = []
-        for item in self.tools.changed_files[:6]:
-            path = str(item.get("path") or "")
-            entry: dict[str, Any] = {
-                "path": path,
-                "action": str(item.get("action") or "edit"),
-            }
-            try:
-                entry["content"] = self.project.read_text(path)[:5000]
-            except Exception:
-                entry["content"] = ""
-            changed.append(entry)
-        # The auditor also needs the entry point when the task touched other
-        # files; it is the quickest way to see how the project starts.
-        if not any(item.get("path") == "main.py" for item in changed):
-            try:
-                changed.append(
-                    {
-                        "path": "main.py",
-                        "action": "unchanged",
-                        "content": self.project.read_text("main.py")[:4000],
-                    }
-                )
-            except Exception:
-                pass
+        from .diffs import changed_files_payload
+
+        # Diffs keep the audit cheap: the auditor sees the edit, not the whole
+        # project again. Without a pre-run snapshot the helper falls back to
+        # bounded content so the check is never blind.
+        changed = changed_files_payload(
+            self.project,
+            str((self.snapshot or {}).get("id") or ""),
+            self.tools.changed_files,
+        )
         scenes: list[dict[str, Any]] = []
         try:
             from ..core.scene import list_scenes, load_scene
@@ -773,7 +1046,10 @@ class Agent:
             },
         ]
         try:
-            result = self._call_model(messages, None, temperature=0.0)
+            with self._aux_client():
+                result = self._call_model(messages, None, temperature=0.0)
+        except AgentCancelled:
+            raise
         except Exception:
             self.emit(
                 "status",
@@ -911,9 +1187,26 @@ class Agent:
     # ------------------------------------------------------------------
     # Loop protection
     # ------------------------------------------------------------------
-    def _track_tool_call(self, name: str, output: str) -> None:
-        """Remember identical tool results to detect endless repetition."""
-        signature = (name, output[:400])
+    def _track_tool_call(
+        self,
+        name: str,
+        output: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> None:
+        """Remember identical tool calls to detect endless repetition.
+
+        The output alone is not enough: two ``read_file`` calls for different
+        ranges or two ``run_command`` calls with changing output look different
+        even when the model is stuck. The call arguments are the stable signal.
+        """
+        if arguments is None:
+            signature = (name, output[:400])
+        else:
+            try:
+                encoded = json.dumps(arguments, sort_keys=True, ensure_ascii=False)
+            except (TypeError, ValueError):
+                encoded = str(arguments)
+            signature = (name, encoded[:600])
         if getattr(self, "_last_tool_signature", None) == signature:
             self._repeat_count = getattr(self, "_repeat_count", 0) + 1
         else:
@@ -925,6 +1218,105 @@ class Agent:
         return getattr(self, "_repeat_count", 0) >= allowed
 
     # ------------------------------------------------------------------
+    # Parallel read-only tools
+    # ------------------------------------------------------------------
+    def _can_run_reads_parallel(self, calls: list[ToolCall]) -> bool:
+        if len(calls) < 2:
+            return False
+        if any(call.arguments.get("_parse_error") for call in calls):
+            return False
+        allowed = self._allowed_tool_names
+        return all(
+            call.name in PARALLEL_READ_TOOLS and call.name in allowed
+            for call in calls
+        )
+
+    def _run_parallel_reads(self, calls: list[ToolCall]) -> None:
+        """Run several independent read-only tools in one wave.
+
+        Models often ask for five files in a single turn. Doing that
+        sequentially wastes seconds per file while nothing mutates state.
+        Results are appended in the original call order, so the conversation
+        stays deterministic and the UI keeps its ordering.
+        """
+        self.emit(
+            "status",
+            _tr(
+                "Reading several parts of the project in parallel…",
+                "Читаю несколько частей проекта параллельно…",
+            ),
+        )
+        set_status(
+            self.project.root,
+            "running",
+            _tr("Reading project files…", "Читаю файлы проекта…"),
+            event_type="tool",
+            data={"tool": "read_batch", "count": len(calls)},
+        )
+
+        def invoke(call: ToolCall) -> str:
+            try:
+                return self.tools.call(call.name, call.arguments)
+            except Exception as exc:
+                return json.dumps(
+                    {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+                    ensure_ascii=False,
+                )
+
+        outputs: list[str] = []
+        with ThreadPoolExecutor(max_workers=min(4, len(calls))) as pool:
+            futures = [pool.submit(invoke, call) for call in calls]
+            for future in futures:
+                self._check_cancel()
+                try:
+                    outputs.append(future.result())
+                except Exception as exc:
+                    outputs.append(
+                        json.dumps(
+                            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+                            ensure_ascii=False,
+                        )
+                    )
+        self._check_cancel()
+        for call, output in zip(calls, outputs):
+            self.emit(
+                "tool_start",
+                call.name,
+                tool=call.name,
+                arguments=call.arguments,
+                call_id=call.id,
+            )
+            self.messages.append(self._tool_message(call, output))
+            self._remember_evidence(call.name, output)
+            self._track_tool_call(call.name, output, call.arguments)
+            try:
+                parsed = json.loads(output)
+            except ValueError:
+                parsed = {"raw": output[:500]}
+            self.emit(
+                "tool_result",
+                call.name,
+                tool=call.name,
+                success=bool(parsed.get("ok", True)),
+                result=output[:5000],
+                call_id=call.id,
+            )
+        if self._stuck_after_repeats():
+            self.messages.append(
+                {
+                    "role": "user",
+                    "content": self._recovery_prompt(
+                        self.tools.readiness(),
+                        extra=(
+                            "You repeated the same reads with the same result. "
+                            "Stop re-reading and start implementing with write_file/edit_file."
+                        ),
+                    ),
+                }
+            )
+            self._reset_loop_tracking()
+
+    # ------------------------------------------------------------------
     # Context and progress guards
     # ------------------------------------------------------------------
     def _tool_message(self, call: ToolCall, output: str) -> dict[str, Any]:
@@ -932,7 +1324,7 @@ class Agent:
             "role": "tool",
             "tool_call_id": call.id,
             "name": call.name,
-            "content": _shorten_tool_output(output),
+            "content": _shorten_tool_output(output, self._tool_result_limit),
         }
 
     def _remember_evidence(self, name: str, output: str) -> None:
@@ -1002,6 +1394,63 @@ class Agent:
         self.incomplete_reason = reason
         set_status(self.project.root, "idle", reason[:300], event_type="agent")
         self.emit("incomplete", reason)
+
+    def _write_starvation_check(self) -> bool:
+        """Stop a specialist that only reads and runs commands.
+
+        ``stall_steps`` cannot catch this: every read of a new line range
+        counts as exploration, so a model can loop for hours. A specialist
+        exists to modify files, so a write-free window is the right signal.
+        The first threshold sends one very direct instruction; only a second
+        window without an edit ends the item.
+        """
+        if self._write_starve_limit <= 0:
+            return False
+        changed = self.tools.files_changed
+        if changed > self._last_write_count:
+            self._last_write_count = changed
+            self._steps_without_write = 0
+            self._write_starve_warned = False
+            return False
+        self._steps_without_write += 1
+        if self._steps_without_write >= self._write_starve_limit:
+            self._stop_incomplete(
+                _tr(
+                    "The specialist spent {count} steps reading and running commands without editing a single file, "
+                    "so it was stopped. The work item is incomplete.",
+                    "Специалист потратил {count} шагов на чтение и команды, не изменив ни одного файла, "
+                    "и был остановлен. Пункт работы не выполнен.",
+                    count=self._steps_without_write,
+                )
+            )
+            return True
+        if (
+            self._steps_without_write == self._write_starve_warn
+            and not self._write_starve_warned
+        ):
+            self._write_starve_warned = True
+            self.emit(
+                "status",
+                _tr(
+                    "No file edits for {count} steps — requiring the agent to write the missing code now…",
+                    "Нет правок файлов {count} шагов — требую немедленно дописать код…",
+                    count=self._steps_without_write,
+                ),
+            )
+            # AI-facing material stays English-only.
+            self.messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"WRITE STARVATION: {self._steps_without_write} steps in a row "
+                        "without editing a file. You already announced that you would "
+                        "continue writing. Do it now: call edit_file or write_file and "
+                        "replace the placeholder/marker with the real code. Do not read "
+                        "more files and do not run more commands until the file has changed."
+                    ),
+                }
+            )
+        return False
 
     def _track_stall(self) -> bool:
         """Stop a run that keeps spending tokens without changing anything.
@@ -1189,6 +1638,75 @@ class Agent:
                 _tr("Could not create the project snapshot: {error}", "Не удалось создать снимок проекта: {error}", error=exc),
             )
 
+    def _journal_path(self):
+        return self.project.root / ".reasonable" / "agent_run.json"
+
+    def _journal_run(self, task_text: str, step: int) -> None:
+        """Persist the live conversation so a hard crash can be resumed.
+
+        Written after every completed step. The file is removed on any normal
+        ending (done, stopped, error), so it only survives a process kill or a
+        power loss — exactly the case where the user would otherwise pay for
+        the whole run again.
+        """
+        if not self._journal_enabled:
+            return
+        try:
+            payload = {
+                "version": 1,
+                "chat_id": self.chat_id or "",
+                "task": str(task_text or "")[:8000],
+                "step": int(step),
+                "saved_at": now_iso(),
+                "messages": self.messages,
+            }
+            path = self._journal_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(path, payload)
+        except Exception:
+            pass
+
+    def _load_journal(self, task_text: str):
+        if not self._journal_enabled:
+            return None
+        path = self._journal_path()
+        try:
+            if time.time() - path.stat().st_mtime > 86_400:
+                return None
+        except OSError:
+            return None
+        data = read_json(path, {})
+        if not isinstance(data, dict):
+            return None
+        try:
+            version = int(data.get("version") or 0)
+        except (TypeError, ValueError):
+            return None
+        if version != 1:
+            return None
+        if str(data.get("task") or "").strip() != str(task_text or "").strip():
+            return None
+        messages = data.get("messages")
+        if not isinstance(messages, list) or len(messages) < 2:
+            return None
+        messages = [item for item in messages if isinstance(item, dict)]
+        messages = _sanitize_resumed_messages(messages)
+        if len(messages) < 2:
+            return None
+        try:
+            step = int(data.get("step") or 0)
+        except (TypeError, ValueError):
+            step = 0
+        return {"messages": messages, "step": step}
+
+    def _clear_journal(self) -> None:
+        if not self._journal_enabled:
+            return
+        try:
+            self._journal_path().unlink()
+        except OSError:
+            pass
+
     def _sync_history(self) -> None:
         """Attach the changed-file audit trail to the pre-run snapshot."""
         self.changes = self.tools.changed_files
@@ -1246,7 +1764,15 @@ class Agent:
         )
 
     # ------------------------------------------------------------------
-    def run(self, user_message: str | None = None) -> str:
+    def run(self, user_message: str | None = None, *, continue_conversation: bool = False) -> str:
+        # A durable specialist can be asked to continue the same task after
+        # hitting a guard. Keep its exact conversation then, otherwise a fix
+        # round starts by re-reading the whole project from scratch.
+        previous_messages = list(self.messages) if continue_conversation else []
+        previous_task = self._task_message if previous_messages else None
+        previous_evidence = set(self._evidence_paths) if previous_messages else set()
+        if self.cancel.is_set():
+            return ""
         self.finished = False
         self.final_text = ""
         self.last_error = ""
@@ -1258,6 +1784,7 @@ class Agent:
         self._install_nudged = False
         self._degenerate_repeats = 0
         self._truncated_repeats = 0
+        self._repeat_recoveries = 0
         self._task_message = None
         self._evidence_paths = set()
         self._stall_signature = None
@@ -1295,15 +1822,61 @@ class Agent:
         # language of the task text. A user with a Russian UI may paste an
         # English prompt and still expects Russian thinking, plans and replies.
         note = i18n.language_note(self.reply_language or i18n.current_language())
-        self.messages.append(
-            {
-                "role": "user",
-                "content": f"{note}\n\n{task_text}",
-            }
-        )
-        # The original task survives every history trim. Without this anchor a
-        # long tool-calling run eventually forgot what it was doing.
-        self._task_message = self.messages[-1]
+        if previous_messages:
+            # Continue the same conversation: the model already knows the
+            # files it edited and must not restart with a full project scan.
+            self.messages = _sanitize_resumed_messages(previous_messages)
+            self._task_message = previous_task
+            self._evidence_paths = previous_evidence
+            if self._task_message is None:
+                for item in self.messages:
+                    if item.get("role") == "user":
+                        self._task_message = item
+                        break
+            self.messages.append(
+                {
+                    "role": "user",
+                    "content": f"{note}\n\n{task_text}",
+                }
+            )
+        else:
+            self.messages.append(
+                {
+                    "role": "user",
+                    "content": f"{note}\n\n{task_text}",
+                }
+            )
+            # The original task survives every history trim. Without this anchor a
+            # long tool-calling run eventually forgot what it was doing.
+            self._task_message = self.messages[-1]
+        # A hard crash leaves the journal behind. Resume that exact task once;
+        # the file is removed on every normal ending.
+        resumed = None if previous_messages else self._load_journal(task_text)
+        resumed_step = 0
+        if resumed:
+            self.messages = resumed["messages"]
+            anchor = None
+            wanted = str(task_text or "").strip()
+            for item in self.messages:
+                if item.get("role") == "user" and wanted and wanted in str(
+                    item.get("content") or ""
+                ):
+                    anchor = item
+            if anchor is None:
+                for item in reversed(self.messages):
+                    if item.get("role") == "user":
+                        anchor = item
+                        break
+            if anchor is not None:
+                self._task_message = anchor
+            resumed_step = max(0, int(resumed.get("step") or 0))
+            self.emit(
+                "status",
+                _tr(
+                    "Resuming the run interrupted by a crash…",
+                    "Продолжаю запуск, прерванный сбоем…",
+                ),
+            )
         # Every run is reversible: the snapshot is taken before the first tool
         # call and its metadata is extended with the files that changed. The
         # read-only improvement review changes nothing, so it needs no snapshot.
@@ -1326,6 +1899,31 @@ class Agent:
             self._stall_limit = max(0, min(50, stall_value))
         except (TypeError, ValueError):
             self._stall_limit = 0
+        if self.max_steps_override is not None:
+            max_steps = max(0, int(self.max_steps_override))
+        if self.stall_override is not None:
+            self._stall_limit = max(0, min(50, int(self.stall_override)))
+        if self.expect_writes:
+            try:
+                warn = int(agent_settings.get("write_starvation_warn", 8) or 8)
+            except (TypeError, ValueError):
+                warn = 8
+            try:
+                stop = int(agent_settings.get("write_starvation_stop", 20) or 20)
+            except (TypeError, ValueError):
+                stop = 20
+            warn = max(4, min(50, warn))
+            self._write_starve_warn = warn
+            self._write_starve_limit = max(warn + 2, min(100, stop))
+        else:
+            self._write_starve_warn = 0
+            self._write_starve_limit = 0
+        self._steps_without_write = 0
+        self._write_starve_warned = False
+        self._last_write_count = self.tools.files_changed
+        self._deadline = (
+            time.monotonic() + self.max_seconds if self.max_seconds > 0 else 0.0
+        )
         try:
             self._context_chars = max(
                 20_000, int(agent_settings.get("context_chars", 120_000) or 120_000)
@@ -1344,17 +1942,42 @@ class Agent:
             self._context_tokens = max(
                 2_000, min(48_000, int(self._context_window * 0.6))
             )
+        mode = str(agent_settings.get("context_mode") or "auto").strip().lower()
+        model = str(self.config.get("model") or "").lower()
+        cache_eligible = self._context_window >= 100_000 and (
+            "deepseek" in model or "v4.1" in model
+        )
+        if mode == "cache" or (mode == "auto" and cache_eligible):
+            if self.cache_profile is False:
+                mode = "balanced"
+            else:
+                self._cache_mode = True
+                try:
+                    user_tokens = int(agent_settings.get("context_tokens") or 0)
+                except (TypeError, ValueError):
+                    user_tokens = 0
+                cache_tokens = (
+                    user_tokens
+                    if user_tokens > 0
+                    else min(110_000, int(self._context_window * 0.86))
+                )
+                self._context_tokens = max(
+                    2_000, min(int(self._context_window * 0.85), cache_tokens)
+                )
+                self._context_chars = max(self._context_chars, self._context_tokens * 4)
+                self._context_messages_limit = 160
+                self._tool_result_limit = 4_500
         temperature = float(agent_settings.get("temperature", 0.3))
         # Restore the conversation from previous sessions so the agent
         # remembers what the user already asked and what was answered.
-        if self.seed_history:
+        if self.seed_history and not resumed:
             self._seed_chat_history()
         set_status(self.project.root, "running", _tr("The agent is studying the project…", "Агент изучает проект…"), event_type="agent")
         record_event(self.project.root, "agent", _tr("The built-in agent started working.", "Встроенный агент начал работу."))
         self.emit("status", _tr("The agent is studying the project…", "Агент изучает проект…"))
 
         try:
-            step = 0
+            step = resumed_step
             while True:
                 step += 1
                 self._check_cancel()
@@ -1368,6 +1991,31 @@ class Agent:
                             max=max_steps,
                         )
                     )
+                    break
+                if self.budget.exceeded:
+                    self._stop_incomplete(
+                        _tr(
+                            "The run used its token budget ({used} of {limit}) and stopped. "
+                            "The work may be incomplete — continue in a new run or raise the budget in settings.",
+                            "Запуск израсходовал бюджет токенов ({used} из {limit}) и остановился. "
+                            "Работа может быть не завершена — продолжите новым запуском или увеличьте бюджет в настройках.",
+                            used=self.budget.used,
+                            limit=self.budget.limit,
+                        )
+                    )
+                    break
+                if self._deadline and time.monotonic() > self._deadline:
+                    self._stop_incomplete(
+                        _tr(
+                            "The run exceeded its {minutes}-minute limit and stopped. "
+                            "The work may be incomplete — continue in a new run or raise the limit in settings.",
+                            "Запуск превысил лимит {minutes} мин и остановился. "
+                            "Работа может быть не завершена — продолжите новым запуском или увеличьте лимит в настройках.",
+                            minutes=max(1, int(round(self.max_seconds / 60))),
+                        )
+                    )
+                    break
+                if self._write_starvation_check():
                     break
                 if step > 1 and self._track_stall():
                     break
@@ -1479,6 +2127,7 @@ class Agent:
                     # Keep useful tool calls but never store the loop in history.
                     message["content"] = ""
                 self.messages.append(message)
+                self._journal_run(task_text, step)
 
                 if not calls:
                     if self.analysis:
@@ -1586,16 +2235,31 @@ class Agent:
                     )
                     continue
 
+                if self._can_run_reads_parallel(calls):
+                    self._run_parallel_reads(calls)
+                    self._journal_run(task_text, step)
+                    continue
+
                 touched_files = False
                 installed_package = False
                 for call in calls:
                     self._check_cancel()
-                    self.emit("tool_start", call.name, tool=call.name, arguments=call.arguments)
+                    self.emit(
+                        "tool_start",
+                        call.name,
+                        tool=call.name,
+                        arguments=call.arguments,
+                        call_id=call.id,
+                    )
                     set_status(
                         self.project.root,
                         "running",
                         _tr("Tool: {name}", "Инструмент: {name}", name=call.name),
                         event_type="tool",
+                        data={
+                            "tool": call.name,
+                            "arguments": _tool_args_summary(call.arguments),
+                        },
                     )
                     if call.arguments.get("_parse_error"):
                         # A cut-off or malformed JSON argument used to reach the
@@ -1620,6 +2284,7 @@ class Agent:
                             tool=call.name,
                             success=False,
                             result=output[:5000],
+                            call_id=call.id,
                         )
                         continue
                     if call.name not in self._allowed_tool_names:
@@ -1642,6 +2307,7 @@ class Agent:
                             tool=call.name,
                             success=False,
                             result=output[:5000],
+                            call_id=call.id,
                         )
                         continue
                     if self.analysis and call.name not in ANALYSIS_TOOL_NAMES:
@@ -1682,6 +2348,7 @@ class Agent:
                                 tool=call.name,
                                 success=False,
                                 result=output[:5000],
+                                call_id=call.id,
                             )
                             if stalled:
                                 feedback += (
@@ -1695,8 +2362,21 @@ class Agent:
                         output = self.tools.call(call.name, call.arguments)
                     # Loop protection: the same tool with the same arguments
                     # over and over means the model is stuck.
-                    self._track_tool_call(call.name, output)
+                    self._track_tool_call(call.name, output, call.arguments)
                     if self._stuck_after_repeats():
+                        self._repeat_recoveries += 1
+                        if self._repeat_recoveries >= 2:
+                            self._stop_incomplete(
+                                _tr(
+                                    "The agent repeated the same tool call with the same arguments "
+                                    "even after a recovery prompt, so the run was stopped. "
+                                    "Try another model or make the task more specific.",
+                                    "Агент повторял один и тот же вызов инструмента с теми же аргументами "
+                                    "даже после требования сменить подход, поэтому запуск остановлен. "
+                                    "Попробуйте другую модель или уточните задачу.",
+                                )
+                            )
+                            break
                         self.messages.append(self._tool_message(call, output))
                         self.messages.append(
                             {
@@ -1717,6 +2397,7 @@ class Agent:
                             tool=call.name,
                             success=True,
                             result=output[:5000],
+                            call_id=call.id,
                         )
                         self.emit(
                             "status",
@@ -1750,11 +2431,19 @@ class Agent:
                         tool=call.name,
                         success=bool(parsed.get("ok", True)),
                         result=output[:5000],
+                        call_id=call.id,
                     )
+                    if self.tools.write_denied:
+                        self.incomplete_reason = _tr(
+                            "The user did not approve the changes, so the run stopped before modifying files.",
+                            "Пользователь не подтвердил изменения, поэтому запуск остановлен до правки файлов.",
+                        )
+                        break
                     if call.name == "finish" and parsed.get("ok"):
                         self.finished = True
                         self.final_text = call.arguments.get("message") or _tr("Project finished.", "Проект готов.")
                         break
+                self._journal_run(task_text, step)
                 if self.finished:
                     break
                 if self.incomplete_reason:
@@ -1824,6 +2513,7 @@ class Agent:
             return ""
         finally:
             self._persist_chat(user_message)
+            self._clear_journal()
             if not self.analysis and self.sync_history:
                 self._sync_history()
             if self.cancel.is_set():

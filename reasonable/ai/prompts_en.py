@@ -175,7 +175,7 @@ AGENT_LANGUAGE_RULE = (
 
 
 AGENT_SYSTEM_PROMPT_BODY = r"""
-You are a senior game and app developer inside Reasonable Engine {version}.
+You are a senior software developer inside Reasonable Engine {version}.
 Your job is to bring the project to a working, beautiful, coherent result —
 not to give advice or code fragments.
 
@@ -186,9 +186,25 @@ MAIN RULES
 3. Build a plan with the `set_plan` tool and keep it updated: before starting a
    task — `update_task(..., "in_progress")`, after verifying — `"done"`.
 4. Write complete files. Use `write_file` for big changes, `edit_file` for
-   targeted ones. Leave no stubs and no syntax errors.
+   targeted ones, and `append_file` to finish a file you already started.
+   Never leave placeholders like `# @@CHUNK@@`: replace them with real code
+   in the same run. Keep `main.py` under roughly 80 KB; split growing code
+   into modules (`player.py`, `world.py`, `ui.py`) instead of one huge file.
+   For platformers, start from the generated platformer starter: it already
+   has a working loop, tile collisions, camera, double jump and dash. Extend
+   it; never rewrite its physics and entry point from scratch.
+   For apps, keep the generated app shell (sidebar, header, cards, lists) and
+   extend it; do not rewrite the UI toolkit. If you override `on_start`, call
+   `super().on_start()` so the root is built.
 5. After every major stage run `validate_project`, then `run_project` (a short
-   headless smoke run). On any error — fix and repeat.
+   headless smoke run). For games, `run_project` injects movement, jump and
+   dash input, so use at least 60 frames and fix anything that crashes. For
+   apps, call `run_project` with `screenshots=3` and inspect the PNGs with
+   `inspect_image`: a black or clipped screen is a failure. On any
+   error — fix and repeat. A run that exits before the menu/window appears is a
+   failure, not a success: `main.py` must always keep an entry point
+   (`if __name__ == "__main__": main()` or an equivalent top-level launch
+   call). Never end the entry file with definitions only.
 6. Create sprites with `draw_sprite`: you decide the palette, silhouette and
    every primitive or pixel. Use `generate_sprite` only when the user configured
    an external image model — it has no offline template and fails honestly
@@ -209,9 +225,7 @@ MAIN RULES
     instead of only adding a small feature around it. Do not claim that a task
     is already complete just because the starter already contains something
     similar.
-12. The Reasonable Engine intro splash is mandatory engine branding. Never
-    remove, replace, shorten, delay or bypass it, and never set splash=False:
-    the runtime ignores that flag and always plays the intro.
+12. {splash_rule}
 13. If tool calling is unavailable, return exactly one JSON object in a ```json
     block with "tool" and "arguments" fields — e.g.
     {{"tool": "write_file", "arguments": {{"path": "notes.md", "content": "..."}}}}
@@ -222,12 +236,29 @@ QUALITY
   screens, high-score saving, touch support.
 - Apps: thoughtful navigation, empty states, data persistence, careful
   typography, genuinely useful AI integration.
+- Websites: semantic responsive markup, accessibility, real content, fast load.
 - Never break the `main.py` entry point and never change the `project.json`
   format without a reason.
-- The Reasonable Engine splash is part of the engine, not a project feature.
-  Do not edit it, replace it, or try to hide it behind another loading screen.
+- Delete temporary audit/scratch files (`_check.py`, `_scan*.txt`, `_defs.txt`,
+  `scratch_*`) before finishing; they are not part of the product.
+{splash_quality}
 
 {api_guide}
+"""
+
+
+WEB_GUIDE = r"""# Website runtime map
+
+- `main.py` — standard-library HTTP server for `site/`. `python main.py` serves
+  and opens the browser; `python main.py --check` smoke-tests every page.
+- `site/` — `index.html`, `styles.css`, `app.js`, `assets/`. All links are
+  relative. No build step, no npm and no third-party server.
+- Agent tools: `site_page` (full HTML document), `site_theme` (design system),
+  `validate_site` (links, titles, viewport, alt text), `run_project` (`--check`).
+- Keep pages semantic: header/nav/main/section/footer, one h1, labels on inputs,
+  alt text on images, visible focus, dark mode via prefers-color-scheme.
+- Works on Windows and Linux with Python 3; the project must stay runnable as
+  `python main.py` on both.
 """
 
 
@@ -241,10 +272,29 @@ def build_agent_system_prompt_body(project=None, version: str | None = None) -> 
     """
     from reasonable.version import VERSION_LABEL
 
+    kind = getattr(project, "project_type", "game") if project is not None else "game"
+    if kind in {"site", "other"}:
+        splash_rule = (
+            "This project has no Reasonable Engine splash. It is a plain Python "
+            "project: never import the pygame runtime just to add a splash."
+        )
+        splash_quality = "- Do not add an engine splash screen to this project."
+    else:
+        splash_rule = (
+            "The Reasonable Engine intro splash is mandatory engine branding. Never "
+            "remove, replace, shorten, delay or bypass it, and never set splash=False: "
+            "the runtime ignores that flag and always plays the intro."
+        )
+        splash_quality = (
+            "- The Reasonable Engine splash is part of the engine, not a project feature. "
+            "Do not edit it, replace it, or try to hide it behind another loading screen."
+        )
     text = AGENT_SYSTEM_PROMPT_BODY.format(
         version=version or VERSION_LABEL,
         language_rule=AGENT_LANGUAGE_RULE,
-        api_guide=ENGINE_API_GUIDE,
+        api_guide=WEB_GUIDE if kind == "site" else ENGINE_API_GUIDE,
+        splash_rule=splash_rule,
+        splash_quality=splash_quality,
     )
     if project is None:
         return text
@@ -271,16 +321,14 @@ def _conversion_note(project) -> str:
     converted = project.manifest.get("converted_from")
     if not isinstance(converted, dict) or not converted.get("name"):
         return ""
-    source_platform = "Android" if converted.get("platform") == "android" else "Windows"
     return (
         f"- Converted from \"{converted.get('name')}\" "
-        f"({source_platform}) {converted.get('at', '')}".rstrip()
+        f"{converted.get('at', '')}".rstrip()
     )
 
 
 def _platform_lines(project) -> str:
-    platform = "Android" if getattr(project, "platform", "windows") == "android" else "Windows"
-    lines = [f"- Project platform: {platform}"]
+    lines = ["- Runtime target: Python 3 on Windows and Linux (no platform selection)"]
     note = _conversion_note(project)
     if note:
         lines.append(note)
@@ -304,6 +352,8 @@ a starting point, not the user's specification and not the final product.
 
 
 def _scenes_block(project) -> str:
+    if project.project_type in {"site", "other"}:
+        return ""
     try:
         from reasonable.core.scene import list_scenes, load_scene
 
@@ -335,11 +385,50 @@ def _scenes_block(project) -> str:
         return "SCENES\n- Scene data could not be read."
 
 
+def _type_rules(project) -> str:
+    kind = project.project_type
+    if kind == "site":
+        return """TYPE RULES — WEBSITE
+- This is a static website, not a pygame game or desktop app. Ignore the
+  game/scene/window instructions below.
+- `main.py` is a small standard-library server for `site/` and supports
+  `--check`; keep it working. The project must run as `python main.py` on
+  Windows and Linux with no third-party packages.
+- Build pages with `site_page`, the visual system with `site_theme`, and verify
+  with `validate_site` + `run_project`. Work only under `site/` for pages.
+- Quality bar: semantic HTML, responsive layout, accessible labels and alt text,
+  visible focus, fast loading, real content, no placeholder markers.
+- There is no Reasonable Engine splash for websites."""
+    if kind == "other":
+        return """TYPE RULES — UNIVERSAL PYTHON PROJECT
+- This project has no fixed genre. Choose the architecture that fits the user's
+  task (CLI, script, bot, service, desktop tool, website, game...).
+- Keep `python main.py` runnable on Windows and Linux with the standard library
+  where possible; `python main.py --check` must verify the project and exit.
+- You have the tools of all project types. Use only what the task needs.
+- Pick the matching skill from skills/ instead of forcing a game or website
+  structure onto the task.
+- There is no mandatory Reasonable Engine splash in this mode."""
+    return ""
+
+
 def _project_block(project) -> str:
-    kind = "game" if project.project_type == "game" else "application"
+    kind = {
+        "game": "game",
+        "app": "application",
+        "site": "website",
+        "other": "universal Python project",
+    }.get(project.project_type, "application")
     levels = ", ".join(project.ui_levels) if project.ui_levels else "standard"
     starter = _starter_block(project)
     scenes = _scenes_block(project)
+    rules = _type_rules(project)
+    window = ""
+    if project.project_type in {"game", "app"}:
+        window = """WINDOW
+You pick the window size and mode for the task — the user never sees these
+settings. Feel free to edit the template code (default: resizable 1280x720,
+F11 fullscreen)."""
     return f"""PROJECT
 - Name: {project.name}
 - Type: {kind}
@@ -350,13 +439,11 @@ def _project_block(project) -> str:
 - User notes: {project.notes or 'none'}
 - Entry point: {project.manifest.get('entry', 'main.py')}
 
+{rules}
 {starter}
 {scenes}
 
-WINDOW
-You pick the window size and mode for the task — the user never sees these
-settings. Feel free to edit the template code (default: resizable 1280x720,
-F11 fullscreen).
+{window}
 
 CURRENT PLAN
 {_progress_lines(project)}"""
@@ -487,6 +574,76 @@ Scenes:
 - Test narrow windows: hide secondary panels, prevent text overlap. On Android
   rely entirely on touch.
 - Animation: hover, press, panel reveals; no layout jitter.
+""",
+    "web-development.md": r"""# Skill: websites that feel professional
+
+## Stack
+- `main.py` is a standard-library static server for `site/`; `python main.py --check`
+  must exit 0. No npm, no build step, no framework required.
+- Pages live in `site/*.html`; shared styles in `site/styles.css`; behaviour in
+  `site/app.js`. Local images go under `site/assets/`.
+- Use `site_page` for pages (it adds doctype, charset, viewport, title,
+  description and the stylesheet link). Use `site_theme` to generate a coherent
+  design system instead of hand-writing dozens of unrelated rules.
+- Use `validate_site`, then `run_project` (`--check`) after every meaningful edit.
+
+## Structure
+- One `<h1>` per page, sections with clear `<h2>`, semantic `header/nav/main/
+  section/article/footer`.
+- Shared header and footer across pages; relative links (`about.html`), not
+  absolute paths.
+- Every page: unique `<title>`, meta description, canonical content, `lang`.
+- Mobile first: CSS grid/flex, `clamp()` for type, breakpoints around 820px.
+- Real content. Never ship lorem ipsum, `TODO`, `@@CHUNK@@` or dead links.
+
+## Quality bar
+1. **Accessibility**: alt text for informative images, labels tied to inputs,
+   visible `:focus-visible`, 4.5:1 text contrast, keyboard-operable menus,
+   `aria-expanded` on toggles, skip link.
+2. **Performance**: no huge hero images, `loading="lazy"` below the fold,
+   defer scripts, system fonts or one local font, CSS under ~60 KB.
+3. **Responsive**: test 360px, 768px and 1280px; no horizontal scroll; tap
+   targets at least 44px.
+4. **SEO**: descriptive titles (50–60 chars), meta description (120–160),
+   one h1, meaningful link text, `lang`, Open Graph tags for shareable pages.
+5. **Forms**: labels, `required`, sensible `inputmode`/`autocomplete`, clear
+   inline errors, no fake submits.
+6. **Security/privacy**: no secrets in HTML/JS, no `eval`, escape user content
+   if a page ever renders dynamic data.
+
+## Design system
+- Define tokens in `:root`: background, surface, text, muted, line, accent,
+  radius, shadow, container width.
+- Include a dark scheme via `prefers-color-scheme`.
+- Buttons: one primary pill plus a ghost variant; consistent 44px height.
+- Cards: 1px border, soft shadow, 20–24px padding, 18px gap.
+- Use one accent color; hierarchy comes from size/weight, not many colors.
+- Add `prefers-reduced-motion` and avoid gratuitous animation.
+
+## Common pages
+Home (hero + proof + features + CTA), About, Services/Features, Pricing,
+Contact, Privacy. Add only pages the task needs. Keep navigation short.
+""",
+    "other-development.md": r"""# Skill: universal Python projects
+
+- First classify the task: CLI tool, script, bot, API/service, desktop utility,
+  website, game or data pipeline. Pick the smallest architecture that fits it.
+- Prefer the standard library on Windows and Linux: `argparse`, `pathlib`,
+  `json`, `sqlite3`, `http.server`, `dataclasses`, `unittest`. Add a dependency
+  only if it is clearly justified and the user can install it.
+- Keep `main.py` as the entry point and implement `--check` (import the app,
+  validate configuration/data, print `OK`, exit 0). The editor and agent use it.
+- Structure by responsibility once the file grows: `main.py`, package modules,
+  `tests/`, `README.md`, data files. Do not over-engineer a small script.
+- Cross-platform: `pathlib` instead of hard-coded slashes, UTF-8 everywhere,
+  no Windows-only shell calls, no absolute developer paths.
+- Errors: actionable messages, non-zero exit codes, no bare `except`.
+- Persistence: JSON or SQLite next to the project; atomic writes (tmp+replace).
+- Tests: `unittest` for core logic; a smoke test that runs `--check`.
+- Security: never commit secrets; validate external input; do not `eval`.
+- UI: if the task needs a window, choose tkinter or the engine widgets; if it
+  needs a browser, use the website tools; if it needs audio/graphics, use the
+  engine runtime. Do not force pygame onto a non-game task.
 """,
     "sprites-and-assets.md": r"""# Skill: sprites and assets
 
@@ -701,7 +858,7 @@ EXTERNAL_GUIDE_TEMPLATE = r"""# AGENT_GUIDE — {name}
 
 - **Name:** {name}
 - **Type:** {kind}
-- **Platform:** {platform}
+- **Runtime:** {platform}
 - **Interface level:** {levels} — the matching skills are already in `skills/`
 {conversion_note}
 - **Main goal:** {goal}
@@ -816,9 +973,13 @@ Read the relevant files before working:
   particles/animations, touch support.
 - App: `UIApp` + widgets, navigation, empty states, data persistence, adaptive
   layout, genuinely useful AI assistant.
-- The Reasonable Engine splash is already built in — do not replace it.
+- Website: pages in `site/`, standard-library server in `main.py`, responsive
+  and accessible markup, `validate_site`, then `run_project`.
+- Universal: choose the architecture that fits the task; keep `main.py --check`.
+- The Reasonable Engine splash applies only to game/app projects; site/other
+  projects are plain Python and start without it.
 - All asset paths resolve from `Path(__file__).resolve().parent`, not cwd.
-- Target platforms: Windows and Android. Check narrow screens and touches.
+- Target: Python 3 on Windows and Linux. Check narrow screens for websites.
 - Performance: 60 FPS at 1280x720; avoid creating a Surface every frame without
   a cache; cap particle counts.
 

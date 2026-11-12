@@ -47,6 +47,8 @@ def empty_usage() -> dict[str, Any]:
         "completion_tokens": 0,
         "cached_tokens": 0,
         "cache_write_tokens": 0,
+        "allowance": 0.0,
+        "list_cost": 0.0,
         "requests": 0,
         "seconds": 0.0,
         "updated": "",
@@ -64,6 +66,8 @@ def load_usage(project_dir: Path) -> dict[str, Any]:
                 "completion_tokens": _safe_int(data.get("completion_tokens")),
                 "cached_tokens": _safe_int(data.get("cached_tokens")),
                 "cache_write_tokens": _safe_int(data.get("cache_write_tokens")),
+                "allowance": round(_safe_float(data.get("allowance")), 8),
+                "list_cost": round(_safe_float(data.get("list_cost")), 8),
                 "requests": _safe_int(data.get("requests")),
                 "seconds": round(_safe_float(data.get("seconds")), 3),
                 "updated": str(data.get("updated") or ""),
@@ -80,6 +84,8 @@ def add_usage(
     total_tokens: int | None = None,
     cached_tokens: int = 0,
     cache_write_tokens: int = 0,
+    allowance: float = 0.0,
+    list_cost: float = 0.0,
     seconds: float = 0.0,
     requests: int = 1,
 ) -> dict[str, Any]:
@@ -95,6 +101,12 @@ def add_usage(
         data["completion_tokens"] += completion
         data["cached_tokens"] += _safe_int(cached_tokens)
         data["cache_write_tokens"] += _safe_int(cache_write_tokens)
+        data["allowance"] = round(
+            float(data.get("allowance") or 0.0) + _safe_float(allowance), 8
+        )
+        data["list_cost"] = round(
+            float(data.get("list_cost") or 0.0) + _safe_float(list_cost), 8
+        )
         data["total_tokens"] += total
         data["requests"] += _safe_int(requests)
         data["seconds"] = round(float(data.get("seconds") or 0.0) + _safe_float(seconds), 3)
@@ -119,3 +131,19 @@ def format_duration(seconds: float) -> str:
 def format_tokens(count: int) -> str:
     """Group digits with non-breaking spaces for a compact UI label."""
     return f"{max(0, int(count or 0)):,}".replace(",", "\u202f")
+
+
+def format_cost(amount: float) -> str:
+    """Small, honest dollar label for one project's lifetime AI spend.
+
+    Sub-cent values keep enough digits to be useful; rounding everything to
+    ``$0.00`` would hide the cost of short runs.
+    """
+    value = max(0.0, float(amount or 0.0))
+    if value >= 1:
+        return f"${value:,.2f}"
+    if value >= 0.01:
+        return f"${value:.4f}"
+    if value > 0:
+        return f"${value:.6f}"
+    return "$0"

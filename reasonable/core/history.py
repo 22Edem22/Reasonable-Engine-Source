@@ -25,6 +25,10 @@ HISTORY_DIR = ".reasonable/history"
 META_NAME = "meta.json"
 FILES_DIR = "files"
 MAX_SNAPSHOTS = 20
+# Asset-heavy projects could otherwise fill the disk with 20 full copies.
+# Pruning keeps the newest snapshots and stops adding when this budget is hit,
+# always preserving at least two versions.
+MAX_TOTAL_BYTES = 2_000_000_000
 MAX_FILES = 5000
 MAX_FILE_BYTES = 8_000_000
 
@@ -247,6 +251,33 @@ def snapshot_files(project: Any, snapshot_id: str, limit: int = 400) -> list[str
     return rows
 
 
+def _snapshot_relative(value: Any) -> str:
+    """Normalize a project-relative path and reject traversal attempts."""
+    text = str(value or "").replace("\\", "/").strip().lstrip("/")
+    parts = [part for part in text.split("/") if part not in {"", "."}]
+    if not parts or any(part == ".." for part in parts):
+        return ""
+    return "/".join(parts)
+
+
+def snapshot_text(project: Any, snapshot_id: str, relative: str) -> str | None:
+    """Read one file exactly as it was when the snapshot was created.
+
+    Audit passes compare this text with the current file to show a diff
+    instead of re-sending whole files (which dominated the prompt bill).
+    ``None`` means the file did not exist in the snapshot.
+    """
+    value = _valid_snapshot_id(snapshot_id)
+    path_text = _snapshot_relative(relative)
+    if not value or not path_text:
+        return None
+    path = history_root(project) / value / FILES_DIR / path_text
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
 def delete_snapshot(project: Any, snapshot_id: str) -> bool:
     value = _valid_snapshot_id(snapshot_id)
     if not value:
@@ -266,9 +297,21 @@ def delete_snapshot(project: Any, snapshot_id: str) -> bool:
 
 def _prune(root: Path) -> None:
     rows = list_snapshots(root)
-    for snapshot in rows[MAX_SNAPSHOTS:]:
-        directory = history_root(root) / str(snapshot.get("id"))
-        shutil.rmtree(directory, ignore_errors=True)
+    keep: list[dict[str, Any]] = []
+    total_bytes = 0
+    for index, snapshot in enumerate(rows):
+        size = int(snapshot.get("bytes") or 0)
+        over_count = index >= MAX_SNAPSHOTS
+        over_size = len(keep) >= 2 and total_bytes + size > MAX_TOTAL_BYTES
+        if over_count or over_size:
+            break
+        keep.append(snapshot)
+        total_bytes += size
+    keep_ids = {str(item.get("id")) for item in keep}
+    for snapshot in rows:
+        if str(snapshot.get("id")) not in keep_ids:
+            directory = history_root(root) / str(snapshot.get("id"))
+            shutil.rmtree(directory, ignore_errors=True)
 
 
 def _keep_sets(files_dir: Path) -> tuple[set[str], set[str]]:

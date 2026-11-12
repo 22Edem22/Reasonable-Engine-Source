@@ -137,6 +137,23 @@ class ChatPanelHistoryTests(unittest.TestCase):
                 ("error", "Ошибка сети"),
             ],
         )
+        from PySide6.QtCore import QEvent
+
+        for bubble in bubbles:
+            self.assertEqual(bubble.toolTip(), "")
+            self.assertTrue(bubble.time_label.isHidden())
+            self.assertRegex(bubble.time_label.text(), r"\d{2}:\d{2}")
+
+        fresh = reopened._append("user", "Ещё одно сообщение")
+        self.assertRegex(fresh.time_label.text(), r"\d{2}:\d{2}")
+        self.assertTrue(fresh.time_label.isHidden())
+        before = fresh.sizeHint().height()
+        fresh.eventFilter(fresh.body, QEvent(QEvent.Type.Enter))
+        self.app.processEvents()
+        self.assertFalse(fresh.time_label.isHidden())
+        # The caption lives in the header row, so hovering must not resize the
+        # bubble and shift the conversation under the pointer.
+        self.assertEqual(fresh.sizeHint().height(), before)
 
     def test_agent_run_with_skipped_persistence_keeps_ui_messages(self) -> None:
         from reasonable.editor.chat import ChatPanel

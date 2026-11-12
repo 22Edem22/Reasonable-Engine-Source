@@ -8,6 +8,7 @@ so there is no hidden database and no lock-in.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 import re
@@ -32,6 +33,12 @@ from .paths import (
 MANIFEST_NAME = "project.json"
 PROJECT_FORMAT = 1
 ENGINE_DIR_NAME = "_engine"
+PROJECT_TYPES = ("game", "app", "site", "other")
+SCRATCH_PATTERN = re.compile(
+    r"^(?:_check.*\.py|_probe.*\.py|_scan.*|_defs\.txt|_t\d+\.json|tmp_.*|scratch.*)$",
+    re.IGNORECASE,
+)
+
 UI_LEVELS = ("simple", "standard", "advanced")
 UI_LEVEL_LABELS = {
     "simple": "Простой (tkinter)",
@@ -100,7 +107,7 @@ def default_manifest(
     ui_levels: list[str] | None = None,
 ) -> dict[str, Any]:
     stamp = now_iso()
-    project_type = project_type if project_type in {"game", "app"} else "game"
+    project_type = project_type if project_type in PROJECT_TYPES else "game"
     return {
         "format": PROJECT_FORMAT,
         "name": name.strip() or tr("New project", "Новый проект"),
@@ -189,7 +196,7 @@ class Project:
     @property
     def project_type(self) -> str:
         value = str(self.manifest.get("type") or "game")
-        return value if value in {"game", "app"} else "game"
+        return value if value in PROJECT_TYPES else "game"
 
     @property
     def platform(self) -> str:
@@ -233,6 +240,68 @@ class Project:
     @property
     def entry(self) -> Path:
         return self.root / str(self.manifest.get("entry") or "main.py")
+
+    def scratch_files(self) -> list[Path]:
+        """Temporary audit/probe files that must not ship with the project."""
+        result: list[Path] = []
+        try:
+            for path in self.root.iterdir():
+                if path.is_file() and SCRATCH_PATTERN.match(path.name):
+                    result.append(path)
+        except OSError:
+            pass
+        return result
+
+    def missing_requirements(self) -> list[str]:
+        """Package names from requirements.txt that are not importable here."""
+        path = self.root / "requirements.txt"
+        if not path.is_file():
+            return []
+        aliases = {
+            "pillow": "PIL",
+            "beautifulsoup4": "bs4",
+            "python-dateutil": "dateutil",
+            "pyyaml": "yaml",
+            "opencv-python": "cv2",
+            "scikit-learn": "sklearn",
+        }
+        missing: list[str] = []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        for line in lines:
+            value = line.strip()
+            if not value or value.startswith(("#", "-", "git+", "http")):
+                continue
+            name = re.split(r"[\s\[<>=!~;]", value, maxsplit=1)[0].strip()
+            if not name:
+                continue
+            module = aliases.get(name.lower(), name.replace("-", "_"))
+            try:
+                if importlib.util.find_spec(module) is None:
+                    missing.append(name)
+            except (ImportError, ValueError):
+                missing.append(name)
+        return list(dict.fromkeys(missing))
+
+    def has_launch_block(self) -> bool:
+        """Whether main.py contains executable launch code.
+
+        A file with only imports, constants, functions and classes parses
+        cleanly but does nothing when launched: the splash plays and the
+        window closes. Game and app projects need a top-level call, a main
+        loop or an ``if __name__ == "__main__"`` guard at the end.
+        """
+        if not self.entry.is_file() or self.entry.suffix != ".py":
+            return True
+        try:
+            tree = ast.parse(self.entry.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            # A syntax error is reported separately by validate().
+            return True
+        runtime_nodes = (ast.Expr, ast.If, ast.While, ast.For, ast.Try, ast.With)
+        return any(isinstance(node, runtime_nodes) for node in tree.body)
 
     @property
     def window(self) -> dict[str, Any]:
@@ -460,17 +529,95 @@ class Project:
         progress_state = read_json(self.root / "progress" / "state.json", {})
         if not progress_state:
             issues.append(ValidationIssue("warning", tr("The agent has not created progress/state.json yet.", "Агент ещё не создал progress/state.json."), "progress/state.json"))
+        if self.project_type == "site":
+            from .site import validate_site
+
+            for issue in validate_site(self.root):
+                if issue.get("level") == "ok" and issues:
+                    continue
+                issues.append(
+                    ValidationIssue(
+                        str(issue.get("level") or "warning"),
+                        str(issue.get("message") or ""),
+                        str(issue.get("path") or ""),
+                    )
+                )
+        if (
+            self.project_type in {"game", "app"}
+            and self.entry.exists()
+            and self.entry.suffix == ".py"
+            and not self.has_launch_block()
+        ):
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    tr(
+                        "The entry point has no launch code: the project would open and close immediately. "
+                        "Add `if __name__ == \"__main__\": main()` or start the game at the end of the file.",
+                        "В точке входа нет запуска: проект откроется и сразу закроется. "
+                        "Добавьте `if __name__ == \"__main__\": main()` или запустите игру в конце файла.",
+                    ),
+                    self.rel(self.entry),
+                )
+            )
+        try:
+            if self.entry.is_file() and self.entry.stat().st_size > 120_000:
+                issues.append(
+                    ValidationIssue(
+                        "warning",
+                        tr(
+                            "The entry point is larger than 120 KB. Split it into modules before adding more features; "
+                            "a huge main.py is hard to verify and often hides missing code.",
+                            "Точка входа больше 120 КБ. Разбейте её на модули перед добавлением новых функций: "
+                            "в огромном main.py трудно проверять код и легко потерять целые куски.",
+                        ),
+                        self.rel(self.entry),
+                    )
+                )
+        except OSError:
+            pass
+        missing_packages = self.missing_requirements()
+        if missing_packages:
+            issues.append(
+                ValidationIssue(
+                    "warning",
+                    tr(
+                        "Dependencies from requirements.txt are not installed: {names}. Install them before running.",
+                        "Зависимости из requirements.txt не установлены: {names}. Установите их перед запуском.",
+                        names=", ".join(missing_packages[:8]),
+                    ),
+                    "requirements.txt",
+                )
+            )
+        for path in self.scratch_files():
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    tr(
+                        "Temporary verification file must be removed: {name}",
+                        "Временный проверочный файл нужно удалить: {name}",
+                        name=path.name,
+                    ),
+                    self.rel(path),
+                )
+            )
         if not issues:
             issues.append(ValidationIssue("ok", tr("The project looks correct: syntax and structure are fine.", "Проект выглядит корректно: синтаксис и структура в порядке.")))
         return issues
 
     def summary(self) -> str:
-        platform = "Android" if self.platform == "android" else "Windows"
         levels = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in self.ui_levels)
-        kind = tr("game", "игра") if self.project_type == "game" else tr("app", "приложение")
+        kind = {
+            "game": tr("game", "игра"),
+            "app": tr("app", "приложение"),
+            "site": tr("website", "сайт"),
+            "other": tr("project", "проект"),
+        }.get(self.project_type, tr("project", "проект"))
         return (
-            f"{self.name} — {kind}, "
-            f"{platform}, {tr('interface:', 'интерфейс:')} {levels}, {tr('mode', 'режим')} {self.mode}."
+            f"{self.name} — {kind}, Python, "
+            f"{tr('interface:', 'интерфейс:')} {levels}, {tr('mode', 'режим')} {self.mode}."
+        ) if self.project_type in {"game", "app"} else (
+            f"{self.name} — {kind}, Python, {tr('mode', 'режим')} {self.mode}."
         )
 
     # -- engine sync ------------------------------------------------------

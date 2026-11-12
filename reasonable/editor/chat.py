@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import threading
+from datetime import datetime
 from typing import Callable
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygon, QTextCursor
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPixmap, QPolygon, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,26 +28,57 @@ from PySide6.QtWidgets import (
 )
 
 from reasonable.ai.agent import AgentEvent
+from reasonable.ai.diffs import changed_files_payload
 from reasonable.ai.prompts import build_improvement_prompt
 from reasonable.ai.providers import config_status, short_provider_name
 from reasonable.core import chatlog
 from reasonable.core.agent_errors import AUTO_CONTINUE_KINDS
 from reasonable.core.i18n import current_language, t
+from reasonable.core.paths import now_iso
 from reasonable.core.progress import derived_percent, read_state
 from reasonable.core.settings import Settings
-from reasonable.core.usage import add_usage, format_duration, format_tokens, load_usage
+from reasonable.core.usage import (
+    add_usage,
+    format_cost,
+    format_duration,
+    format_tokens,
+    load_usage,
+)
 
 from . import theme
 from .widgets import Avatar, Badge, Card, muted, title_label
 from .workers import AgentWorker
 
 
+def _format_message_time(iso_value: str) -> str:
+    text = str(iso_value or "").strip()
+    if not text:
+        return ""
+    try:
+        value = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return text
+    now = datetime.now(value.tzinfo) if value.tzinfo is not None else datetime.now()
+    if value.date() == now.date():
+        return value.strftime("%H:%M")
+    return value.strftime("%d.%m.%Y %H:%M")
+
+
 class MessageBubble(QFrame):
-    def __init__(self, role: str, text: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        role: str,
+        text: str,
+        parent: QWidget | None = None,
+        *,
+        timestamp: str = "",
+    ) -> None:
         super().__init__(parent)
         self.role = role
         self.full_text = text
         self.expanded = False
+        self.timestamp = str(timestamp or now_iso())
+        self._time_text = _format_message_time(self.timestamp)
         self.setObjectName("cardSoft")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         if role == "user":
@@ -99,8 +132,23 @@ class MessageBubble(QFrame):
             name = QLabel(t(role_key))
             name.setFont(theme.ui_font(9, 600))
             name.setStyleSheet("color: #C98A90;" if role == "error" else "color: #8B929C;")
+        # The send time appears in the top-right corner of the bubble on hover.
+        # It lives in the header row, so showing it never changes the bubble
+        # height and the chat list does not jump under the pointer.
+        self.time_label = QLabel(self._time_text)
+        self.time_label.setObjectName("messageTime")
+        self.time_label.setFont(theme.ui_font(8))
+        self.time_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.time_label.setStyleSheet(
+            "QLabel#messageTime { color: #767D87; background: transparent;"
+            " border: none; padding: 0; }"
+        )
+        self.time_label.hide()
         header.addWidget(name)
         header.addStretch(1)
+        header.addWidget(self.time_label)
         layout.addLayout(header)
 
         self.body = QLabel(text)
@@ -120,6 +168,42 @@ class MessageBubble(QFrame):
             self.more_button.clicked.connect(self._toggle)
             layout.addWidget(self.more_button, 0, Qt.AlignmentFlag.AlignLeft)
 
+        # Hover filters cover the body and the header labels (name, avatar,
+        # time), so the caption follows the pointer anywhere in the bubble.
+        self._install_time_hover()
+
+    def _install_time_hover(self) -> None:
+        for widget in self.findChildren(QWidget):
+            if widget.property("messageTimeHover"):
+                continue
+            widget.setProperty("messageTimeHover", True)
+            widget.installEventFilter(self)
+
+    def enterEvent(self, event) -> None:
+        self.time_label.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hide_time_if_outside()
+        super().leaveEvent(event)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.Enter:
+            self.time_label.show()
+        elif event.type() == QEvent.Type.Leave:
+            # Moving between the bubble and its child labels also emits Leave;
+            # hide only once the pointer is really outside the bubble.
+            self._hide_time_if_outside()
+        return False
+
+    def _hide_time_if_outside(self) -> None:
+        try:
+            inside = self.rect().contains(self.mapFromGlobal(QCursor.pos()))
+        except RuntimeError:
+            return
+        if not inside:
+            self.time_label.hide()
+
     def _toggle(self) -> None:
         self.expanded = not self.expanded
         if self.expanded:
@@ -130,6 +214,16 @@ class MessageBubble(QFrame):
             self.body.setText(self.full_text[:360] + "…")
             if self.more_button:
                 self.more_button.setText(t("chat.show_full"))
+
+    def append_text(self, text: str) -> None:
+        if not text:
+            return
+        self.full_text += text
+        self.body.setText(self.full_text)
+
+    def set_text(self, text: str) -> None:
+        self.full_text = text
+        self.body.setText(text)
 
 
 class AgentErrorBubble(MessageBubble):
@@ -178,6 +272,7 @@ class AgentErrorBubble(MessageBubble):
         self._hint.setStyleSheet("background: transparent; border: none; color: #9AA1AB;")
         self.layout().addWidget(self._hint)
         self._refresh_hint()
+        self._install_time_hover()
 
     def _auto_toggled(self, checked: bool) -> None:
         self._refresh_hint()
@@ -199,6 +294,7 @@ _TOOL_LABEL_KEYS = {
     "read_file": "chat.tool_read_file",
     "write_file": "chat.tool_write_file",
     "edit_file": "chat.tool_edit_file",
+    "append_file": "chat.tool_append_file",
     "delete_path": "chat.tool_delete_path",
     "search_text": "chat.tool_search_text",
     "run_command": "chat.tool_run_command",
@@ -384,10 +480,18 @@ def _format_tool_result(raw: str) -> str:
 class ToolCallCard(QFrame):
     """One compact, collapsible tool call in the agent conversation."""
 
-    def __init__(self, name: str, arguments: dict | None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        arguments: dict | None,
+        parent: QWidget | None = None,
+        *,
+        agent: str = "",
+    ) -> None:
         super().__init__(parent)
         self.name = name
         self.arguments = dict(arguments or {})
+        self.agent = str(agent or "")
         self.full_text = ""
         self.success = True
         self._status = "•"
@@ -465,11 +569,14 @@ class ToolCallCard(QFrame):
     def _refresh_header(self) -> None:
         expanded = self.header.isChecked()
         self.header.setIcon(_chevron_icon(expanded))
-        text = f"{self._status}  {_tool_label(self.name)}"
+        prefix = f"{self.agent}  ·  " if self.agent else ""
+        text = f"{self._status}  {prefix}{_tool_label(self.name)}"
         if self._summary:
             text += f"  ·  {self._summary}"
         self.header.setText(text)
         tooltip = _tool_label(self.name)
+        if self.agent:
+            tooltip = f"{self.agent} · {tooltip}"
         if self._summary:
             tooltip += f" · {self._summary}"
         tooltip += f"\n{t('chat.tool_toggle_hint')}"
@@ -550,12 +657,22 @@ class ChangesCard(Card):
         "generate": "chat.action_generate",
     }
 
-    def __init__(self, files: list[dict], snapshot: dict | None, outcome: str = "", parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        files: list[dict],
+        snapshot: dict | None,
+        outcome: str = "",
+        parent: QWidget | None = None,
+        project=None,
+    ) -> None:
         super().__init__(parent, soft=True, padding=13)
         self.files = list(files or [])
         self.snapshot = snapshot or {}
         self.outcome = outcome
+        self.project = project
+        self._diff_loaded = False
         self.setObjectName("cardSoft")
+        snapshot_id = str(self.snapshot.get("id") or "")
 
         top = QHBoxLayout()
         top.setSpacing(8)
@@ -564,6 +681,15 @@ class ChangesCard(Card):
         heading.setStyleSheet("color: #E7E9EC; background: transparent; border: none;")
         top.addWidget(heading)
         top.addStretch(1)
+        if self.project is not None and snapshot_id and self.files:
+            self.diff_button = QPushButton(t("chat.show_diff"))
+            self.diff_button.setObjectName("ghost")
+            self.diff_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.diff_button.setToolTip(t("chat.show_diff_tip"))
+            self.diff_button.clicked.connect(self._toggle_diff)
+            top.addWidget(self.diff_button)
+        else:
+            self.diff_button = None
         tone = "teal" if outcome == "done" else "gold"
         count = Badge(t("chat.file_count", count=len(self.files)), tone)
         top.addWidget(count)
@@ -599,7 +725,18 @@ class ChangesCard(Card):
                 rows.addWidget(muted(t("chat.more_files", count=len(self.files) - 14), size=8))
             self.layout().addLayout(rows)
 
-        snapshot_id = str(self.snapshot.get("id") or "")
+        self._diff_view = QTextEdit()
+        self._diff_view.setReadOnly(True)
+        self._diff_view.setVisible(False)
+        self._diff_view.setMinimumHeight(120)
+        self._diff_view.setMaximumHeight(360)
+        self._diff_view.setStyleSheet(
+            "QTextEdit { background: #0E1116; color: #C9CDD4; border: 1px solid #24282F;"
+            " border-radius: 6px; padding: 6px; font-family: 'Cascadia Code',"
+            " 'JetBrains Mono', 'Consolas', monospace; font-size: 11px; }"
+        )
+        self.layout().addWidget(self._diff_view)
+
         if snapshot_id:
             note = muted(
                 t(
@@ -626,6 +763,38 @@ class ChangesCard(Card):
         actions.addStretch(1)
         self.layout().addLayout(actions)
 
+    def _toggle_diff(self) -> None:
+        """Show or hide a bounded unified diff against the run's snapshot."""
+        if not self._diff_loaded:
+            snapshot_id = str(self.snapshot.get("id") or "")
+            try:
+                payload = changed_files_payload(
+                    self.project,
+                    snapshot_id,
+                    self.files,
+                    file_limit=4_000,
+                    total_limit=20_000,
+                )
+            except Exception as exc:
+                payload = []
+                self._diff_view.setPlainText(f"{type(exc).__name__}: {exc}")
+            chunks: list[str] = []
+            for entry in payload:
+                body = entry.get("diff") or entry.get("content") or entry.get("note") or ""
+                if body:
+                    chunks.append(f"--- {entry.get('path', '')}\n{body}")
+            if payload:
+                self._diff_view.setPlainText("\n\n".join(chunks) or t("chat.no_diff"))
+            elif not self._diff_view.toPlainText():
+                self._diff_view.setPlainText(t("chat.no_diff"))
+            self._diff_loaded = True
+        visible = not self._diff_view.isVisible()
+        self._diff_view.setVisible(visible)
+        if self.diff_button is not None:
+            self.diff_button.setText(
+                t("chat.hide_diff") if visible else t("chat.show_diff")
+            )
+
 
 class ChatPanel(QWidget):
     finished = Signal()
@@ -634,6 +803,7 @@ class ChatPanel(QWidget):
     restore_requested = Signal(str)
     history_requested = Signal()
     history_changed = Signal()
+    confirm_requested = Signal(object)
 
     def __init__(self, project, settings: Settings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -649,12 +819,17 @@ class ChatPanel(QWidget):
         self._changes_card: ChangesCard | None = None
         self._tool_group: ToolCallGroup | None = None
         self._active_tool_card: ToolCallCard | None = None
+        self._tool_cards: dict[str, ToolCallCard] = {}
         self._last_error_kind = "other"
         self._auto_continue_kind = ""
         self._auto_continue_attempts = 0
         self._auto_sending = False
         self._analysis_run = False
         self._run_chat_id: str | None = None
+        self._stream_bubble: MessageBubble | None = None
+        self._approval_lock = threading.Lock()
+        self._approval: dict | None = None
+        self._approval_decision: bool | None = None
         self.usage = load_usage(self.project.root)
         # Set by ProjectPage so unsaved editor buffers reach disk before the
         # agent snapshot and tool calls see them.
@@ -671,6 +846,7 @@ class ChatPanel(QWidget):
         self._update_usage_label()
         self.refresh_state()
         self._restore_history()
+        self.confirm_requested.connect(self._on_confirm_request)
 
     # ------------------------------------------------------------------
     def _restore_history(self) -> None:
@@ -695,7 +871,7 @@ class ChatPanel(QWidget):
             text = str(item.get("text") or "").strip()
             if not text:
                 continue
-            self._append(role, text)
+            self._append(role, text, timestamp=str(item.get("ts") or ""))
 
     def _remember(
         self,
@@ -750,6 +926,7 @@ class ChatPanel(QWidget):
         self._run_chat_id = None
         self._tool_group = None
         self._active_tool_card = None
+        self._tool_cards.clear()
         self._show_intro()
         self._restore_history()
         self.refresh_state()
@@ -1129,28 +1306,46 @@ class ChatPanel(QWidget):
                 return True
         return super().eventFilter(obj, event)
 
-    def _append(self, role: str, text: str) -> MessageBubble:
+    def _append(self, role: str, text: str, timestamp: str = "") -> MessageBubble:
         self._tool_group = None
-        bubble = MessageBubble(role, text)
+        bubble = MessageBubble(role, text, timestamp=timestamp)
         self.stream.insertWidget(self.stream.count() - 1, bubble)
         self._message_count += 1
         QTimer.singleShot(30, self._scroll_bottom)
         return bubble
 
-    def _append_tool_start(self, name: str, arguments: dict | None) -> ToolCallCard:
+    def _append_stream_delta(self, text: str) -> None:
+        if not text:
+            return
+        if self._stream_bubble is None:
+            self._stream_bubble = self._append("assistant", text)
+        else:
+            self._stream_bubble.append_text(text)
+            QTimer.singleShot(30, self._scroll_bottom)
+
+    def _append_tool_start(
+        self,
+        name: str,
+        arguments: dict | None,
+        *,
+        agent: str = "",
+        call_id: str = "",
+    ) -> ToolCallCard:
         if self._tool_group is None:
             self._tool_group = ToolCallGroup()
             self.stream.insertWidget(self.stream.count() - 1, self._tool_group)
             self._message_count += 1
-        card = ToolCallCard(name, arguments)
+        card = ToolCallCard(name, arguments, agent=agent)
         self._tool_group.add_call(card)
         self._active_tool_card = card
+        if call_id:
+            self._tool_cards[call_id] = card
         QTimer.singleShot(30, self._scroll_bottom)
         return card
 
     def _append_changes(self, files: list[dict], snapshot: dict | None, outcome: str = "") -> ChangesCard:
         self._tool_group = None
-        card = ChangesCard(files, snapshot, outcome)
+        card = ChangesCard(files, snapshot, outcome, project=self.project)
         card.file_requested.connect(self.file_open_requested)
         card.restore_requested.connect(self.restore_requested)
         card.history_requested.connect(self.history_requested)
@@ -1241,7 +1436,28 @@ class ChatPanel(QWidget):
             return
         duration = format_duration(seconds)
         cached = int(self.usage.get("cached_tokens") or 0)
-        if cached > 0:
+        # OpenCode Go reports the real charge; other providers only report
+        # tokens, so the cost line is shown only when we actually know it.
+        cost_value = float(self.usage.get("allowance") or 0.0)
+        if cost_value <= 0:
+            cost_value = float(self.usage.get("list_cost") or 0.0)
+        cost = format_cost(cost_value) if cost_value > 0 else ""
+        if cost:
+            key = (
+                "chat.usage_total_cached_cost"
+                if cached > 0
+                else "chat.usage_total_cost"
+            )
+            self.usage_label.setText(
+                t(
+                    key,
+                    tokens=format_tokens(tokens),
+                    cached=format_tokens(cached),
+                    cost=cost,
+                    time=duration,
+                )
+            )
+        elif cached > 0:
             self.usage_label.setText(
                 t(
                     "chat.usage_total_cached",
@@ -1258,14 +1474,16 @@ class ChatPanel(QWidget):
                     time=duration,
                 )
             )
+        tooltip_key = "chat.usage_tooltip_cost" if cost else "chat.usage_tooltip"
         self.usage_label.setToolTip(
             t(
-                "chat.usage_tooltip",
+                tooltip_key,
                 requests=int(self.usage.get("requests") or 0),
                 prompt=format_tokens(int(self.usage.get("prompt_tokens") or 0)),
                 cached=format_tokens(int(self.usage.get("cached_tokens") or 0)),
                 cache_write=format_tokens(int(self.usage.get("cache_write_tokens") or 0)),
                 completion=format_tokens(int(self.usage.get("completion_tokens") or 0)),
+                cost=cost,
                 time=duration,
             )
         )
@@ -1357,9 +1575,11 @@ class ChatPanel(QWidget):
         self._last_error_kind = "other"
         self._auto_continue_kind = ""
         self._current_snapshot = None
+        self._stream_bubble = None
         self._changes_card = None
         self._tool_group = None
         self._active_tool_card = None
+        self._tool_cards.clear()
         self._run_chat_id = chat_id or chatlog.active_chat_id(self.project.root)
         # Store the task before the run starts: even if the app is closed in
         # the middle of a long generation, the conversation keeps its order
@@ -1375,6 +1595,11 @@ class ChatPanel(QWidget):
         self.status_badge.set_tone("gold")
         self.progress.setRange(0, 0)
         self.step_label.setText(t("chat.improve_working") if analysis else t("chat.studying"))
+        with self._approval_lock:
+            self._approval = None
+            self._approval_decision = None
+        agent_settings = self.settings.data.get("agent", {}) or {}
+        confirm_changes = bool(agent_settings.get("confirm_changes", False))
         self.worker = AgentWorker(
             self.project,
             self.settings,
@@ -1384,13 +1609,56 @@ class ChatPanel(QWidget):
             analysis=analysis,
             reply_language=reply_language,
             persist_messages=False,
+            confirm_write=self._confirm_write if confirm_changes else None,
         )
         self.worker.event.connect(self._on_event)
         self.worker.done.connect(self._on_done)
         self.worker.incomplete.connect(self._on_incomplete)
         self.worker.failed.connect(self._on_failed)
         self.worker.cancelled.connect(self._on_cancelled)
+        self.worker.finished.connect(
+            lambda worker=self.worker: self._release_worker(worker)
+        )
         self.worker.start()
+
+    def _release_worker(self, worker) -> None:
+        """Drop a finished worker so the next run starts from a clean object."""
+        if self.worker is worker:
+            self.worker = None
+        worker.deleteLater()
+
+    def _confirm_write(self, action: str, path: str) -> bool:
+        """Block an agent thread until the user approves the first change."""
+        with self._approval_lock:
+            if self._approval_decision is not None:
+                return self._approval_decision
+            request = self._approval
+            if request is None:
+                request = {
+                    "event": threading.Event(),
+                    "approved": False,
+                    "action": str(action or ""),
+                    "path": str(path or ""),
+                }
+                self._approval = request
+                self.confirm_requested.emit(request)
+        request["event"].wait(120)
+        with self._approval_lock:
+            self._approval_decision = bool(request.get("approved"))
+            return self._approval_decision
+
+    def _on_confirm_request(self, request: dict) -> None:
+        if request.get("event") is None or request["event"].is_set():
+            return
+        answer = QMessageBox.question(
+            self,
+            t("chat.confirm_write_title"),
+            t("chat.confirm_write_text", path=request.get("path") or ""),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        request["approved"] = answer == QMessageBox.StandardButton.Yes
+        request["event"].set()
 
     def _on_event(self, event: AgentEvent) -> None:
         kind = event.kind
@@ -1406,14 +1674,33 @@ class ChatPanel(QWidget):
         elif kind == "assistant":
             if not event.text.strip():
                 return
-            self._append("assistant", event.text)
+            if self._stream_bubble is not None:
+                self._stream_bubble.set_text(event.text)
+                self._stream_bubble = None
+            else:
+                self._append("assistant", event.text)
             self._remember("assistant", event.text)
+        elif kind == "delta":
+            self._append_stream_delta(event.text)
             self._last_assistant = event.text
         elif kind == "tool_start":
             name = event.data.get("tool", "")
-            self.step_label.setText(t("chat.tool_label", name=_tool_label(name)))
+            agent = str(event.data.get("agent") or "")
+            call_id = str(event.data.get("call_id") or "")
+            if agent:
+                self.step_label.setText(f"{agent}  ·  {_tool_label(name)}")
+            else:
+                self.step_label.setText(t("chat.tool_label", name=_tool_label(name)))
+            # A tool call ends the current streamed reply: the next deltas
+            # belong to a new assistant turn, not to this bubble.
+            self._stream_bubble = None
             if not self._analysis_run:
-                self._append_tool_start(name, event.data.get("arguments") or {})
+                self._append_tool_start(
+                    name,
+                    event.data.get("arguments") or {},
+                    agent=agent,
+                    call_id=call_id,
+                )
         elif kind == "tool_result":
             name = event.data.get("tool", "tool")
             result = event.data.get("result", "")
@@ -1422,10 +1709,16 @@ class ChatPanel(QWidget):
                 if name in {"set_plan", "update_task", "report_progress", "finish"}:
                     self.refresh_state()
                 return
-            card = self._active_tool_card
+            call_id = str(event.data.get("call_id") or "")
+            card = self._tool_cards.pop(call_id, None) if call_id else None
+            if card is None:
+                card = self._active_tool_card
             if card is None or card.name != name:
-                card = self._append_tool_start(name, {})
-            self._active_tool_card = None
+                card = self._append_tool_start(
+                    name, {}, agent=str(event.data.get("agent") or "")
+                )
+            if self._active_tool_card is card:
+                self._active_tool_card = None
             card.finish(result, success)
             if name in {"set_plan", "update_task", "report_progress", "finish"}:
                 self.refresh_state()
@@ -1438,6 +1731,8 @@ class ChatPanel(QWidget):
                 total_tokens=int(usage.get("total_tokens") or 0),
                 cached_tokens=int(usage.get("cached_tokens") or 0),
                 cache_write_tokens=int(usage.get("cache_write_tokens") or 0),
+                allowance=float(usage.get("allowance") or 0.0),
+                list_cost=float(usage.get("list_cost") or 0.0),
                 seconds=float(usage.get("seconds") or 0.0),
                 requests=1,
             )
@@ -1561,9 +1856,14 @@ class ChatPanel(QWidget):
 
     def _finish(self, badge: str, message: str) -> None:
         self.running = False
+        self._stream_bubble = None
+        with self._approval_lock:
+            self._approval = None
+            self._approval_decision = None
         if self._active_tool_card is not None:
             self._active_tool_card.stop()
             self._active_tool_card = None
+        self._tool_cards.clear()
         self._analysis_run = False
         self.send_button.setEnabled(True)
         self.stop_button.hide()
@@ -1601,9 +1901,23 @@ class ChatPanel(QWidget):
         self._set_chat_controls_enabled(enabled and not self.running)
 
     def shutdown(self) -> None:
-        if self.worker is not None and self.worker.isRunning():
-            self.worker.stop()
-            self.worker.wait(1500)
+        worker = self.worker
+        approval = self._approval
+        if approval is not None and not approval["event"].is_set():
+            approval["approved"] = False
+            approval["event"].set()
+        if worker is None:
+            return
+        if worker.isRunning():
+            worker.stop()
+            # The network layer now aborts a cancelled request quickly, so a
+            # normal stop fits in a couple of seconds. Only a truly stuck
+            # thread is terminated: destroying a running QThread during
+            # application shutdown is a hard crash and can lose the run.
+            if not worker.wait(5000):
+                worker.terminate()
+                worker.wait(2000)
+        self.worker = None
 
     def _on_settings_clicked(self) -> None:
         self.settings_requested.emit()

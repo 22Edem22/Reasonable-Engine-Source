@@ -807,6 +807,43 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "Context budget, tokens (0 = auto)",
     ),
     "settings.context_tokens_auto": _pair("авто", "auto"),
+    "settings.label_context_mode": _pair(
+        "Профиль контекста",
+        "Context profile",
+    ),
+    "settings.context_mode_auto": _pair(
+        "Авто (кэш для DeepSeek V4.1)",
+        "Auto (cache for DeepSeek V4.1)",
+    ),
+    "settings.context_mode_balanced": _pair(
+        "Сбалансированный",
+        "Balanced",
+    ),
+    "settings.context_mode_cache": _pair(
+        "Максимальный кэш",
+        "Maximum cache",
+    ),
+    "settings.context_mode_tip": _pair(
+        "Авто включает большой контекст и короткие tool-результаты для "
+        "DeepSeek V4.1 (окно 128k), чтобы поднять долю кэша. "
+        "«Сбалансированный» оставляет 48k, «Максимальный кэш» включает режим "
+        "для любой модели с большим окном. Большой контекст повышает задержку.",
+        "Auto enables a large context and shorter tool results for DeepSeek "
+        "V4.1 (128k window) to raise the cache share. “Balanced” keeps 48k; "
+        "“Maximum cache” enables it for any large-window model. A large context "
+        "increases latency.",
+    ),
+    "settings.label_run_budget": _pair(
+        "Лимит токенов на запуск (0 — без лимита)",
+        "Tokens per run (0 = unlimited)",
+    ),
+    "settings.run_budget_off": _pair("без лимита", "unlimited"),
+    "settings.run_budget_tip": _pair(
+        "Жёсткий предел на один запуск агента, включая параллельных специалистов. "
+        "Когда бюджет израсходован, работа останавливается, а изменения и снимок сохраняются.",
+        "A hard cap for one agent run, including parallel specialists. When the "
+        "budget is used up the run stops and keeps the changes and the snapshot.",
+    ),
     "settings.compaction_check": _pair(
         "Сжимать старый контекст",
         "Compress older context",
@@ -816,6 +853,43 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "и продолжает с кратким резюме. Отключите, чтобы оставить только обрезку.",
         "When history no longer fits, the agent summarizes older steps and "
         "continues from a short summary. Disable to keep plain trimming.",
+    ),
+    "settings.resume_runs_check": _pair(
+        "Продолжать запуск после сбоя",
+        "Resume a run after a crash",
+    ),
+    "settings.resume_runs_tip": _pair(
+        "Агент сохраняет ход текущего шага. Если редактор или компьютер "
+        "завершится аварийно, следующий запуск той же задачи продолжит с "
+        "последнего завершённого шага, а не начнёт заново.",
+        "The agent journals the current step. If the editor or the computer "
+        "dies, the next run of the same task continues from the last completed "
+        "step instead of starting over.",
+    ),
+    "settings.stream_check": _pair(
+        "Показывать ответ по мере генерации",
+        "Stream the answer as it is generated",
+    ),
+    "settings.stream_tip": _pair(
+        "Текст появляется в чате постепенно. Некоторые провайдеры при "
+        "стриминге не присылают расход токенов, поэтому счётчик стоимости "
+        "может быть менее точным. При ошибке агент автоматически вернётся "
+        "к обычному ответу.",
+        "Text appears in the chat gradually. Some providers omit token usage "
+        "when streaming, so the cost counter can be less precise. On any "
+        "error the agent falls back to a regular response.",
+    ),
+    "settings.confirm_changes_check": _pair(
+        "Спрашивать перед изменениями файлов",
+        "Ask before changing files",
+    ),
+    "settings.confirm_changes_tip": _pair(
+        "Перед первой правкой запуск остановится и спросит разрешение. "
+        "После подтверждения агент работает как обычно: проверяет и запускает "
+        "проект. Отмена возвращает управление без изменения файлов.",
+        "Before the first edit the run pauses for approval. After confirmation "
+        "the agent works as usual: it validates and runs the project. Declining "
+        "returns control without changing any file.",
     ),
     "settings.auto_continue_title": _pair(
         "Автопродолжение после ошибок",
@@ -851,6 +925,22 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "An extra model request after completion. Disable it to save tokens or "
         "to finish immediately.",
     ),
+    "settings.aux_model": _pair(
+        "Модель для служебных вызовов",
+        "Model for auxiliary calls",
+    ),
+    "settings.aux_model_tip": _pair(
+        "Сжатие контекста и проверка выполнения идут на этой модели. Выберите "
+        "дешёвую и быструю — основная модель продолжит решать задачу. Пустой "
+        "пункт означает «как основная».",
+        "Context compaction and the completion check run on this model. Pick a "
+        "cheap, fast one; the main model keeps solving the task. The empty "
+        "option means “same as the main model”.",
+    ),
+    "settings.aux_model_same": _pair(
+        "Как основная модель",
+        "Same as the main model",
+    ),
     "settings.parallel_title": _pair(
         "Параллельная разработка",
         "Parallel development",
@@ -880,6 +970,37 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "settings.parallel_rounds": _pair(
         "Кругов исправлений",
         "Repair rounds",
+    ),
+    "settings.label_specialist_minutes": _pair(
+        "Минут на специалиста",
+        "Minutes per specialist",
+    ),
+    "settings.label_specialist_steps": _pair(
+        "Шагов на специалиста",
+        "Steps per specialist",
+    ),
+    "settings.label_run_minutes": _pair(
+        "Минут на весь запуск",
+        "Minutes per run",
+    ),
+    "settings.specialist_unlimited": _pair("без лимита", "unlimited"),
+    "settings.specialist_minutes_tip": _pair(
+        "Сколько времени один специалист может работать над своим пунктом. "
+        "Если он не успел — запуск останавливается, изменения и снимок сохраняются.",
+        "How long one specialist may work on its item. If it runs out of time "
+        "the run stops and keeps the changes and the snapshot.",
+    ),
+    "settings.specialist_steps_tip": _pair(
+        "Жёсткий предел шагов специалиста. Дополнительно действует защита от "
+        "цикла «читаю и запускаю, но ничего не пишу».",
+        "A hard step cap for one specialist. It is backed by a guard against "
+        "the “read and run but never edit” loop.",
+    ),
+    "settings.run_minutes_tip": _pair(
+        "Общий предел времени на весь параллельный запуск, включая круги "
+        "исправлений. 0 — без лимита.",
+        "Overall wall-clock limit for the whole parallel run, including repair "
+        "rounds. 0 means unlimited.",
     ),
     "settings.projects_hint2": _pair(
         "По умолчанию новые проекты создаются в папке Projects рядом с движком. "
@@ -912,6 +1033,8 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "projectpage.back_tooltip": _pair("Ко всем проектам", "Back to all projects"),
     "projectpage.badge_game": _pair("ИГРА", "GAME"),
     "projectpage.badge_app": _pair("ПРИЛОЖЕНИЕ", "APP"),
+    "projectpage.badge_site": _pair("САЙТ", "WEBSITE"),
+    "projectpage.badge_other": _pair("ДРУГОЕ", "OTHER"),
     "projectpage.badge_mode_builtin": _pair("ВСТРОЕННЫЙ ИИ", "BUILT-IN AI"),
     "projectpage.badge_mode_external": _pair("ВНЕШНИЙ АГЕНТ", "EXTERNAL AGENT"),
     "projectpage.goal_missing": _pair("Цель пока не описана", "No goal described yet"),
@@ -1304,6 +1427,16 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "newproj.type_game": _pair("ИГРА", "GAME"),
     "newproj.type_game_hint": _pair("Уровни, персонажи, очки, геймплей", "Levels, characters, scores, gameplay"),
     "newproj.type_app": _pair("ПРИЛОЖЕНИЕ", "APP"),
+    "newproj.type_site": _pair("САЙТ", "WEBSITE"),
+    "newproj.type_site_hint": _pair(
+        "Страницы, дизайн, адаптивность",
+        "Pages, design, responsive layout",
+    ),
+    "newproj.type_other": _pair("ДРУГОЕ", "OTHER"),
+    "newproj.type_other_hint": _pair(
+        "Скрипты, боты, утилиты, что угодно",
+        "Scripts, bots, tools, anything",
+    ),
     "newproj.type_app_hint": _pair("Экраны, списки, формы, ИИ-панели", "Screens, lists, forms, AI panels"),
     "newproj.levels_section": _pair("Уровень интерфейса", "Interface level"),
     "newproj.level_hint_simple": _pair(
@@ -1418,6 +1551,8 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     ),
     "newproj.kind_game": _pair("Игра", "Game"),
     "newproj.kind_app": _pair("Приложение", "App"),
+    "newproj.kind_site": _pair("Сайт", "Website"),
+    "newproj.kind_other": _pair("Другое", "Other"),
     "newproj.summary_blank": _pair(
         "Пустой проект · минимальный main.py\n"
         "Без игры и без вопросов про ИИ\n"
@@ -1504,6 +1639,46 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "external.check_engine_hint": _pair("Проект самодостаточен", "The project is self-contained"),
     "external.readme_header": _pair("Внешний агент · {name}", "External agent · {name}"),
     # --- Project settings dialog (editor/project_settings.py) ---
+    "importproj.title": _pair(
+        "Добавить существующий проект",
+        "Add an existing project",
+    ),
+    "importproj.intro": _pair(
+        "В этой папке нет project.json. Укажите, что это за проект — файл "
+        "настроек будет создан, а существующие файлы останутся нетронутыми.",
+        "This folder has no project.json. Tell us what the project is: a "
+        "settings file will be created and your existing files will stay intact.",
+    ),
+    "importproj.entry": _pair("Точка входа", "Entry point"),
+    "importproj.entry_tip": _pair(
+        "Файл, с которого запускается проект. Обычно main.py.",
+        "The file that starts the project. Usually main.py.",
+    ),
+    "importproj.type": _pair("Тип проекта", "Project type"),
+    "importproj.type_game": _pair("Игра", "Game"),
+    "importproj.type_app": _pair("Приложение", "Application"),
+    "importproj.type_site": _pair("Сайт", "Website"),
+    "importproj.type_other": _pair("Другое", "Other"),
+    "importproj.platform": _pair("Платформа", "Platform"),
+    "importproj.mode": _pair("Режим ИИ", "AI mode"),
+    "importproj.mode_builtin": _pair("Встроенный ИИ", "Built-in AI"),
+    "importproj.mode_external": _pair("Внешний агент", "External agent"),
+    "importproj.create": _pair(
+        "Создать настройки и открыть",
+        "Create settings and open",
+    ),
+    "importproj.name_required": _pair(
+        "Укажите название проекта.",
+        "Enter a project name.",
+    ),
+    "importproj.entry_invalid": _pair(
+        "Точка входа должна быть файлом внутри папки проекта.",
+        "The entry point must be a file inside the project folder.",
+    ),
+    "importproj.create_failed_title": _pair(
+        "Не удалось добавить проект",
+        "Could not add the project",
+    ),
     "projset.title": _pair("Настройки проекта", "Project settings"),
     "projset.advanced": _pair("Расширенные параметры", "Advanced options"),
     "projset.advanced_hint": _pair("Версия Android и служебные параметры.", "Android version and service settings."),
@@ -1580,6 +1755,30 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "The agent did not change any project files. Check the plan and the task wording.",
     ),
     "chat.open_in_code": _pair("Клик — открыть в редакторе кода", "Click to open in the code editor"),
+    "chat.confirm_write_title": _pair(
+        "Подтвердите изменения",
+        "Confirm the changes",
+    ),
+    "chat.confirm_write_text": _pair(
+        "Агент готов изменить проект (первый файл: {path}).\n"
+        "Разрешить изменения?",
+        "The agent is about to change the project (first file: {path}).\n"
+        "Allow the changes?",
+    ),
+    "chat.message_time": _pair(
+        "Время сообщения: {time}",
+        "Message time: {time}",
+    ),
+    "chat.show_diff": _pair("Показать дифф", "Show diff"),
+    "chat.hide_diff": _pair("Скрыть дифф", "Hide diff"),
+    "chat.show_diff_tip": _pair(
+        "Показать, что именно изменилось в файлах по сравнению со снимком",
+        "Show exactly what changed in the files compared with the snapshot",
+    ),
+    "chat.no_diff": _pair(
+        "Текстовых изменений нет — только новые, удалённые или двоичные файлы.",
+        "No textual changes — only new, deleted or binary files.",
+    ),
     "chat.more_files": _pair(
         "Ещё {count} файл(ов) — полный список в истории.",
         "{count} more file(s) — the full list is in the history.",
@@ -1684,6 +1883,14 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "Всего: {tokens} токенов · из кэша {cached} · {time}",
         "Total: {tokens} tokens · {cached} cached · {time}",
     ),
+    "chat.usage_total_cost": _pair(
+        "Всего: {tokens} токенов · ~{cost} · {time}",
+        "Total: {tokens} tokens · ~{cost} · {time}",
+    ),
+    "chat.usage_total_cached_cost": _pair(
+        "Всего: {tokens} токенов · из кэша {cached} · ~{cost} · {time}",
+        "Total: {tokens} tokens · {cached} cached · ~{cost} · {time}",
+    ),
     "chat.usage_tooltip": _pair(
         "За всё время в этом проекте\nЗапросов: {requests}\nОтправлено: {prompt} "
         "(из кэша: {cached})\nЗаписано в кэш: {cache_write}\nПолучено: {completion}\n"
@@ -1691,6 +1898,14 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
         "All time in this project\nRequests: {requests}\nSent: {prompt} "
         "(cached: {cached})\nCache written: {cache_write}\nReceived: {completion}\n"
         "Generation time: {time}",
+    ),
+    "chat.usage_tooltip_cost": _pair(
+        "За всё время в этом проекте\nЗапросов: {requests}\nОтправлено: {prompt} "
+        "(из кэша: {cached})\nЗаписано в кэш: {cache_write}\nПолучено: {completion}\n"
+        "Списано в OpenCode: {cost}\nВремя генерации: {time}",
+        "All time in this project\nRequests: {requests}\nSent: {prompt} "
+        "(cached: {cached})\nCache written: {cache_write}\nReceived: {completion}\n"
+        "Charged in OpenCode: {cost}\nGeneration time: {time}",
     ),
     "chat.time_less_minute": _pair("меньше минуты", "less than a minute"),
     "chat.time_minutes": _pair("{minutes} мин", "{minutes} min"),
@@ -1805,6 +2020,7 @@ TRANSLATIONS: dict[str, dict[str, str] | tuple[str]] = {
     "chat.tool_read_file": _pair("Чтение файла", "Reading a file"),
     "chat.tool_write_file": _pair("Запись файла", "Writing a file"),
     "chat.tool_edit_file": _pair("Правка файла", "Editing a file"),
+    "chat.tool_append_file": _pair("Дописывание файла", "Appending to a file"),
     "chat.tool_delete_path": _pair("Удаление", "Deleting"),
     "chat.tool_search_text": _pair("Поиск по проекту", "Searching the project"),
     "chat.tool_run_command": _pair("Команда", "Command"),
@@ -2360,6 +2576,8 @@ work until there is a result, do not repeat the same action.""",
     "scene.tool_panel": _pair("Панель (P)", "Panel (P)"),
     "scene.tool_image": _pair("Изображение из ассетов", "Image from assets"),
     "scene.tool_delete": _pair("Удалить объект (Del)", "Delete object (Del)"),
+    "scene.undo_tip": _pair("Отменить (Ctrl+Z)", "Undo (Ctrl+Z)"),
+    "scene.redo_tip": _pair("Повторить (Ctrl+Y)", "Redo (Ctrl+Y)"),
     "scene.tool_duplicate": _pair("Дублировать (Ctrl+D)", "Duplicate (Ctrl+D)"),
     "scene.snap": _pair("Привязка к сетке", "Snap to grid"),
     "scene.grid": _pair("Сетка", "Grid"),
@@ -2516,6 +2734,19 @@ work until there is a result, do not repeat the same action.""",
     "code.refresh_button": _pair("Обновить", "Refresh"),
     "code.refresh_tip": _pair("Обновить дерево файлов", "Refresh the file tree"),
     "code.search_placeholder": _pair("Поиск файла…", "Search for a file…"),
+    "code.find_placeholder": _pair("Найти в файле…", "Find in file…"),
+    "code.replace_placeholder": _pair("Заменить на…", "Replace with…"),
+    "code.find_case": _pair("Aa", "Aa"),
+    "code.find_case_tip": _pair("Учитывать регистр", "Match case"),
+    "code.find_prev": _pair("Назад", "Previous"),
+    "code.find_next": _pair("Далее", "Next"),
+    "code.replace_one": _pair("Заменить", "Replace"),
+    "code.replace_all": _pair("Заменить всё", "Replace all"),
+    "code.find_close": _pair("Закрыть поиск", "Close search"),
+    "code.replacements_count": _pair(
+        "Заменено вхождений: {count}",
+        "Replacements made: {count}",
+    ),
     "code.new_file_button": _pair("+ Файл", "+ File"),
     "code.new_folder_button": _pair("+ Папка", "+ Folder"),
     "code.no_file_selected": _pair("Файл не выбран", "No file selected"),

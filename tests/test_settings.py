@@ -123,6 +123,28 @@ class SettingsTests(unittest.TestCase):
         again = Settings(self.path)
         self.assertEqual(again.auto_continue_kinds(), ["server", "timeout"])
 
+    def test_old_thirty_step_default_is_migrated_to_sixty(self) -> None:
+        self.path.write_text(
+            json.dumps({"version": 2, "agent": {"specialist_max_steps": 30}}),
+            encoding="utf-8",
+        )
+        settings = Settings(self.path)
+        self.assertEqual(settings.data["agent"]["specialist_max_steps"], 60)
+
+    def test_api_keys_are_not_written_in_plain_text_on_windows(self) -> None:
+        import sys
+
+        if sys.platform != "win32":
+            self.skipTest("DPAPI is Windows-only")
+        settings = Settings(self.path)
+        settings.update_provider("openrouter", api_key="sk-test-plain")
+        raw = self.path.read_text(encoding="utf-8")
+        self.assertNotIn("sk-test-plain", raw)
+        self.assertEqual(settings.get_provider_config()["api_key"], "sk-test-plain")
+
+        reloaded = Settings(self.path)
+        self.assertEqual(reloaded.get_provider_config()["api_key"], "sk-test-plain")
+
 
 if __name__ == "__main__":
     unittest.main()

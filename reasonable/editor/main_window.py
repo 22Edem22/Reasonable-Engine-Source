@@ -31,6 +31,7 @@ from reasonable.core.settings import Settings
 from reasonable.version import VERSION, VERSION_LABEL, VERSION_NAME
 
 from . import theme
+from .import_project import ImportProjectDialog
 from .new_project import NewProjectDialog
 from .project_page import ProjectPage
 from .settings_dialog import SettingsDialog
@@ -216,10 +217,15 @@ class MainWindow(QMainWindow):
             self.history_action,
             self.delete_action,
             self.back_action,
-            self.scene_action,
             *self.section_actions,
         ):
             action.setEnabled(active)
+        scene_ok = bool(
+            active
+            and self.current_page is not None
+            and self.current_page.project.project_type in {"game", "app"}
+        )
+        self.scene_action.setEnabled(scene_ok)
 
     def _fill_recent_menu(self) -> None:
         self.recent_menu.clear()
@@ -278,10 +284,19 @@ class MainWindow(QMainWindow):
         try:
             project = Project.load(target)
         except Exception as exc:
-            QMessageBox.warning(self, t("dialog.open_failed_title"), str(exc))
-            self.settings.remove_recent(Path(target))
-            self.welcome.refresh()
-            return
+            if target.is_dir() and not (target / "project.json").exists():
+                # A folder with code but no manifest: treat it as an existing
+                # project, ask what it is and create only the settings file.
+                project = self._import_existing_project(target)
+                if project is None:
+                    self.settings.remove_recent(target)
+                    self.welcome.refresh()
+                    return
+            else:
+                QMessageBox.warning(self, t("dialog.open_failed_title"), str(exc))
+                self.settings.remove_recent(Path(target))
+                self.welcome.refresh()
+                return
         if not self._leave_current():
             return
         page = ProjectPage(project, self.settings)
@@ -303,6 +318,25 @@ class MainWindow(QMainWindow):
             page._show_page(section)
         elif focus_agent:
             page.open_agent_page(focus=True)
+
+    def _import_existing_project(self, target: Path):
+        """Create a manifest for an existing folder without scaffolding it."""
+        dialog = ImportProjectDialog(target, self)
+        if not dialog.exec() or dialog.manifest is None:
+            return None
+        try:
+            project = Project.create(target, dialog.manifest, scaffold=False)
+            for name in ("assets", "progress"):
+                (target / name).mkdir(exist_ok=True)
+            from reasonable.core.progress import ensure_state
+
+            ensure_state(project.root, project.mode)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, t("importproj.create_failed_title"), str(exc)
+            )
+            return None
+        return project
 
     def _leave_current(self) -> bool:
         page = self.current_page

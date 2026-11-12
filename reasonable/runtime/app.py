@@ -337,6 +337,7 @@ class UIApp(App):
         self.theme = theme or Theme()
         set_active_theme(self.theme)
         self.root = None
+        self._root_attempted = False
         self._background_surface: pygame.Surface | None = None
         self._background_size = None
 
@@ -344,7 +345,17 @@ class UIApp(App):
         """Return the root widget (usually a Panel/VStack)."""
         return None
 
+    def _ensure_root(self) -> None:
+        """Build the UI if a subclass forgot to call super().on_start()."""
+        if self.root is not None or self._root_attempted:
+            return
+        self._root_attempted = True
+        root = self.build_ui()
+        if root is not None:
+            self.set_root(root)
+
     def on_start(self) -> None:
+        self._root_attempted = True
         root = self.build_ui()
         if root is not None:
             self.set_root(root)
@@ -358,6 +369,7 @@ class UIApp(App):
             pass
 
     def on_event(self, event: pygame.event.Event) -> None:
+        self._ensure_root()
         if self.root is None:
             return
         from .ui import blur_entries, touch_to_mouse
@@ -369,11 +381,13 @@ class UIApp(App):
             self.root.handle_event(ui_event)
 
     def on_update(self, dt: float) -> None:
+        self._ensure_root()
         if self.root is not None:
             self.root.layout(pygame.Rect(0, 0, *self.size))
             self.root.update(dt)
 
     def on_draw(self, surface: pygame.Surface) -> None:
+        self._ensure_root()
         size = surface.get_size()
         if self._background_surface is None or self._background_size != size:
             # The gradient and the ambient glows never change while the window

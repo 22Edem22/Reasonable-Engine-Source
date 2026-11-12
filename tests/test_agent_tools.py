@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reasonable.ai.tools import AgentTools
+from reasonable.ai.tools import AgentTools, SITE_TOOL_NAMES, tool_schemas_for
 from reasonable.core.progress import read_state
 from reasonable.core.project import Project, default_manifest
 
@@ -34,6 +34,106 @@ class AgentToolsTests(unittest.TestCase):
         result = self.call("does_not_exist")
         self.assertFalse(result["ok"])
         self.assertIn("Неизвестный инструмент", result["error"])
+
+    def test_run_project_rejects_an_entry_without_launch_code(self) -> None:
+        (self.root / "main.py").write_text(
+            "def main():\n    pass\n", encoding="utf-8"
+        )
+        result = self.call("run_project", frames=2)
+        self.assertFalse(result["ok"])
+        self.assertIn("main.py", result["error"].lower())
+
+    def test_write_file_cannot_remove_entry_launch_code(self) -> None:
+        (self.root / "main.py").write_text(
+            "def main():\n    pass\n\nif __name__ == \"__main__\":\n    main()\n",
+            encoding="utf-8",
+        )
+        result = self.call(
+            "write_file", path="main.py", content="def main():\n    pass\n"
+        )
+        self.assertFalse(result["ok"])
+        self.assertIn("__main__", (self.root / "main.py").read_text(encoding="utf-8"))
+
+    def test_edit_file_cannot_remove_entry_launch_code(self) -> None:
+        (self.root / "main.py").write_text(
+            "def main():\n    pass\n\nif __name__ == \"__main__\":\n    main()\n",
+            encoding="utf-8",
+        )
+        result = self.call(
+            "edit_file",
+            path="main.py",
+            old_text="\nif __name__ == \"__main__\":\n    main()\n",
+            new_text="\n",
+        )
+        self.assertFalse(result["ok"])
+        self.assertIn("__main__", (self.root / "main.py").read_text(encoding="utf-8"))
+
+    def test_run_project_enables_autoplay_for_games(self) -> None:
+        from types import SimpleNamespace
+        from unittest import mock
+
+        captured = {}
+
+        def fake_run(command, **kwargs):
+            captured["env"] = dict(kwargs.get("env") or {})
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        with mock.patch("reasonable.ai.tools.subprocess.run", side_effect=fake_run):
+            result = self.call("run_project", frames=2)
+        self.assertTrue(result["ok"])
+        self.assertEqual(captured["env"].get("RE_AUTOPLAY"), "1")
+        self.assertEqual(captured["env"].get("RE_FRAMES"), "2")
+
+    def test_run_project_fails_when_autoplay_is_stuck(self) -> None:
+        from types import SimpleNamespace
+        from unittest import mock
+
+        def fake_run(command, **kwargs):
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "RE_AUTOPLAY_IDLE: the game screen did not change for 120 frames\n"
+                    "RE_AUTOPLAY_OK frames=121 flips=122 max_unchanged=121 idle=True\n"
+                ),
+                stderr="",
+            )
+
+        with mock.patch("reasonable.ai.tools.subprocess.run", side_effect=fake_run):
+            result = self.call("run_project", frames=120)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["error"])
+
+    def test_repeated_scratch_writes_are_blocked(self) -> None:
+        for _ in range(3):
+            result = self.call(
+                "write_file", path="_check.py", content="print('check')\n"
+            )
+            self.assertTrue(result["ok"], result)
+        blocked = self.call(
+            "write_file", path="_check.py", content="print('check again')\n"
+        )
+        self.assertFalse(blocked["ok"])
+        self.assertEqual(self.tools.files_changed, 0)
+        ready = self.tools.readiness()
+        self.assertFalse(ready["ready"])
+        self.assertTrue(any("temporary" in item.lower() for item in ready["missing"]))
+
+    def test_run_project_captures_and_checks_screenshots(self) -> None:
+        from types import SimpleNamespace
+        from unittest import mock
+        from PIL import Image
+
+        def fake_run(command, **kwargs):
+            directory = Path(kwargs["env"]["RE_SCREENSHOTS"])
+            directory.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (12, 8), (30, 40, 50)).save(directory / "frame_01.png")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with mock.patch("reasonable.ai.tools.subprocess.run", side_effect=fake_run):
+            result = self.call("run_project", frames=5, screenshots=1)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(len(result["screenshots"]), 1)
+        self.assertFalse(result["screenshots"][0]["blank"])
 
     def test_read_write_edit_and_search(self) -> None:
         written = self.call("write_file", path="src/level.py", content="SCORE = 0\n")
@@ -112,6 +212,8 @@ class AgentToolsTests(unittest.TestCase):
         self.assertTrue(run["ok"], run)
         self.assertEqual(run["returncode"], 0)
 
+        for task in read_state(self.root).get("tasks") or []:
+            self.call("update_task", task=task["id"], status="done")
         finish = self.call("finish", message="Готово")
         self.assertTrue(finish["ok"], finish)
         self.assertEqual(finish["percent"], 100.0)
@@ -167,6 +269,158 @@ class AgentToolsTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["returncode"], 0)
         self.assertIn("2", result["output"])
+
+    def test_large_file_is_readable_by_line_range(self) -> None:
+        # 400 KB is the old hard rejection threshold; a slice must still work.
+        big = self.root / "data" / "big.json"
+        big.parent.mkdir(parents=True)
+        lines = [f'"row_{index}": {index},' for index in range(20_000)]
+        big.write_text("\n".join(lines), encoding="utf-8")
+        result = self.call("read_file", path="data/big.json", start_line=2, end_line=4)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["start_line"], 2)
+        self.assertEqual(result["content"].splitlines()[0], '"row_1": 1,')
+
+    def test_project_manifest_cannot_be_rewritten_by_the_agent(self) -> None:
+        before = (self.root / "project.json").read_text(encoding="utf-8")
+        written = self.call("write_file", path="project.json", content="{}")
+        self.assertFalse(written["ok"])
+        edited = self.call(
+            "edit_file",
+            path="project.json",
+            old_text='"format": 1',
+            new_text='"format": 2',
+        )
+        self.assertFalse(edited["ok"])
+        self.assertEqual(
+            (self.root / "project.json").read_text(encoding="utf-8"), before
+        )
+
+    def test_append_file_finishes_a_partial_file(self) -> None:
+        self.call("write_file", path="src/chunked.py", content="PART_ONE = 1\n# @@CHUNK@@\n")
+        appended = self.call(
+            "append_file", path="src/chunked.py", content="PART_TWO = 2\n"
+        )
+        self.assertTrue(appended["ok"])
+        self.assertEqual(appended["appended"], len("PART_TWO = 2\n"))
+        self.assertEqual(
+            (self.root / "src" / "chunked.py").read_text(encoding="utf-8"),
+            "PART_ONE = 1\n# @@CHUNK@@\nPART_TWO = 2\n",
+        )
+
+    def test_append_file_creates_a_missing_file(self) -> None:
+        result = self.call("append_file", path="notes.md", content="hello\n")
+        self.assertTrue(result["ok"])
+        self.assertEqual((self.root / "notes.md").read_text(encoding="utf-8"), "hello\n")
+
+    def test_append_file_rejects_invalid_json(self) -> None:
+        self.call("write_file", path="data.json", content='{"a": 1}')
+        result = self.call("append_file", path="data.json", content=",oops")
+        self.assertFalse(result["ok"])
+        self.assertEqual((self.root / "data.json").read_text(encoding="utf-8"), '{"a": 1}')
+
+    def test_append_file_cannot_touch_the_manifest(self) -> None:
+        result = self.call("append_file", path="project.json", content="x")
+        self.assertFalse(result["ok"])
+
+    def test_declined_write_is_not_applied(self) -> None:
+        called: list[tuple[str, str]] = []
+        tools = AgentTools(
+            self.project,
+            confirm_write=lambda action, path: called.append((action, path)) or False,
+        )
+        result = json.loads(
+            tools.call("write_file", {"path": "blocked.py", "content": "X = 1\n"})
+        )
+        self.assertFalse(result["ok"])
+        self.assertTrue(tools.write_denied)
+        self.assertEqual(called, [("write", "blocked.py")])
+        self.assertFalse((self.root / "blocked.py").exists())
+
+    def test_approved_write_is_applied(self) -> None:
+        tools = AgentTools(self.project, confirm_write=lambda action, path: True)
+        result = json.loads(
+            tools.call("write_file", {"path": "allowed.py", "content": "X = 1\n"})
+        )
+        self.assertTrue(result["ok"])
+        self.assertFalse(tools.write_denied)
+        self.assertTrue((self.root / "allowed.py").is_file())
+
+
+class SiteToolTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name) / "site-project"
+        self.project = Project.create(
+            self.root,
+            default_manifest(
+                "Site",
+                project_type="site",
+                goal="Build a landing page",
+                template="site",
+            ),
+            scaffold=True,
+        )
+        self.tools = AgentTools(self.project, image_config={})
+
+    def call(self, name: str, **arguments) -> dict:
+        return json.loads(self.tools.call(name, arguments))
+
+    def test_site_page_writes_a_complete_document(self) -> None:
+        result = self.call(
+            "site_page",
+            path="about.html",
+            title="About us",
+            description="Who we are",
+            body="<main><h1>About</h1></main>",
+        )
+        self.assertTrue(result["ok"])
+        page = (self.root / "site" / "about.html").read_text(encoding="utf-8")
+        self.assertIn('charset="utf-8"', page)
+        self.assertIn('name="viewport"', page)
+        self.assertIn("<title>About us</title>", page)
+        self.assertIn('name="description"', page)
+        self.assertIn("styles.css", page)
+        self.assertIn("<h1>About</h1>", page)
+
+    def test_site_theme_writes_a_design_system(self) -> None:
+        result = self.call("site_theme", palette="cool", mode="dark", radius=18)
+        self.assertTrue(result["ok"])
+        css = (self.root / "site" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("--accent", css)
+        self.assertIn("--radius: 18px", css)
+        self.assertIn("color-scheme: dark", css)
+        self.assertIn("@media (max-width: 820px)", css)
+
+    def test_validate_site_finds_a_broken_reference(self) -> None:
+        self.call(
+            "site_page",
+            path="broken.html",
+            title="Broken",
+            body='<a href="missing.html">Missing</a>',
+        )
+        result = self.call("validate_site")
+        self.assertFalse(result["ok"] is False)
+        self.assertTrue(result["has_errors"])
+        self.assertTrue(
+            any("missing.html" in str(issue.get("message")) for issue in result["issues"])
+        )
+
+    def test_run_project_uses_the_site_check_mode(self) -> None:
+        result = self.call("run_project")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["returncode"], 0)
+
+    def test_site_tools_are_only_advertised_where_useful(self) -> None:
+        names = {schema["name"] for schema in tool_schemas_for("game")}
+        self.assertFalse(names & SITE_TOOL_NAMES)
+        self.assertTrue(
+            {schema["name"] for schema in tool_schemas_for("site")} >= SITE_TOOL_NAMES
+        )
+        self.assertTrue(
+            {schema["name"] for schema in tool_schemas_for("other")} >= SITE_TOOL_NAMES
+        )
 
 
 if __name__ == "__main__":

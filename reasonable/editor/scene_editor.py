@@ -10,6 +10,7 @@ reuse the same data.
 
 from __future__ import annotations
 
+import copy
 import math
 import uuid
 from pathlib import Path
@@ -893,12 +894,31 @@ class SceneEditorPage(QWidget):
             self.scene["template"] = starter
             save_scene(project.root, self.scene, "main")
         self._syncing = False
+        self._undo_stack: list[dict] = []
+        self._redo_stack: list[dict] = []
+        self._collection_undo: list[dict] = []
+        self._collection_redo: list[dict] = []
+        self._undo_baseline = copy.deepcopy(self.scene)
+        self._undo_guard = False
+        self._undo_timer = QTimer(self)
+        self._undo_timer.setSingleShot(True)
+        self._undo_timer.setInterval(450)
+        self._undo_timer.timeout.connect(self._commit_undo_baseline)
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.timeout.connect(self.save_now)
         self._save_shortcut = QShortcut(QKeySequence.StandardKey.Save, self)
         self._save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._save_shortcut.activated.connect(self.save_now)
+        self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self._undo_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._undo_shortcut.activated.connect(self.undo)
+        self._redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
+        self._redo_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._redo_shortcut.activated.connect(self.redo)
+        self._redo_alt_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
+        self._redo_alt_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._redo_alt_shortcut.activated.connect(self.redo)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -1070,6 +1090,7 @@ class SceneEditorPage(QWidget):
         self._refresh_scene_tabs(scene_id)
         self._refresh_empty_panel()
         QTimer.singleShot(0, self.viewport.fit_view)
+        self._reset_undo()
         self.status_message.emit(t("scene.opened", title=self._scene_title()))
 
     def _create_scene(self, template: str) -> None:
@@ -1084,6 +1105,7 @@ class SceneEditorPage(QWidget):
             return
         self.save_now()
         size = self.viewport.scene_size()
+        self._push_collection_undo()
         created = create_scene(
             self.project.root,
             str(title).strip(),
@@ -1099,6 +1121,7 @@ class SceneEditorPage(QWidget):
         self._load_inspector(None)
         self._refresh_empty_panel()
         QTimer.singleShot(0, self.viewport.fit_view)
+        self._reset_object_undo()
         self.status_message.emit(t("scene.created", title=self._scene_title()))
 
     def _rename_scene(self) -> None:
@@ -1111,13 +1134,16 @@ class SceneEditorPage(QWidget):
         if not ok or not str(title).strip():
             return
         self.save_now()
+        self._push_collection_undo()
         if rename_scene(self.project.root, self.scene_name, str(title).strip()):
             self.scene["name"] = str(title).strip()
+            self._reset_object_undo()
             self._refresh_scene_tabs(self.scene_name)
             self.status_message.emit(t("scene.renamed", title=self._scene_title()))
 
     def _duplicate_scene(self) -> None:
         self.save_now()
+        self._push_collection_undo()
         created = duplicate_scene(self.project.root, self.scene_name)
         if created is None:
             return
@@ -1130,6 +1156,7 @@ class SceneEditorPage(QWidget):
         self._load_inspector(None)
         self._refresh_empty_panel()
         QTimer.singleShot(0, self.viewport.fit_view)
+        self._reset_object_undo()
         self.status_message.emit(t("scene.created", title=self._scene_title()))
 
     def _delete_scene(self) -> None:
@@ -1149,6 +1176,7 @@ class SceneEditorPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
+        self._push_collection_undo()
         delete_scene(self.project.root, self.scene_name)
         remaining = list_scenes(self.project.root)
         self.scene_name = remaining[0]["id"] if remaining else "main"
@@ -1160,6 +1188,7 @@ class SceneEditorPage(QWidget):
         self._load_inspector(None)
         self._refresh_empty_panel()
         QTimer.singleShot(0, self.viewport.fit_view)
+        self._reset_object_undo()
         self.status_message.emit(t("scene.deleted", title=self._scene_title()))
 
     def _scene_settings(self) -> None:
@@ -1169,11 +1198,17 @@ class SceneEditorPage(QWidget):
         values = dialog.values()
         if not values["name"]:
             values["name"] = self._scene_title()
+        self._undo_stack.append(copy.deepcopy(self.scene))
+        if len(self._undo_stack) > 50:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
         self.scene["name"] = values["name"]
         self.scene["size"] = values["size"]
         self.scene["grid"] = values["grid"]
         self.scene["background"] = values["background"]
         self.save_now()
+        self._undo_baseline = copy.deepcopy(self.scene)
+        self._update_undo_buttons()
         self._refresh_scene_tabs(self.scene_name)
         self.viewport.fit_view()
         self.status_message.emit(t("scene.settings_saved", title=self._scene_title()))
@@ -1244,6 +1279,22 @@ class SceneEditorPage(QWidget):
         remove.setToolTip(t("scene.tool_delete"))
         remove.clicked.connect(self.viewport_delete)
         row.addWidget(remove)
+
+        row.addSpacing(8)
+        self.undo_button = QPushButton("↶")
+        self.undo_button.setObjectName("ghost")
+        self.undo_button.setFixedSize(28, 28)
+        self.undo_button.setToolTip(t("scene.undo_tip"))
+        self.undo_button.setEnabled(False)
+        self.undo_button.clicked.connect(self.undo)
+        row.addWidget(self.undo_button)
+        self.redo_button = QPushButton("↷")
+        self.redo_button.setObjectName("ghost")
+        self.redo_button.setFixedSize(28, 28)
+        self.redo_button.setToolTip(t("scene.redo_tip"))
+        self.redo_button.setEnabled(False)
+        self.redo_button.clicked.connect(self.redo)
+        row.addWidget(self.redo_button)
 
         row.addSpacing(8)
         zoom_out = QPushButton()
@@ -1671,6 +1722,137 @@ class SceneEditorPage(QWidget):
         self._refresh_list()
         self._refresh_empty_panel()
         self._schedule_save()
+        self._remember_undo()
+
+    # -- undo / redo ---------------------------------------------------
+    def _remember_undo(self) -> None:
+        """Remember the scene before an edit burst (drag, slider, typing)."""
+        if self._undo_guard:
+            return
+        if not self._undo_timer.isActive():
+            self._undo_stack.append(copy.deepcopy(self._undo_baseline))
+            if len(self._undo_stack) > 50:
+                self._undo_stack.pop(0)
+            self._redo_stack.clear()
+        self._undo_timer.start()
+        self._update_undo_buttons()
+
+    def _commit_undo_baseline(self) -> None:
+        self._undo_baseline = copy.deepcopy(self.scene)
+
+    def _reset_undo(self) -> None:
+        self._undo_timer.stop()
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._collection_undo.clear()
+        self._collection_redo.clear()
+        self._undo_baseline = copy.deepcopy(self.scene)
+        self._update_undo_buttons()
+
+    def _reset_object_undo(self) -> None:
+        """A collection-level operation starts a new object-edit timeline."""
+        self._undo_timer.stop()
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._undo_baseline = copy.deepcopy(self.scene)
+
+    # -- scene collection undo -----------------------------------------
+    def _capture_scenes(self) -> dict[str, dict]:
+        captured: dict[str, dict] = {}
+        try:
+            for summary in list_scenes(self.project.root):
+                scene_id = str(summary.get("id") or "")
+                if not scene_id:
+                    continue
+                captured[scene_id] = copy.deepcopy(
+                    load_scene(self.project.root, scene_id, size=self.default_size)
+                )
+        except Exception:
+            return {}
+        return captured
+
+    def _push_collection_undo(self) -> None:
+        snapshot = self._capture_scenes()
+        if not snapshot:
+            return
+        self._collection_undo.append(snapshot)
+        if len(self._collection_undo) > 20:
+            self._collection_undo.pop(0)
+        self._collection_redo.clear()
+        self._reset_object_undo()
+        self._update_undo_buttons()
+
+    def _restore_scene_collection(self, snapshot: dict) -> None:
+        current = {str(item.get("id")) for item in list_scenes(self.project.root)}
+        for scene_id in current - set(snapshot):
+            try:
+                delete_scene(self.project.root, scene_id)
+            except Exception:
+                pass
+        for scene_id, scene in snapshot.items():
+            try:
+                save_scene(self.project.root, copy.deepcopy(scene), scene_id)
+            except Exception:
+                pass
+        target = self.scene_name if self.scene_name in snapshot else next(iter(snapshot), "main")
+        self.scene_name = target
+        self.scene = load_scene(self.project.root, target, size=self.default_size)
+        self.viewport.set_scene(self.scene)
+        self.viewport.selected_id = ""
+        self._refresh_scene_tabs(target)
+        self._refresh_list(select="")
+        self._load_inspector(None)
+        self._refresh_empty_panel()
+        self._undo_baseline = copy.deepcopy(self.scene)
+        self._update_undo_buttons()
+
+    def undo(self) -> None:
+        if self._undo_stack:
+            self._undo_timer.stop()
+            self._redo_stack.append(copy.deepcopy(self.scene))
+            self._restore_undo_state(self._undo_stack.pop())
+            return
+        if self._collection_undo:
+            self._collection_redo.append(self._capture_scenes())
+            self._restore_scene_collection(self._collection_undo.pop())
+
+    def redo(self) -> None:
+        if self._redo_stack:
+            self._undo_timer.stop()
+            self._undo_stack.append(copy.deepcopy(self.scene))
+            self._restore_undo_state(self._redo_stack.pop())
+            return
+        if self._collection_redo:
+            self._collection_undo.append(self._capture_scenes())
+            self._restore_scene_collection(self._collection_redo.pop())
+
+    def _restore_undo_state(self, state: dict) -> None:
+        self._undo_guard = True
+        try:
+            selected = self.viewport.selected_id
+            self.scene = state
+            self.viewport.scene = self.scene
+            if selected and self.viewport.find(selected) is None:
+                selected = ""
+            self.viewport.selected_id = selected
+            self.viewport.update()
+            self._refresh_list(select=selected)
+            self._load_inspector(self.viewport.find(selected) if selected else None)
+            self._refresh_empty_panel()
+            self._undo_baseline = copy.deepcopy(self.scene)
+            self.save_now()
+            self._refresh_scene_tabs(self.scene_name)
+        finally:
+            self._undo_guard = False
+        self._update_undo_buttons()
+
+    def _update_undo_buttons(self) -> None:
+        undo_button = getattr(self, "undo_button", None)
+        redo_button = getattr(self, "redo_button", None)
+        if undo_button is not None:
+            undo_button.setEnabled(bool(self._undo_stack or self._collection_undo))
+        if redo_button is not None:
+            redo_button.setEnabled(bool(self._redo_stack or self._collection_redo))
 
     # -- inspector -----------------------------------------------------
     def _load_inspector(self, item: dict | None) -> None:

@@ -74,6 +74,20 @@ def _replace_tokens(text: str, project) -> str:
     )
 
 
+def _wants_platformer(project) -> bool:
+    """Use the platformer starter when the user explicitly asks for one."""
+    text = f"{project.name} {getattr(project, 'goal', '')}".lower()
+    hints = (
+        "platformer",
+        "platform game",
+        "платформер",
+        "платформенн",
+        "прыжк",
+        "уровни с платформ",
+    )
+    return any(hint in text for hint in hints)
+
+
 def _fallback_icon(path: Path, accent=(217, 119, 87)) -> None:
     try:
         from PIL import Image, ImageDraw
@@ -163,7 +177,35 @@ def _generate_assets(project) -> None:
         pass
 
 
+def _copy_site_tree(project) -> None:
+    """Copy the website starter (HTML/CSS/JS) into the project's site/ folder."""
+    from .paths import TEMPLATES_DIR
+
+    source = TEMPLATES_DIR / "site" / "site"
+    target = project.root / "site"
+    if not source.is_dir():
+        return
+    text_suffixes = {".html", ".css", ".js", ".md", ".json", ".txt", ".svg"}
+    for path in source.rglob("*"):
+        relative = path.relative_to(source)
+        destination = target / relative
+        if path.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix.lower() in text_suffixes:
+            atomic_write_text(
+                destination,
+                _replace_tokens(path.read_text(encoding="utf-8", errors="replace"), project),
+            )
+        else:
+            shutil.copy2(path, destination)
+
+
 def _write_readme(project) -> None:
+    if project.project_type in {"site", "other"}:
+        _write_simple_readme(project)
+        return
     if current_language() == "en":
         goal = project.goal or "The goal is not described yet — add it in the project settings."
         notes = project.notes or "The first task for the agent is written after the project is created — in the “AI agent” section."
@@ -173,7 +215,15 @@ def _write_readme(project) -> None:
         levels_text = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in project.ui_levels)
         starter = str(project.manifest.get("template") or project.project_type)
         starter_section = ""
-        if starter in {"game", "app"} and project.ui_levels != ["simple"]:
+        if starter == "platformer" and project.ui_levels != ["simple"]:
+            starter_section = """## What is already built
+
+The project starts as a working platformer: tile collisions, a following
+camera, double jump, dash, coins, spikes and a goal. Extend this base instead
+of rewriting physics and the game loop from scratch.
+
+"""
+        elif starter in {"game", "app"} and project.ui_levels != ["simple"]:
             starter_section = """## What is already built
 
 The starter is not an empty window — it is a working product you can play or
@@ -288,7 +338,15 @@ engine root: `build_exe.bat` or `python tools/build_editor_exe.py`.
     levels_text = ", ".join(UI_LEVEL_LABELS.get(level, level) for level in project.ui_levels)
     starter = str(project.manifest.get("template") or project.project_type)
     starter_section = ""
-    if starter in {"game", "app"} and project.ui_levels != ["simple"]:
+    if starter == "platformer" and project.ui_levels != ["simple"]:
+        starter_section = """## Что уже готово
+
+Проект начинается как рабочий платформер: тайловые коллизии, камера,
+двойной прыжок, дэш, монеты, шипы и финиш. Расширяйте эту основу, а не
+переписывайте физику и игровой цикл с нуля.
+
+"""
+    elif starter in {"game", "app"} and project.ui_levels != ["simple"]:
         starter_section = """## Что уже готово
 
 Стартовый пример — не пустое окно, а рабочий продукт, которым можно
@@ -396,6 +454,82 @@ Windows напрямую.
     atomic_write_text(project.root / "README.md", readme)
 
 
+def _write_simple_readme(project) -> None:
+    """README for site/other projects: plain Python, no engine splash."""
+    from reasonable.version import VERSION_LABEL
+
+    is_site = project.project_type == "site"
+    kind = tr("website", "сайт") if is_site else tr("Python project", "проект на Python")
+    mode = (
+        tr("built-in AI agent", "встроенный ИИ-агент")
+        if project.mode == "builtin"
+        else tr("external AI agent", "внешний ИИ-агент")
+    )
+    if is_site:
+        structure = """```
+{name}/
+├─ main.py        local server and --check
+├─ site/          index.html, styles.css, app.js and your pages
+├─ project.json   project settings
+├─ progress/      shared progress for the editor and agents
+└─ README.md
+```""".format(name=project.name)
+        extra = tr(
+            "Edit `site/index.html` and `site/styles.css`, add pages to `site/`, "
+            "then run `python main.py` and open the printed URL. `python main.py --check` "
+            "verifies that every page is served.",
+            "Редактируйте `site/index.html` и `site/styles.css`, добавляйте страницы в "
+            "`site/`, запускайте `python main.py` и открывайте напечатанный адрес. "
+            "`python main.py --check` проверяет, что все страницы отдаются.",
+        )
+    else:
+        structure = """```
+{name}/
+├─ main.py        entry point (python main.py)
+├─ project.json   project settings
+├─ progress/      shared progress for the editor and agents
+└─ README.md
+```""".format(name=project.name)
+        extra = tr(
+            "Replace the skeleton in `main.py` with the real program. Keep the "
+            "`--check` flag working: the editor and the agent use it to verify the project.",
+            "Замените заготовку в `main.py` реальной программой. Сохраните флаг "
+            "`--check` — редактор и агент используют его для проверки проекта.",
+        )
+    goal = project.goal or tr("The goal is not described yet.", "Цель пока не описана.")
+    atomic_write_text(
+        project.root / "README.md",
+        f"""# {project.name}
+
+{goal}
+
+> {kind.capitalize()} · built with **Reasonable Engine {VERSION_LABEL}**.
+> Development mode: **{mode}**.
+
+## Quick start
+
+```bash
+python main.py
+```
+
+{extra}
+
+## Structure
+
+{structure}
+
+## Development with AI
+
+- Built-in agent: open the project in Reasonable Engine → “AI agent”.
+- External agent: read `AGENT_GUIDE.md` and connect any coding agent to the folder.
+
+## Notes and requirements
+
+{project.notes or tr("none", "нет")}
+""",
+    )
+
+
 def _write_launchers(project) -> None:
     atomic_write_text(
         project.root / "re.bat",
@@ -474,6 +608,44 @@ exec "${REASONABLE_PYTHON:-python3}" -m reasonable.runtime.launch main.py
         os.chmod(project.root / "run.sh", 0o755)
     except OSError:
         pass
+    if project.project_type in {"site", "other"}:
+        # Plain Python projects must not import the pygame runtime or play the
+        # engine splash: run the entry file directly.
+        atomic_write_text(
+            project.root / "run.bat",
+            """@echo off
+setlocal
+chcp 65001 >nul
+set "PYTHONIOENCODING=utf-8"
+set "HERE=%~dp0"
+cd /d "%HERE%"
+call :find_python
+"%PY%" main.py %*
+if errorlevel 1 pause
+exit /b %ERRORLEVEL%
+
+:find_python
+set "PY=%REASONABLE_PYTHON%"
+if not defined PY if exist "%HERE%..\\python\\python.exe" set "PY=%HERE%..\\python\\python.exe"
+if not defined PY if exist "%HERE%..\\..\\python\\python.exe" set "PY=%HERE%..\\..\\python\\python.exe"
+if not defined PY if exist "%HERE%..\\runtime\\python\\python.exe" set "PY=%HERE%..\\runtime\\python\\python.exe"
+if not defined PY set "PY=python"
+exit /b 0
+""",
+        )
+        atomic_write_text(
+            project.root / "run.sh",
+            """#!/usr/bin/env bash
+set -e
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$HERE"
+exec "${REASONABLE_PYTHON:-python3}" main.py "$@"
+""",
+        )
+        try:
+            os.chmod(project.root / "run.sh", 0o755)
+        except OSError:
+            pass
 
 
 def _write_support_files(project) -> None:
@@ -518,35 +690,60 @@ ai_config.json
 
 
 def _initial_plan(project) -> None:
+    if project.project_type == "site":
+        titles = [
+            tr("Read AGENT_GUIDE.md and the site structure", "Изучить AGENT_GUIDE.md и структуру сайта"),
+            tr("Design the pages, navigation and content", "Спроектировать страницы, навигацию и контент"),
+            tr("Build the responsive design system", "Собрать адаптивную дизайн-систему"),
+            tr("Fill pages with real content and assets", "Наполнить страницы контентом и ассетами"),
+            tr("Validate links, run the site and polish", "Проверить ссылки, запустить сайт и отполировать"),
+        ]
+    elif project.project_type == "other":
+        titles = [
+            tr("Read AGENT_GUIDE.md and the project structure", "Изучить AGENT_GUIDE.md и структуру проекта"),
+            tr("Define the behaviour and the data model", "Определить поведение и модель данных"),
+            tr("Build a minimal working version", "Собрать минимальную рабочую версию"),
+            tr("Add the remaining features and edge cases", "Добавить остальные функции и крайние случаи"),
+            tr("Test, document and finalize", "Проверить, документировать и завершить"),
+        ]
+    else:
+        titles = [
+            tr("Read AGENT_GUIDE.md and the project structure", "Изучить AGENT_GUIDE.md и структуру проекта"),
+            tr("Design the screens and the main game loop", "Спроектировать экраны и основной игровой цикл"),
+            tr("Build a working vertical slice", "Собрать рабочий вертикальный срез"),
+            tr("Add content, assets and polish", "Добавить контент, ассеты и полировку"),
+            tr("Check the launch, save progress and export", "Проверить запуск, сохранить прогресс и экспортировать"),
+        ]
     plan = [
-        {"id": "t1", "title": tr("Read AGENT_GUIDE.md and the project structure", "Изучить AGENT_GUIDE.md и структуру проекта"), "status": "pending"},
-        {"id": "t2", "title": tr("Design the screens and the main game loop", "Спроектировать экраны и основной игровой цикл"), "status": "pending"},
-        {"id": "t3", "title": tr("Build a working vertical slice", "Собрать рабочий вертикальный срез"), "status": "pending"},
-        {"id": "t4", "title": tr("Add content, assets and polish", "Добавить контент, ассеты и полировку"), "status": "pending"},
-        {"id": "t5", "title": tr("Check the launch, save progress and export", "Проверить запуск, сохранить прогресс и экспортировать"), "status": "pending"},
+        {"id": f"t{index}", "title": title, "status": "pending"}
+        for index, title in enumerate(titles, start=1)
     ]
     set_plan(project.root, plan)
 
 
 def scaffold_project(project) -> None:
     project.root.mkdir(parents=True, exist_ok=True)
-    for folder in (
+    plain = project.project_type in {"site", "other"}
+    folders = (
         "assets",
-        "assets/sprites",
-        "assets/backgrounds",
-        "assets/audio",
         "progress",
         ".reasonable",
-        "scenes",
-    ):
+    )
+    if not plain:
+        folders += ("assets/sprites", "assets/backgrounds", "assets/audio", "scenes")
+    elif project.project_type == "site":
+        folders += ("site", "site/assets")
+    for folder in folders:
         (project.root / folder).mkdir(parents=True, exist_ok=True)
 
     template_name = str(project.manifest.get("template") or project.project_type)
-    if template_name not in {"game", "app", "blank", "simple"}:
+    if template_name == "game" and _wants_platformer(project):
+        template_name = "platformer"
+    if template_name not in {"game", "app", "blank", "simple", "site", "other", "platformer"}:
         template_name = project.project_type
     # A project built only on the "simple (tkinter)" level uses the tkinter
     # template and never receives pygame artwork or widget skills.
-    if template_name in {"game", "app"} and project.ui_levels == ["simple"]:
+    if template_name in {"game", "app", "platformer"} and project.ui_levels == ["simple"]:
         template_name = "simple"
     from .paths import TEMPLATES_DIR
 
@@ -561,15 +758,18 @@ def scaffold_project(project) -> None:
             f'class Project(Game):\n    pass\n\nProject("{project.name}", (960, 540)).run()\n',
         )
 
-    _generate_assets(project)
-    if template_name in {"game", "app"}:
+    if project.project_type == "site":
+        _copy_site_tree(project)
+    if not plain:
+        _generate_assets(project)
+    if template_name in {"game", "app", "platformer"}:
         try:
             from .scene import create_scene, list_scenes
 
             if not list_scenes(project.root):
                 window = project.manifest.get("window") or {}
                 size = (int(window.get("width") or 1280), int(window.get("height") or 720))
-                is_game = template_name == "game"
+                is_game = template_name in {"game", "platformer"}
                 create_scene(
                     project.root,
                     tr("Main level", "Главный уровень") if is_game else tr("Main screen", "Главный экран"),

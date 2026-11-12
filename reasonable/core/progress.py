@@ -83,17 +83,9 @@ def read_state(project_dir: Path) -> dict[str, Any]:
 def derived_percent(state: dict[str, Any]) -> float:
     """Best-effort development percent for display.
 
-    Agents do not always call ``re progress``, so the editor derives the
-    percent from the task plan when the stored value is still at zero. An
-    explicitly reported percent always wins. This keeps the overview, the
-    agent tab and external-agent view consistent.
+    The plan is authoritative: only tasks explicitly marked ``done`` count.
+    ``skipped`` means the work item was not completed, not that it finished.
     """
-    try:
-        stored = float(state.get("percent") or 0)
-    except (TypeError, ValueError):
-        stored = 0.0
-    if stored > 0:
-        return max(0.0, min(100.0, stored))
     tasks = state.get("tasks") or []
     total = 0
     done = 0
@@ -103,23 +95,26 @@ def derived_percent(state: dict[str, Any]) -> float:
         total += 1
         if task.get("status") == "done":
             done += 1
-        elif task.get("status") == "skipped":
-            done += 1  # resolved tasks count toward completion
     if total:
         return round(100.0 * done / total, 1)
-    return 0.0
-
-
-def _auto_percent(state: dict[str, Any]) -> float:
-    """Refresh the stored percent from tasks unless the agent reported one."""
-    derived = derived_percent(state)
     try:
         stored = float(state.get("percent") or 0)
     except (TypeError, ValueError):
         stored = 0.0
-    if stored < derived:
-        state["percent"] = derived
-    return float(state.get("percent", derived))
+    return max(0.0, min(100.0, stored))
+
+
+def _auto_percent(state: dict[str, Any]) -> float:
+    """Refresh the stored percent from the task plan when one exists."""
+    tasks = state.get("tasks") or []
+    if tasks and state.get("percent_source") != "manual":
+        state["percent"] = derived_percent(state)
+    if tasks and any(
+        isinstance(task, dict) and task.get("status") in {"pending", "in_progress"}
+        for task in tasks
+    ):
+        state["status"] = "running"
+    return float(state.get("percent", 0.0))
 
 
 def _write_state(project_dir: Path, state: dict[str, Any]) -> None:
@@ -190,6 +185,7 @@ def set_status(
     message: str = "",
     *,
     event_type: str = "status",
+    data: dict | None = None,
 ) -> dict[str, Any]:
     with _LOCK:
         ensure_state(project_dir)
@@ -199,7 +195,7 @@ def set_status(
             state["message"] = message
         state["last_event_at"] = now_iso()
         _write_state(project_dir, state)
-        record_event(project_dir, event_type, message or status)
+        record_event(project_dir, event_type, message or status, data)
         return state
 
 
@@ -215,6 +211,7 @@ def set_progress(
         ensure_state(project_dir)
         state = read_state(project_dir)
         state["percent"] = round(percent, 1)
+        state["percent_source"] = "manual"
         state["status"] = status
         if stage:
             state["stage"] = stage
@@ -237,17 +234,29 @@ def set_plan(project_dir: Path, tasks: Iterable[str | dict]) -> dict[str, Any]:
         if isinstance(task, str):
             normalized.append({"id": f"t{index}", "title": task, "status": "pending"})
         elif isinstance(task, dict):
-            normalized.append(
-                {
-                    "id": str(task.get("id") or f"t{index}"),
-                    "title": str(task.get("title") or task.get("name") or tr("Task {index}", "Задача {index}", index=index)),
-                    "status": str(task.get("status") or "pending"),
-                }
-            )
+            entry = {
+                "id": str(task.get("id") or f"t{index}"),
+                "title": str(task.get("title") or task.get("name") or tr("Task {index}", "Задача {index}", index=index)),
+                "status": str(task.get("status") or "pending"),
+            }
+            # Team plan metadata: who owns the item and what must finish first.
+            role = str(task.get("role") or "").strip()
+            if role:
+                entry["role"] = role
+            depends_on = [
+                str(item).strip()
+                for item in (task.get("depends_on") or [])
+                if str(item).strip()
+            ]
+            if depends_on:
+                entry["depends_on"] = list(dict.fromkeys(depends_on))
+            normalized.append(entry)
     with _LOCK:
         ensure_state(project_dir)
         state = read_state(project_dir)
         state["tasks"] = normalized
+        state.pop("percent_source", None)
+        state["status"] = "running"
         state["last_event_at"] = now_iso()
         _auto_percent(state)
         _write_state(project_dir, state)
@@ -277,6 +286,7 @@ def update_task(project_dir: Path, task_ref: str | int, status: str) -> dict[str
         if found is None:
             raise ValueError(tr("Task not found: {task}", "Задача не найдена: {task}", task=task_ref))
         found["status"] = status
+        state.pop("percent_source", None)
         state["last_event_at"] = now_iso()
         _auto_percent(state)
         _write_state(project_dir, state)
@@ -289,11 +299,25 @@ def update_task(project_dir: Path, task_ref: str | int, status: str) -> dict[str
         return state
 
 
-def finish_progress(project_dir: Path, message: str = "") -> dict[str, Any]:
+def finish_progress(project_dir: Path, message: str = "", *, require_done: bool = False) -> dict[str, Any]:
     message = message or tr("Project finished", "Проект готов")
     with _LOCK:
         ensure_state(project_dir)
         state = read_state(project_dir)
+        if require_done:
+            unfinished = [
+                str(task.get("title") or task.get("id") or "")
+                for task in state.get("tasks") or []
+                if isinstance(task, dict) and task.get("status") != "done"
+            ]
+            if unfinished:
+                raise ValueError(
+                    tr(
+                        "The plan still has unfinished tasks: {tasks}",
+                        "В плане остались незавершённые задачи: {tasks}",
+                        tasks="; ".join(unfinished[:8]),
+                    )
+                )
         state["percent"] = 100.0
         state["status"] = "done"
         state["stage"] = tr("Done", "Готово")

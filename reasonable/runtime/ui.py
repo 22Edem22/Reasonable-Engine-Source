@@ -1008,7 +1008,8 @@ class Entry(Widget):
         on_change: Callable[[str], None] | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(height=46, **kwargs)
+        kwargs.setdefault("height", 46)
+        super().__init__(**kwargs)
         self.placeholder = placeholder
         self.value = value
         self.password = password
@@ -1277,12 +1278,20 @@ class ScrollView(Container):
         return self
 
     def measure(self, max_width: int, max_height: int) -> tuple[int, int]:
-        if self.height is not None:
-            return (self.width or max_width, self.height)
         if self.content is not None:
-            _, h = self.content.measure(max_width - self.padding * 2, 100000)
-            return (self.width or max_width, h + self.padding * 2)
-        return (self.width or max_width, self.height or 100)
+            width, height = self.content.measure(
+                max(0, max_width - self.padding * 2), 100000
+            )
+            return (
+                self.width if self.width is not None else min(max_width, max(120, width)),
+                self.height
+                if self.height is not None
+                else height + self.padding * 2,
+            )
+        return (
+            self.width if self.width is not None else min(max_width, 120),
+            self.height or 100,
+        )
 
     def layout(self, rect) -> None:
         super().layout(rect)

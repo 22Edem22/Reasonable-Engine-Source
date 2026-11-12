@@ -32,7 +32,59 @@ class ProjectTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def test_manifest_defaults(self) -> None:
+    def test_game_entry_without_launch_code_is_an_error(self) -> None:
+        (self.root / "main.py").write_text(
+            "def main():\n    print('never called')\n", encoding="utf-8"
+        )
+        self.assertFalse(self.project.has_launch_block())
+        issues = self.project.validate()
+        self.assertTrue(
+            any(
+                issue.level == "error" and issue.path.endswith("main.py")
+                for issue in issues
+            )
+        )
+
+    def test_game_entry_with_main_guard_has_launch_code(self) -> None:
+        (self.root / "main.py").write_text(
+            "def main():\n    print('ok')\n\n"
+            "if __name__ == \"__main__\":\n    main()\n",
+            encoding="utf-8",
+        )
+        self.assertTrue(self.project.has_launch_block())
+        self.assertFalse(
+            any(
+                issue.level == "error" and issue.path.endswith("main.py")
+                for issue in self.project.validate()
+            )
+        )
+
+    def test_missing_requirement_is_reported(self) -> None:
+        (self.root / "requirements.txt").write_text(
+            "definitely-not-installed-package-xyz>=1\n", encoding="utf-8"
+        )
+        issues = self.project.validate()
+        self.assertTrue(
+            any(
+                issue.level == "warning"
+                and issue.path == "requirements.txt"
+                for issue in issues
+            )
+        )
+
+    def test_site_and_other_types_are_kept(self) -> None:
+        for kind in ("site", "other"):
+            root = self.root.parent / kind
+            root.mkdir()
+            project = Project.create(
+                root,
+                default_manifest(kind, project_type=kind),
+                scaffold=False,
+            )
+            self.assertEqual(project.project_type, kind)
+            self.assertIn("Python", project.summary())
+
+
         manifest = self.project.manifest
         self.assertEqual(manifest["format"], 1)
         self.assertEqual(manifest["name"], "Мой проект")

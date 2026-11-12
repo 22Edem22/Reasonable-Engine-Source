@@ -60,7 +60,7 @@ class ConvertTests(unittest.TestCase):
         self.assertTrue((target.root / "AGENT_GUIDE.md").is_file())
         guide = (target.root / "AGENT_GUIDE.md").read_text(encoding="utf-8")
         # The external agent guide is English-only by design.
-        self.assertIn("**Platform:** Android", guide)
+        self.assertIn("Runtime:** Python 3 on Windows and Linux", guide)
         self.assertIn("Converted from", guide)
         main = (target.root / "main.py").read_text(encoding="utf-8")
         self.assertIn(repr(target.name), main)
@@ -118,7 +118,7 @@ class ConvertTests(unittest.TestCase):
         guide = (target.root / "AGENT_GUIDE.md").read_text(encoding="utf-8")
         # The guide is agent material: English-only regardless of UI language.
         self.assertIn("mode: external", guide)
-        self.assertIn("Platform:** Windows", guide)
+        self.assertIn("Runtime:** Python 3 on Windows and Linux", guide)
         changes = "\n".join(result["changes"])
         self.assertIn("Windows", changes)
         self.assertIn("внешний агент", changes)

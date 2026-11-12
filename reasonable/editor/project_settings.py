@@ -49,10 +49,14 @@ class ProjectSettingsDialog(QDialog):
         self.advanced_check.setToolTip(t("projset.advanced_hint"))
         header.addWidget(self.advanced_check)
         header.addWidget(Badge(
-            t("projectpage.badge_game") if project.project_type == "game" else t("projectpage.badge_app"),
+            {
+                "game": t("projectpage.badge_game"),
+                "app": t("projectpage.badge_app"),
+                "site": t("projectpage.badge_site"),
+                "other": t("projectpage.badge_other"),
+            }.get(project.project_type, t("projectpage.badge_app")),
             "default",
         ))
-        header.addWidget(Badge("WINDOWS" if project.platform == "windows" else "ANDROID", "default"))
         header.addWidget(Badge(
             t("projset.badge_builtin") if project.mode == "builtin" else t("projset.badge_external"),
             "default",

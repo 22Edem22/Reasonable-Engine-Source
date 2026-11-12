@@ -59,6 +59,26 @@ class ScaffoldTests(unittest.TestCase):
                 orientation="portrait",
             ),
         )
+        cls.site = Project.create(
+            cls.base / "site",
+            default_manifest(
+                "Лендинг",
+                project_type="site",
+                mode="builtin",
+                goal="Лендинг студии",
+                template="site",
+            ),
+        )
+        cls.other = Project.create(
+            cls.base / "other",
+            default_manifest(
+                "Утилита",
+                project_type="other",
+                mode="builtin",
+                goal="Полезная утилита",
+                template="other",
+            ),
+        )
         cls.blank = Project.create(
             cls.base / "blank",
             default_manifest("Пустой проект", template="blank"),
@@ -200,6 +220,24 @@ class ScaffoldTests(unittest.TestCase):
         for project in (self.game, self.app):
             result = _run_project(project)
             self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+
+    def test_platformer_goal_uses_the_platformer_starter(self) -> None:
+        root = self.base / "platformer"
+        project = Project.create(
+            root,
+            default_manifest(
+                "Прыгун",
+                project_type="game",
+                mode="builtin",
+                goal="Сделай платформер с уровнями, прыжками и монетами",
+            ),
+        )
+        source = project.entry.read_text(encoding="utf-8")
+        self.assertIn("Platformer starter", source)
+        self.assertIn("class Player", source)
+        self.assertIn("if __name__ == \"__main__\":", source)
+        result = _run_project(project, frames=8)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
 
     def test_blank_template_is_minimal_and_runs(self) -> None:
         self.assertEqual(self.blank.manifest.get("template"), "blank")
@@ -344,6 +382,38 @@ class ScaffoldTests(unittest.TestCase):
             self.assertFalse((vendored / "core" / "secret.py").exists())
             self.assertFalse(any(vendored.rglob("*.py")))
             self.assertTrue((vendored / "assets" / "logo.txt").is_file())
+
+    def test_site_is_a_plain_python_server(self) -> None:
+        self.assertTrue((self.site.root / "site" / "index.html").is_file())
+        self.assertTrue((self.site.root / "site" / "styles.css").is_file())
+        main = self.site.entry.read_text(encoding="utf-8")
+        self.assertIn("http.server", main)
+        self.assertNotIn("reasonable.runtime", main)
+        result = subprocess.run(
+            [sys.executable, str(self.site.entry), "--check"],
+            cwd=str(self.site.root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+    def test_other_is_a_plain_python_project(self) -> None:
+        main = self.other.entry.read_text(encoding="utf-8")
+        self.assertIn("--check", main)
+        self.assertNotIn("reasonable.runtime", main)
+        result = subprocess.run(
+            [sys.executable, str(self.other.entry), "--check"],
+            cwd=str(self.other.root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
 
 if __name__ == "__main__":

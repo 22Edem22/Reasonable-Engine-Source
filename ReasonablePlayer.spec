@@ -36,7 +36,6 @@ hidden = collect_submodules("pygame")
 hidden += [
     "pygame._sdl2",
     "pygame.mixer",
-    "pygame.mixer.music",
     "pygame.font",
     "pygame.image",
     "pygame.transform",

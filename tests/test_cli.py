@@ -58,7 +58,7 @@ class CliTests(unittest.TestCase):
         result = self.cli("task", "t2", "done")
         self.assertEqual(result.returncode, 0, result.stderr)
         state = read_state(self.project.root)
-        self.assertEqual(state["percent"], 35.0)
+        self.assertEqual(state["percent"], 33.3)
         self.assertEqual(state["stage"], "Меню")
         self.assertEqual(state["tasks"][1]["status"], "done")
 

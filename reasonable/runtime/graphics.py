@@ -162,6 +162,12 @@ class Sprite(Node):
         self.tint = None
         self.shadow = False
         self.shadow_color = (0, 0, 0, 70)
+        # Scaled/rotated/tinted variants are expensive to rebuild every frame.
+        # A small bounded cache makes camera zoom and fade-ins cheap, which
+        # matters most on Android. Keyed by every visual input, so property
+        # changes produce a new entry instead of a stale image.
+        self._draw_cache: dict[tuple, tuple[pygame.Surface, pygame.Surface | None]] = {}
+        self._draw_cache_pixels = 0
 
     @property
     def image(self) -> pygame.Surface:
@@ -170,6 +176,8 @@ class Sprite(Node):
     @image.setter
     def image(self, value) -> None:
         self._source = load_image(value)
+        self._draw_cache.clear()
+        self._draw_cache_pixels = 0
 
     @property
     def width(self) -> float:
@@ -194,13 +202,64 @@ class Sprite(Node):
     def draw(self, surface: pygame.Surface, camera: Camera) -> None:
         if not self.visible:
             return
+        tint_key = tuple(self.tint) if isinstance(self.tint, (list, tuple)) else self.tint
+        shadow_key = (
+            tuple(self.shadow_color)
+            if isinstance(self.shadow_color, (list, tuple))
+            else self.shadow_color
+        )
+        key = (
+            self.flip_x,
+            self.flip_y,
+            tint_key,
+            round(float(self.scale.x), 3),
+            round(float(self.scale.y), 3),
+            round(float(self.angle), 2),
+            int(self.alpha),
+            round(float(camera.zoom), 3),
+            bool(self.shadow),
+            shadow_key,
+        )
+        cached = self._draw_cache.get(key)
+        if cached is None:
+            cached = self._render_draw_image(camera.zoom)
+            area = cached[0].get_width() * cached[0].get_height()
+            if cached[1] is not None:
+                area += cached[1].get_width() * cached[1].get_height()
+            # Keep the cache small enough for mobile memory: eight entries and
+            # roughly 16 megapixels of decoded surfaces in total.
+            while self._draw_cache and (
+                len(self._draw_cache) >= 8
+                or self._draw_cache_pixels + area > 16_000_000
+            ):
+                old_key = next(iter(self._draw_cache))
+                old_image, old_shadow = self._draw_cache.pop(old_key)
+                self._draw_cache_pixels -= old_image.get_width() * old_image.get_height()
+                if old_shadow is not None:
+                    self._draw_cache_pixels -= old_shadow.get_width() * old_shadow.get_height()
+            self._draw_cache[key] = cached
+            self._draw_cache_pixels += area
+        image, shadow = cached
+        screen = camera.world_to_screen((self.x, self.y))
+        rect = image.get_rect()
+        setattr(rect, "center", (int(screen.x), int(screen.y)))
+        if self.anchor != (0.5, 0.5):
+            rect.left = int(screen.x - self.anchor[0] * image.get_width())
+            rect.top = int(screen.y - self.anchor[1] * image.get_height())
+        if shadow is not None:
+            surface.blit(shadow, (rect.centerx - shadow.get_width() // 2, rect.bottom - shadow.get_height() // 2))
+        surface.blit(image, rect)
+
+    def _render_draw_image(
+        self, zoom: float
+    ) -> tuple[pygame.Surface, pygame.Surface | None]:
         image = self._source
         if self.flip_x or self.flip_y:
             image = pygame.transform.flip(image, self.flip_x, self.flip_y)
         if self.tint:
             image = tint_surface(image, self.tint, 255)
-        effective_scale_x = self.scale.x * camera.zoom
-        effective_scale_y = self.scale.y * camera.zoom
+        effective_scale_x = self.scale.x * zoom
+        effective_scale_y = self.scale.y * zoom
         if abs(effective_scale_x - 1) > 0.001 or abs(effective_scale_y - 1) > 0.001:
             width = max(1, int(abs(image.get_width() * effective_scale_x)))
             height = max(1, int(abs(image.get_height() * effective_scale_y)))
@@ -210,20 +269,14 @@ class Sprite(Node):
         if self.alpha < 255:
             image = image.copy()
             image.set_alpha(int(self.alpha))
-        screen = camera.world_to_screen((self.x, self.y))
-        rect = image.get_rect()
-        setattr(rect, "center", (int(screen.x), int(screen.y)))
-        if self.anchor != (0.5, 0.5):
-            rect.left = int(screen.x - self.anchor[0] * image.get_width())
-            rect.top = int(screen.y - self.anchor[1] * image.get_height())
+        shadow = None
         if self.shadow:
             shadow = pygame.Surface(
                 (int(image.get_width() * 0.8), max(3, int(image.get_height() * 0.2))),
                 pygame.SRCALPHA,
             )
             pygame.draw.ellipse(shadow, self.shadow_color, shadow.get_rect())
-            surface.blit(shadow, (rect.centerx - shadow.get_width() // 2, rect.bottom - shadow.get_height() // 2))
-        surface.blit(image, rect)
+        return image, shadow
 
 
 def make_circle_surface(
@@ -344,6 +397,7 @@ class Text(Node):
         self.anchor = anchor
         self._cache: pygame.Surface | None = None
         self._cache_key = None
+        self._draw_cache: dict[tuple, pygame.Surface] = {}
 
     def set_text(self, text: str) -> "Text":
         if text != self.text:
@@ -364,6 +418,8 @@ class Text(Node):
                 letter_spacing=self.letter_spacing,
             )
             self._cache_key = key
+            # Any change of text/colour invalidates the zoomed variants too.
+            self._draw_cache.clear()
         return self._cache
 
     @property
@@ -378,14 +434,23 @@ class Text(Node):
         if not self.visible or not self.text:
             return
         image = self._render()
-        if self.alpha < 255:
-            image = image.copy()
-            image.set_alpha(self.alpha)
-        if abs(camera.zoom - 1) > 0.01:
-            image = pygame.transform.smoothscale(
-                image,
-                (max(1, round(image.get_width() * camera.zoom)), max(1, round(image.get_height() * camera.zoom))),
-            )
+        zoom = round(float(camera.zoom), 3)
+        cache_key = (zoom, int(self.alpha))
+        cached = self._draw_cache.get(cache_key)
+        if cached is None:
+            cached = image
+            if self.alpha < 255:
+                cached = cached.copy()
+                cached.set_alpha(self.alpha)
+            if abs(zoom - 1) > 0.01:
+                cached = pygame.transform.smoothscale(
+                    cached,
+                    (max(1, round(cached.get_width() * zoom)), max(1, round(cached.get_height() * zoom))),
+                )
+            if len(self._draw_cache) >= 4:
+                self._draw_cache.pop(next(iter(self._draw_cache)))
+            self._draw_cache[cache_key] = cached
+        image = cached
         screen = camera.world_to_screen((self.x, self.y))
         rect = image.get_rect()
         setattr(rect, self.anchor, (int(screen.x), int(screen.y)))

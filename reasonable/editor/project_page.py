@@ -275,10 +275,16 @@ class ProjectPage(QWidget):
         self.name_label.setMinimumWidth(100)
         self.name_label.setMaximumWidth(360)
         top.addWidget(self.name_label)
-        self.type_badge = Badge(t("projectpage.badge_game") if self.project.project_type == "game" else t("projectpage.badge_app"), "default")
+        self.type_badge = Badge(
+            {
+                "game": t("projectpage.badge_game"),
+                "app": t("projectpage.badge_app"),
+                "site": t("projectpage.badge_site"),
+                "other": t("projectpage.badge_other"),
+            }.get(self.project.project_type, t("projectpage.badge_app")),
+            "default",
+        )
         top.addWidget(self.type_badge)
-        self.platform_badge = Badge("WINDOWS" if self.project.platform == "windows" else "ANDROID", "default")
-        top.addWidget(self.platform_badge)
         self.mode_badge = Badge(t("projectpage.badge_mode_builtin") if self.project.mode == "builtin" else t("projectpage.badge_mode_external"), "default")
         top.addWidget(self.mode_badge)
         top.addStretch(1)
@@ -1036,8 +1042,14 @@ class ProjectPage(QWidget):
 
         self.name_label.setText(_shorten(self.project.name, 32))
         self.goal_label_header.setText(self.project.goal or t("projectpage.goal_missing"))
-        self.type_badge.setText(t("projectpage.badge_game") if self.project.project_type == "game" else t("projectpage.badge_app"))
-        self.platform_badge.setText("WINDOWS" if self.project.platform == "windows" else "ANDROID")
+        self.type_badge.setText(
+            {
+                "game": t("projectpage.badge_game"),
+                "app": t("projectpage.badge_app"),
+                "site": t("projectpage.badge_site"),
+                "other": t("projectpage.badge_other"),
+            }.get(self.project.project_type, t("projectpage.badge_app"))
+        )
         self.mode_badge.setText(t("projectpage.badge_mode_builtin") if self.project.mode == "builtin" else t("projectpage.badge_mode_external"))
         self.project_icon.setPixmap(project_icon_pixmap(self.project.icon_path, 30, self.project.name))
         levels = ", ".join(_tl(f"project.ui_{level}", UI_LEVEL_LABELS.get(level, level)) for level in self.project.ui_levels)
@@ -1046,10 +1058,16 @@ class ProjectPage(QWidget):
             if self.project.manifest.get("orientation") == "portrait"
             else t("projectpage.orientation_landscape")
         )
+        if self.project.project_type == "site":
+            runtime_line = "Python · HTML/CSS/JS"
+        elif self.project.project_type == "other":
+            runtime_line = "Python"
+        else:
+            runtime_line = f"Python · {orientation}"
         self.side_meta.setText(
-            f"{'Windows' if self.project.platform == 'windows' else 'Android'} · {orientation}\n"
-            f"{t('projectpage.meta_ui_line', levels=levels)}\n"
-            f"{'Python/pygame' if self.project.project_type == 'game' else 'Python/pygame UI'}"
+            f"{runtime_line}\n{t('projectpage.meta_ui_line', levels=levels)}"
+            if self.project.project_type in {"game", "app"}
+            else runtime_line
         )
         self._update_header_model()
         self._update_side_ai()

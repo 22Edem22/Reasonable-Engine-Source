@@ -11,13 +11,14 @@ from __future__ import annotations
 import json
 import socket
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from reasonable.core.agent_errors import http_error_kind
 from reasonable.core.i18n import tr as _tr
@@ -112,9 +113,83 @@ def _join_url(base: str, suffix: str) -> str:
 
 
 class HTTPTransport:
-    def __init__(self, timeout: float = 120.0, retries: int = 2) -> None:
+    def __init__(
+        self,
+        timeout: float = 120.0,
+        retries: int = 2,
+        cancel: Any = None,
+    ) -> None:
         self.timeout = timeout
         self.retries = retries
+        # A ``threading.Event``-like object set by the editor's Stop button.
+        # ``urllib`` cannot be interrupted, so the blocking call runs in a
+        # short-lived daemon thread and the caller stops waiting immediately.
+        self.cancel = cancel
+
+    def _cancelled(self) -> bool:
+        return self.cancel is not None and bool(self.cancel.is_set())
+
+    def _check_cancel(self) -> None:
+        if self._cancelled():
+            raise AIError(_tr("The request was cancelled.", "Запрос отменён."), kind="cancelled")
+
+    def _sleep(self, seconds: float) -> None:
+        """Sleep between retries without ignoring the Stop button."""
+        if self.cancel is None:
+            time.sleep(seconds)
+            return
+        deadline = time.monotonic() + max(0.0, float(seconds))
+        while True:
+            self._check_cancel()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.1, remaining))
+
+    def _run_blocking(self, function: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        if self.cancel is None:
+            return function()
+        box: dict[str, Any] = {}
+
+        def target() -> None:
+            try:
+                box["value"] = function()
+            except BaseException as exc:  # re-raised in the calling thread
+                box["error"] = exc
+
+        thread = threading.Thread(target=target, daemon=True)
+        thread.start()
+        while thread.is_alive():
+            self._check_cancel()
+            thread.join(0.1)
+        if "error" in box:
+            raise box["error"]
+        return box.get("value") or {}
+
+    def _send(
+        self,
+        url: str,
+        method: str,
+        headers: dict[str, str],
+        data: bytes | None,
+    ) -> dict[str, Any]:
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        context = ssl.create_default_context()
+        with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+        if not raw.strip():
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            raise AIError(
+                _tr("The server returned non-JSON. The endpoint may be wrong.", "Сервер вернул не JSON. Возможно, endpoint указан неверно."),
+                detail=raw[:800],
+                kind="bad_response",
+            )
+        if isinstance(parsed, dict):
+            return parsed
+        return {"data": parsed}
 
     def request(
         self,
@@ -125,7 +200,7 @@ class HTTPTransport:
     ) -> dict[str, Any]:
         headers = {
             "Accept": "application/json",
-            "User-Agent": "ReasonableEngine/0.1 (+https://reasonable-engine.local)",
+            "User-Agent": _USER_AGENT,
             **(headers or {}),
         }
         data = None
@@ -134,24 +209,9 @@ class HTTPTransport:
             headers["Content-Type"] = "application/json"
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
-            request = urllib.request.Request(url, data=data, headers=headers, method=method)
+            self._check_cancel()
             try:
-                context = ssl.create_default_context()
-                with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
-                    raw = response.read().decode("utf-8", errors="replace")
-                    if not raw.strip():
-                        return {}
-                    try:
-                        parsed = json.loads(raw)
-                        if isinstance(parsed, dict):
-                            return parsed
-                        return {"data": parsed}
-                    except ValueError:
-                        raise AIError(
-                            _tr("The server returned non-JSON. The endpoint may be wrong.", "Сервер вернул не JSON. Возможно, endpoint указан неверно."),
-                            detail=raw[:800],
-                            kind="bad_response",
-                        )
+                return self._run_blocking(lambda: self._send(url, method, headers, data))
             except urllib.error.HTTPError as error:
                 body = error.read().decode("utf-8", errors="replace")
                 last_error = AIError(
@@ -161,7 +221,7 @@ class HTTPTransport:
                     kind=http_error_kind(error.code),
                 )
                 if error.code in {429, 500, 502, 503, 504} and attempt < self.retries:
-                    time.sleep(2.2 + attempt * 2.5)
+                    self._sleep(2.2 + attempt * 2.5)
                     continue
                 raise last_error
             except urllib.error.URLError as error:
@@ -181,7 +241,7 @@ class HTTPTransport:
                     message = _tr("Network error: {reason}", "Сетевая ошибка: {reason}", reason=reason)
                 last_error = AIError(message, detail=str(reason), kind=kind)
                 if attempt < self.retries:
-                    time.sleep(1.5)
+                    self._sleep(1.5)
                     continue
                 raise last_error
             except (TimeoutError, socket.timeout):
@@ -193,19 +253,49 @@ class HTTPTransport:
                     kind="timeout",
                 )
                 if attempt < self.retries:
-                    time.sleep(1.5)
+                    self._sleep(1.5)
                     continue
                 raise last_error
             except OSError as error:
                 last_error = AIError(_tr("Network error: {error}", "Ошибка сети: {error}", error=error), detail=str(error), kind="network")
                 if attempt < self.retries:
-                    time.sleep(1.5)
+                    self._sleep(1.5)
                     continue
                 raise last_error
         raise last_error or AIError(_tr("Unknown network error", "Неизвестная ошибка сети"), kind="network")
 
-    @staticmethod
-    def _friendly_http_error(code: int, body: str) -> str:
+    def iter_lines(
+        self,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+    ):
+        """Yield decoded SSE lines from a streaming response."""
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {**headers, "Accept": "text/event-stream", "Content-Type": "application/json"}
+        request = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        context = ssl.create_default_context()
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
+                for raw in response:
+                    self._check_cancel()
+                    yield raw.decode("utf-8", errors="replace").rstrip("\r\n")
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            raise AIError(
+                self._friendly_http_error(error.code, body),
+                status=error.code,
+                detail=body[:2000],
+                kind=http_error_kind(error.code),
+            )
+        except urllib.error.URLError as error:
+            raise AIError(
+                _tr("Network error: {reason}", "Сетевая ошибка: {reason}", reason=error.reason),
+                detail=str(error.reason),
+                kind="network",
+            )
+
+    def _friendly_http_error(self, code: int, body: str) -> str:
         detail = ""
         try:
             payload = json.loads(body)
@@ -236,8 +326,19 @@ class HTTPTransport:
 
 
 class AIClient:
-    def __init__(self, config: dict[str, Any], *, timeout: float = 120.0, retries: int = 2) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        *,
+        timeout: float = 120.0,
+        retries: int = 2,
+        cancel: Any = None,
+        stream: bool = False,
+        stream_callback: Callable[[str], None] | None = None,
+    ) -> None:
         self.config = config
+        self.stream = bool(stream)
+        self.stream_callback = stream_callback
         self.kind = config.get("kind", "openai")
         self.base_url = str(config.get("base_url", "")).strip()
         self.api_key = str(config.get("api_key", "")).strip()
@@ -265,7 +366,7 @@ class AIClient:
         except (TypeError, ValueError):
             self.default_max_tokens = 16384
         self.default_max_tokens = max(256, min(65536, self.default_max_tokens))
-        self.http = HTTPTransport(timeout=timeout, retries=retries)
+        self.http = HTTPTransport(timeout=timeout, retries=retries, cancel=cancel)
 
     # ------------------------------------------------------------------
     def _auth_headers(self) -> dict[str, str]:
@@ -316,6 +417,134 @@ class AIClient:
             return self._chat_anthropic(messages, tools, temperature, limit)
         return self._chat_openai(messages, tools, temperature, limit)
 
+    def _chat_openai_stream(self, payload: dict[str, Any]) -> ChatResult:
+        """Consume an SSE stream and assemble the final message.
+
+        Streaming is opt-in. If the endpoint rejects it or returns something
+        that is not SSE, the caller falls back to the regular request, so an
+        unusual provider is never worse off than before.
+        """
+        stream_payload = dict(payload)
+        stream_payload["stream"] = True
+        stream_payload["stream_options"] = {"include_usage": True}
+        try:
+            return self._consume_openai_stream(stream_payload)
+        except AIError as error:
+            if error.status in {400, 422}:
+                stream_payload.pop("stream_options", None)
+                return self._consume_openai_stream(stream_payload)
+            raise
+
+    def _consume_openai_stream(self, payload: dict[str, Any]) -> ChatResult:
+        content_parts: list[str] = []
+        calls: dict[int, dict[str, str]] = {}
+        finish_reason = ""
+        usage: dict[str, Any] = {}
+        try:
+            lines = self.http.iter_lines(
+                self._chat_url(), self._auth_headers(), payload
+            )
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith(":"):
+                    continue
+                chunk = line[5:].strip() if line.startswith("data:") else line
+                if chunk == "[DONE]":
+                    break
+                try:
+                    data = json.loads(chunk)
+                except ValueError:
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                if isinstance(data.get("usage"), dict):
+                    usage = data["usage"]
+                for choice in data.get("choices") or []:
+                    if not isinstance(choice, dict):
+                        continue
+                    if choice.get("finish_reason"):
+                        finish_reason = str(choice["finish_reason"])
+                    delta = choice.get("delta") or choice.get("message") or {}
+                    text = delta.get("content")
+                    if isinstance(text, list):
+                        text = "".join(
+                            part.get("text", "") if isinstance(part, dict) else str(part)
+                            for part in text
+                        )
+                    if text:
+                        content_parts.append(str(text))
+                        if self.stream_callback is not None:
+                            try:
+                                self.stream_callback(str(text))
+                            except Exception:
+                                pass
+                    entries = delta.get("tool_calls") or []
+                    if not entries and isinstance(delta.get("function_call"), dict):
+                        entries = [{"index": 0, "function": delta["function_call"]}]
+                    for entry in entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        try:
+                            index = int(entry.get("index") or 0)
+                        except (TypeError, ValueError):
+                            index = 0
+                        slot = calls.setdefault(
+                            index, {"id": "", "name": "", "arguments": ""}
+                        )
+                        if entry.get("id"):
+                            slot["id"] = str(entry["id"])
+                        function = entry.get("function") or {}
+                        if function.get("name"):
+                            slot["name"] = str(function["name"])
+                        arguments = function.get("arguments")
+                        if isinstance(arguments, str):
+                            slot["arguments"] += arguments
+                        elif isinstance(arguments, dict):
+                            slot["arguments"] += json.dumps(arguments, ensure_ascii=False)
+        except AIError:
+            raise
+        except (TimeoutError, socket.timeout) as exc:
+            raise AIError(
+                _tr("The AI server did not respond in time.", "ИИ-сервер не ответил вовремя."),
+                detail=str(exc),
+                kind="timeout",
+            )
+        except OSError as exc:
+            raise AIError(
+                _tr("Network error: {error}", "Ошибка сети: {error}", error=exc),
+                detail=str(exc),
+                kind="network",
+            )
+        tool_calls: list[ToolCall] = []
+        for index in sorted(calls):
+            slot = calls[index]
+            if not slot["name"]:
+                continue
+            raw = slot["arguments"] or "{}"
+            tool_calls.append(
+                ToolCall(
+                    id=slot["id"] or f"call_{index}_{int(time.time())}",
+                    name=slot["name"],
+                    arguments=parse_tool_arguments(raw),
+                    raw_arguments=raw,
+                )
+            )
+        if not content_parts and not tool_calls and not usage:
+            raise AIError(
+                _tr(
+                    "The provider did not return a streaming response.",
+                    "Провайдер не вернул потоковый ответ.",
+                ),
+                kind="bad_response",
+            )
+        return ChatResult(
+            content="".join(content_parts).strip(),
+            tool_calls=tool_calls,
+            usage=usage,
+            raw={},
+            finish_reason=finish_reason,
+        )
+
     def _chat_openai(
         self,
         messages: list[dict[str, Any]],
@@ -344,6 +573,14 @@ class AIClient:
             payload["tool_choice"] = "auto"
         # Some OpenAI-compatible endpoints reject unsupported parameters; retry
         # without them if we get a specific 400.
+        if self.stream and self.stream_callback is not None:
+            try:
+                return self._chat_openai_stream(payload)
+            except AIError as error:
+                if error.status not in {400, 422} and getattr(error, "kind", "") != "bad_response":
+                    raise
+                # Streaming is unsupported or returned non-SSE data: use the
+                # regular request below, which also has parameter fallbacks.
         try:
             data = self.http.request(
                 self._chat_url(), method="POST", headers=self._auth_headers(), payload=payload

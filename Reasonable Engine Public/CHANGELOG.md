@@ -6,6 +6,177 @@ Version format: **RE-<generation>.<release>** — for example RE-2.01, RE-2.02.
 The generation changes only on a major engine overhaul (Reasonable Engine 1 → 2).
 The first release of a generation is always .01; versions like "RE-2.00" do not exist.
 
+## [RE-2.03] — 2026-11-08
+
+### Changed
+- **Message time without a popup**: hovering a message now shows its send time
+  quietly in the top-right corner, plus the date for older messages. The bubble
+  keeps its size, so the conversation no longer jumps, and the tooltip no longer
+  covers the message text.
+- **Sprites are faster on weak devices**: scaled, rotated and semi-transparent
+  sprites and text are now cached instead of being rebuilt every frame. This is
+  most noticeable on Android and when the camera zooms.
+- **The agent protects the prompt cache and your monthly allowance**: in a long
+  task, history now frees a real block of context instead of being trimmed one
+  message per step. Later requests reuse the cache, so the same input is not
+  billed again. On an 80-request test run the cache share rose from 27% to 88%
+  and the modeled cost dropped by about 80%.
+- **The chat shows the real OpenCode charge**: the counter now reports what a
+  request cost from the OpenCode Go monthly allowance, not just a token count.
+  The total is stored with the project and survives an editor restart.
+
+### Added
+- **Dependencies are checked up front**: if a package from `requirements.txt`
+  is missing, `validate` reports a warning with its name instead of letting the
+  app crash or silently run in demo mode.
+- **UI screenshots for the agent**: `run_project` can save several application
+  frames and return their PNG paths. Blank/black frames fail the run, and the
+  agent can open a screenshot with `inspect_image` to see the real layout.
+- **Platformer starter**: when the task explicitly asks for a platformer, a new
+  project starts from a working base — game loop, tile collisions, camera,
+  double jump, dash, coins, spikes and a goal. The agent extends it instead of
+  writing physics and the loop from scratch.
+- **Game autoplay run**: for games, `run_project` now presses Enter to leave
+  menus, holds right, jumps and dashes for a few seconds in headless mode. If
+  the screen does not change for 120 frames, the run fails: the game is stuck
+  in a menu or frozen instead of merely "starting successfully".
+- **Every specialist's work is visible**: the chat now shows tool calls from
+  parallel AI agents with a label saying which agent is doing what, and each
+  result returns to its own card even when agents answer out of order. Before,
+  only a shared status line was visible.
+- **A diff of the changes right in the chat**: after a run, the changes card
+  shows not only the file list but a line-by-line diff for each file against the
+  snapshot taken before the run. You can see exactly what changed without
+  opening files by hand.
+- **A token limit per run**: the agent settings now have a hard cap for one run,
+  including parallel specialists. When the budget is used up the run stops and
+  keeps the changes and the snapshot; 0 keeps the previous unlimited behaviour.
+- **Find and replace in the code editor**: `Ctrl+F` opens search in the current
+  file, `Ctrl+H` opens replace, and `F3` finds the next match. Search highlights
+  missing matches and can replace every occurrence at once.
+- **Undo and redo in the scene editor**: `Ctrl+Z` and `Ctrl+Y` (or the toolbar
+  buttons) undo moves, resizes and inspector edits, as well as creating,
+  deleting and renaming scenes.
+- **The answer appears as it is generated**: agent settings can enable
+  streaming, so the reply text appears in the chat gradually instead of in one
+  block. On an error or an unsupported provider the agent automatically falls
+  back to a regular reply.
+- **An interrupted run resumes after a crash**: the current step is journaled
+  in the project. If the editor or the computer dies, the next run of the same
+  task continues from the last completed step instead of starting over.
+- **Reading the project is faster**: several independent read-only tools in one
+  model turn (files, search, image inspection) run in parallel instead of one
+  by one.
+- **Approval before changes**: an optional mode where the run pauses before the
+  first edit and asks for permission. After confirmation the agent works as
+  usual; declining ends the run without touching any file.
+
+- **Files can be finished in parts**: the `append_file` tool adds text to the
+  end of a file without rewriting what is already there. The system prompt now
+  explicitly forbids leaving markers such as `# @@CHUNK@@` — an unfinished file
+  must be completed in the same run.
+- **Message time on hover**: every user and agent message shows its send time
+  in a tooltip. Restored history shows the saved time, not the moment the
+  project was opened.
+- **Import an existing folder**: if the selected folder has no `project.json`,
+  the editor asks for its name, type, entry point and AI mode, creates the
+  settings file and opens the project. Existing files are never overwritten;
+  `assets/` and `progress/` are created only when missing.
+- **Cache up to 97% on DeepSeek V4.1**: the `auto` context profile for models
+  with a 128k window raises the stable prefix to ~110k tokens, keeps up to 160
+  messages and caps one tool result at 4.5k characters. In the offline benchmark
+  the cache share rises from 88% to 97.7% and the modeled cost drops from $0.0595
+  to $0.0439 per 80 requests. The profile is selectable in the agent settings;
+  a large context increases latency, so “Balanced” remains available.
+- **Website mode**: a dedicated project type for landing pages, blogs and
+  storefronts. It ships a responsive `site/` starter and design system, a
+  standard-library Python server (`python main.py`, `--check`), and the
+  `site_page`, `site_theme` and `validate_site` tools. Validation covers broken
+  links/assets, titles, viewport, alt text and placeholder markers; the agent
+  skill covers semantics, accessibility, SEO and performance.
+- **Other mode**: a universal Python project with no genre assumptions. The
+  agent gets the tools of every mode and a dedicated skill for choosing the
+  right architecture (CLI, script, bot, service, game or website).
+- **No platform picker any more**: new projects are Python 3 and run on Windows
+  and Linux. Windows/Android mentions are gone from creation, import, settings
+  and the project header; the entry point is `python main.py`.
+- **No splash for websites and universal projects**: they start directly and do
+  not use the pygame runtime. Games and apps keep the engine intro splash.
+
+### Fixed
+- **The agent no longer gets stuck in verification loops**: temporary
+  `_check.py`, `_probe.py`, `tmp_*` and `scratch_*` files no longer count as
+  progress, the fourth write to the same scratch file is blocked, and
+  `validate`/`finish` require them to be removed. Percent now follows the task
+  plan: a new plan resets a stale 100%, and `finish` fails while items remain.
+- **Apps no longer open to a black screen**: the UI root is built even when a
+  `UIApp` subclass forgets to call `super().on_start()`. `Entry` accepts its
+  own height, and `ScrollView` no longer claims the full window width or pushes
+  neighbouring buttons off-screen.
+- **A game without an entry point is no longer considered finished**: if
+  `main.py` contains only classes and functions but no launch code
+  (`if __name__ == "__main__"` or a call at the end of the file), validation
+  reports an error and `run_project` fails. `write_file` and `edit_file` now
+  also refuse to save such a `main.py`; files over 120 KB get a warning to split
+  into modules. Before, such a project showed the splash, closed immediately,
+  and still passed the checks.
+- **Parallel verification no longer fails every time**: the master called
+  `run_project` with an invalid keyword signature (`frames`), so every check
+  returned an error and the agent fell into endless repairs. Arguments are now
+  passed correctly.
+- **Tool repetitions are detected by arguments, not by output**: identical
+  `read_file`/`run_command` calls with changing output no longer count as
+  progress. After a second repetition window the run stops; long read-only
+  streaks are bounded too.
+- **A specialist is reminded that this is a continuation**: a repeat task now
+  carries an explicit “read only the named files and edit” rule, and the step
+  limit is raised from 30 to 60. Old 30 values are migrated automatically so
+  existing projects stop hitting the cap.
+- **A repair round continues the same work**: when a specialist hits the step
+  limit, the next round now continues its conversation — with the files already
+  read and the edits already made — instead of starting the project over.
+  Before, every round re-read `main.py` and spent the whole limit re-learning
+  the code.
+- **`main.py` no longer grows without bound**: the prompt asks to keep it around
+  80 KB and split code into modules; temporary `_check.py`, `_scan*.txt` and
+  `scratch_*` files must be removed before finishing.
+- **A specialist no longer gets stuck reading**: if it spends several steps
+  only reading files and running commands without editing anything, the agent
+  first gets a demand to write the missing code immediately, then the item is
+  stopped. Specialists also have per-item time (15 minutes) and step (30)
+  limits, and the whole run has a 90-minute limit; all are configurable.
+- **A captain-led team with a dependency graph**: the parallel mode no longer
+  creates a throwaway agent per item. The captain builds a DAG, runs independent
+  items in waves, and delivers a finished report to the agent that depends on it.
+  Specialists are durable: a member remembers its earlier work and is reused for
+  fixes, and the project plan shows roles and dependencies.
+- **Diff-based audit**: the independent check receives compact diffs instead of
+  full files. It sees the actual edit without paying for the whole project
+  again: one changed line in a 5 KB file is 136 characters instead of 5,180.
+- **A cheap model for auxiliary calls**: context compaction and the completion
+  check can run on a fast, inexpensive model while the main model keeps working
+  on the task. Choose it in the task-completion settings; the default is the
+  main model.
+- **A built-in cost benchmark**: `python tools/token_bench.py` replays a long run
+  and reports tokens, cache share and modeled cost before and after a change, so
+  savings are verified with numbers instead of guesses.
+
+### Fixed
+- **The Stop button works immediately**: cancelling no longer waits for the
+  model to answer. An unfinished network request is aborted instead of hanging
+  for up to two minutes.
+- **Agent file writes survive interruptions**: files are saved through a
+  temporary copy and an atomic replace. A crash or closing the editor in the
+  middle of a write no longer leaves a truncated file.
+- **`project.json` cannot be overwritten by accident**: the agent cannot change
+  the project manifest with its tools, even if the model asks to.
+- **Large files are readable in slices**: `read_file` with a line range now
+  works for files larger than 400 KB instead of rejecting them entirely.
+- **A timed-out command stops with its child processes**: a package install or
+  a stuck test no longer leaves processes behind after the tool is stopped.
+- **Version history no longer grows without a limit**: besides the snapshot
+  count, their total size is capped; the newest versions are always kept.
+
 ## [RE-2.02] — 2026-11-06
 
 ### Added
@@ -264,6 +435,7 @@ The first public release of Reasonable Engine 1.
 - Agent instructions and skills have been rewritten: a project receives only the
   skills it needs (based on its type and interface levels).
 
+[RE-2.03]: ../../releases/tag/RE-2.03
 [RE-2.02]: ../../releases/tag/RE-2.02
 [RE-2.01]: ../../releases/tag/RE-2.01
 [RE-1.01]: ../../releases/tag/RE-1.01

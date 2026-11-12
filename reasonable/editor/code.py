@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QPainter,
     QPen,
     QPixmap,
+    QShortcut,
     QSyntaxHighlighter,
     QTextCharFormat,
     QTextCursor,
@@ -22,6 +23,7 @@ from PySide6.QtGui import (
     QTextFormat,
 )
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -287,6 +289,16 @@ class CodePage(QWidget):
         self.watch_timer.timeout.connect(self._check_disk)
         self.watch_timer.start()
 
+        self._find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        self._find_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._find_shortcut.activated.connect(lambda: self.show_find(False))
+        self._replace_shortcut = QShortcut(QKeySequence("Ctrl+H"), self)
+        self._replace_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._replace_shortcut.activated.connect(lambda: self.show_find(True))
+        self._find_next_shortcut = QShortcut(QKeySequence.StandardKey.FindNext, self)
+        self._find_next_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._find_next_shortcut.activated.connect(lambda: self._find_next(False))
+
         self.refresh_tree()
         entry = project.rel(project.entry)
         if (project.root / entry).exists():
@@ -388,6 +400,7 @@ class CodePage(QWidget):
         self.save_button.clicked.connect(self.save_file)
         header_layout.addWidget(self.save_button)
         layout.addWidget(header)
+        layout.addWidget(self._build_find_bar())
 
         self.stack = QStackedWidget()
         self.placeholder = EmptyState(
@@ -411,6 +424,130 @@ class CodePage(QWidget):
         self.status.setStyleSheet("padding: 5px 12px; background: #101216; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;")
         layout.addWidget(self.status)
         return frame
+
+    def _build_find_bar(self) -> QWidget:
+        bar = QFrame()
+        bar.setObjectName("findBar")
+        bar.setVisible(False)
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(10, 5, 10, 5)
+        row.setSpacing(6)
+        self.find_input = QLineEdit()
+        self.find_input.setPlaceholderText(t("code.find_placeholder"))
+        self.find_input.setClearButtonEnabled(True)
+        self.find_input.returnPressed.connect(lambda: self._find_next(False))
+        self.find_input.textChanged.connect(self._clear_find_status)
+        row.addWidget(self.find_input, 1)
+        self.find_case = QCheckBox(t("code.find_case"))
+        self.find_case.setToolTip(t("code.find_case_tip"))
+        self.find_case.toggled.connect(lambda _checked: self._find_next(False))
+        row.addWidget(self.find_case)
+        prev = QPushButton(t("code.find_prev"))
+        prev.setObjectName("ghost")
+        prev.clicked.connect(lambda: self._find_next(True))
+        row.addWidget(prev)
+        nxt = QPushButton(t("code.find_next"))
+        nxt.setObjectName("ghost")
+        nxt.clicked.connect(lambda: self._find_next(False))
+        row.addWidget(nxt)
+        self.replace_input = QLineEdit()
+        self.replace_input.setPlaceholderText(t("code.replace_placeholder"))
+        row.addWidget(self.replace_input, 1)
+        self.replace_button = QPushButton(t("code.replace_one"))
+        self.replace_button.setObjectName("ghost")
+        self.replace_button.clicked.connect(self._replace_one)
+        row.addWidget(self.replace_button)
+        self.replace_all_button = QPushButton(t("code.replace_all"))
+        self.replace_all_button.setObjectName("ghost")
+        self.replace_all_button.clicked.connect(self._replace_all)
+        row.addWidget(self.replace_all_button)
+        close = QPushButton("×")
+        close.setObjectName("ghost")
+        close.setFixedWidth(28)
+        close.setToolTip(t("code.find_close"))
+        close.clicked.connect(self.hide_find)
+        row.addWidget(close)
+        self._find_bar = bar
+        self._set_replace_visible(False)
+        return bar
+
+    def _set_replace_visible(self, visible: bool) -> None:
+        self.replace_input.setVisible(visible)
+        self.replace_button.setVisible(visible)
+        self.replace_all_button.setVisible(visible)
+
+    def show_find(self, replace: bool = False) -> None:
+        if self.stack.currentIndex() != 1:
+            return
+        selected = self.editor.textCursor().selectedText()
+        if selected and "\n" not in selected:
+            self.find_input.setText(selected)
+        self._set_replace_visible(replace)
+        self._find_bar.setVisible(True)
+        self.find_input.setFocus()
+        self.find_input.selectAll()
+
+    def hide_find(self) -> None:
+        self._find_bar.setVisible(False)
+        self.editor.setFocus()
+
+    def _find_flags(self) -> QTextDocument.FindFlag:
+        flags = QTextDocument.FindFlag(0)
+        if self.find_case.isChecked():
+            flags |= QTextDocument.FindFlag.FindCaseSensitively
+        return flags
+
+    def _clear_find_status(self) -> None:
+        self.find_input.setStyleSheet("")
+
+    def _find_next(self, backward: bool = False) -> bool:
+        needle = self.find_input.text()
+        if not needle:
+            return False
+        flags = self._find_flags()
+        if backward:
+            flags |= QTextDocument.FindFlag.FindBackward
+        found = self.editor.find(needle, flags)
+        if not found:
+            # Wrap around: a search from the end reaches the beginning again.
+            cursor = self.editor.textCursor()
+            cursor.movePosition(
+                QTextCursor.MoveOperation.End
+                if backward
+                else QTextCursor.MoveOperation.Start
+            )
+            self.editor.setTextCursor(cursor)
+            found = self.editor.find(needle, flags)
+        if found:
+            self._clear_find_status()
+        else:
+            self.find_input.setStyleSheet(
+                "QLineEdit { background: #3A2020; border: 1px solid #C05050; }"
+            )
+        return found
+
+    def _replace_one(self) -> None:
+        needle = self.find_input.text()
+        cursor = self.editor.textCursor()
+        if needle and cursor.hasSelection() and cursor.selectedText() == needle:
+            cursor.insertText(self.replace_input.text())
+        self._find_next(False)
+
+    def _replace_all(self) -> None:
+        needle = self.find_input.text()
+        if not needle:
+            return
+        document = self.editor.document()
+        flags = self._find_flags()
+        cursor = QTextCursor(document)
+        count = 0
+        while True:
+            cursor = document.find(needle, cursor, flags)
+            if cursor.isNull():
+                break
+            cursor.insertText(self.replace_input.text())
+            count += 1
+        self.status_message.emit(t("code.replacements_count", count=count))
 
     def _build_image_view(self) -> QWidget:
         widget = QWidget()

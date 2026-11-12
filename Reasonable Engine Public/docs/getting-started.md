@@ -4,7 +4,7 @@
 
 ## Installation
 
-1. Download `ReasonableEngine-Setup-RE-2.02.exe` from the
+1. Download `ReasonableEngine-Setup-RE-2.03.exe` from the
    [Releases](../../releases/latest) page.
 2. Run the installer. It will install the editor, a portable Python, and the
    runtime itself — there is nothing extra to install.

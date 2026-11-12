@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -56,7 +57,236 @@ class AgentHarnessTests(unittest.TestCase):
         return value
 
     # ------------------------------------------------------------------
-    def test_history_trimming_keeps_the_original_task(self) -> None:
+    def test_deepseek_auto_profile_expands_context_for_cache(self) -> None:
+        agent = self._agent(
+            require_ready=False,
+            provider_config={
+                "kind": "openai",
+                "base_url": "http://localhost/v1",
+                "model": "deepseek-v4.1-flash",
+                "api_key": "test",
+                "context_window": 128_000,
+            },
+        )
+
+        def fake_call(messages, tools, *, temperature):
+            return ChatResult(content="done")
+
+        agent._call_model = fake_call  # type: ignore[assignment]
+        agent.run("Do the task")
+        self.assertGreaterEqual(agent._context_tokens, 100_000)
+        self.assertEqual(agent._context_messages_limit, 160)
+        self.assertEqual(agent._tool_result_limit, 4_500)
+
+    def test_balanced_context_stays_small_for_other_models(self) -> None:
+        agent = self._agent(
+            require_ready=False,
+            provider_config={
+                "kind": "openai",
+                "base_url": "http://localhost/v1",
+                "model": "gpt-4o",
+                "api_key": "test",
+                "context_window": 128_000,
+            },
+        )
+
+        def fake_call(messages, tools, *, temperature):
+            return ChatResult(content="done")
+
+        agent._call_model = fake_call  # type: ignore[assignment]
+        agent.run("Do the task")
+        self.assertLessEqual(agent._context_tokens, 48_000)
+        self.assertEqual(agent._context_messages_limit, 0)
+
+    def test_repeated_tool_arguments_are_detected_with_changed_output(self) -> None:
+        agent = self._agent()
+        arguments = {"path": "main.py", "start_line": 1, "end_line": 20}
+        agent._track_tool_call("read_file", "first output", arguments)
+        agent._track_tool_call("read_file", "second output", arguments)
+        self.assertEqual(agent._repeat_count, 1)
+        agent._track_tool_call("read_file", "third", {"path": "main.py", "start_line": 21})
+        self.assertEqual(agent._repeat_count, 0)
+
+    def test_run_stops_when_the_user_declines_changes(self) -> None:
+        agent = self._agent(require_ready=False, confirm_write=lambda action, path: False)
+        answers = [
+            ChatResult(
+                tool_calls=[
+                    ToolCall(
+                        id="w1",
+                        name="write_file",
+                        arguments={"path": "x.py", "content": "X = 1\n"},
+                    )
+                ]
+            ),
+            ChatResult(content="done"),
+        ]
+
+        def fake_call(messages, tools, *, temperature):
+            return answers.pop(0)
+
+        agent._call_model = fake_call  # type: ignore[assignment]
+        agent.run("Make a file")
+        self.assertFalse(agent.finished)
+        self.assertIn("не подтвердил", agent.incomplete_reason)
+        self.assertFalse((self.root / "x.py").exists())
+
+    def test_specialist_is_stopped_when_it_only_reads(self) -> None:
+        self.settings.data.setdefault("agent", {})["write_starvation_warn"] = 2
+        self.settings.data["agent"]["write_starvation_stop"] = 4
+        agent = self._agent(require_ready=False, expect_writes=True)
+        answers = [
+            ChatResult(
+                tool_calls=[
+                    ToolCall(
+                        id=f"r{index}",
+                        name="read_file",
+                        arguments={"path": "main.py"},
+                    )
+                ]
+            )
+            for index in range(1, 8)
+        ]
+
+        def fake_call(messages, tools, *, temperature):
+            return answers.pop(0)
+
+        agent._call_model = fake_call  # type: ignore[assignment]
+        agent.run("Implement the missing part")
+        self.assertFalse(agent.finished)
+        self.assertTrue(
+            "without editing" in agent.incomplete_reason
+            or "ни одного файла" in agent.incomplete_reason,
+            agent.incomplete_reason,
+        )
+
+    def test_specialist_is_stopped_by_its_wall_clock_limit(self) -> None:
+        agent = self._agent(
+            require_ready=False, expect_writes=False, max_seconds=0.01
+        )
+        calls = [
+            ChatResult(
+                tool_calls=[
+                    ToolCall(
+                        id=f"r{index}",
+                        name="read_file",
+                        arguments={"path": "main.py"},
+                    )
+                ]
+            )
+            for index in range(1, 6)
+        ]
+
+        def fake_call(messages, tools, *, temperature):
+            time.sleep(0.02)
+            return calls.pop(0)
+
+        agent._call_model = fake_call  # type: ignore[assignment]
+        agent.run("Implement the missing part")
+        self.assertFalse(agent.finished)
+        self.assertTrue(
+            "exceeded its" in agent.incomplete_reason
+            or "превысил лимит" in agent.incomplete_reason,
+            agent.incomplete_reason,
+        )
+
+    def test_run_resumes_a_crashed_journal_instead_of_starting_over(self) -> None:
+        agent = self._agent(require_ready=False)
+        agent._journal_enabled = True
+        agent.messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "Do the task"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "name": "read_file", "content": "MARKER"},
+        ]
+        agent._journal_run("Do the task", 4)
+        seen: list[list[dict]] = []
+
+        def fake_call(messages, tools, *, temperature):
+            seen.append(list(messages))
+            return ChatResult(content="finished")
+
+        agent._call_model = fake_call  # type: ignore[assignment]
+        agent.run("Do the task")
+        self.assertTrue(seen)
+        sent = seen[0]
+        self.assertTrue(any(item.get("content") == "MARKER" for item in sent))
+        self.assertEqual(
+            sum(
+                1
+                for item in sent
+                if item.get("role") == "user" and "Do the task" in str(item.get("content"))
+            ),
+            1,
+        )
+        self.assertIsNone(agent._load_journal("Do the task"))
+
+    def test_parallel_reads_append_results_in_order(self) -> None:
+        agent = self._agent()
+        agent.messages = []
+        calls = [
+            ToolCall(id="a", name="read_file", arguments={"path": "main.py"}),
+            ToolCall(id="b", name="read_file", arguments={"path": "project.json"}),
+        ]
+        self.assertTrue(agent._can_run_reads_parallel(calls))
+        agent._run_parallel_reads(calls)
+        self.assertEqual(len(agent.messages), 2)
+        self.assertEqual(agent.messages[0]["tool_call_id"], "a")
+        self.assertEqual(agent.messages[1]["tool_call_id"], "b")
+        self.assertIn("print('ok')", agent.messages[0]["content"])
+
+    def test_mutating_tools_are_never_run_in_parallel(self) -> None:
+        agent = self._agent()
+        calls = [
+            ToolCall(id="a", name="read_file", arguments={"path": "main.py"}),
+            ToolCall(id="b", name="write_file", arguments={"path": "x.py", "content": "X = 1"}),
+        ]
+        self.assertFalse(agent._can_run_reads_parallel(calls))
+
+    def test_run_journal_round_trip_and_sanitizing(self) -> None:
+        agent = self._agent()
+        agent.messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "Do the task"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "name": "read_file", "content": "{}"},
+        ]
+        agent._journal_run("Do the task", 3)
+        loaded = agent._load_journal("Do the task")
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["step"], 3)
+        self.assertEqual(len(loaded["messages"]), 4)
+        self.assertIsNone(agent._load_journal("Another task"))
+
+        # A crash in the middle of a turn must not leave an unanswered call.
+        agent.messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_2", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+                ],
+            }
+        )
+        agent._journal_run("Do the task", 4)
+        loaded = agent._load_journal("Do the task")
+        self.assertEqual(len(loaded["messages"]), 4)
+
+        agent._clear_journal()
+        self.assertIsNone(agent._load_journal("Do the task"))
+
         agent = self._agent()
         agent.messages = [
             {"role": "system", "content": "SYSTEM"},
@@ -396,6 +626,49 @@ class AgentHarnessTests(unittest.TestCase):
         self.assertFalse(agent.finished)
         self.assertIn("3", agent.incomplete_reason)
         self.assertTrue(any(event.kind == "incomplete" for event in events))
+
+    def test_a_reused_specialist_continues_instead_of_starting_over(self) -> None:
+        self.settings.data["agent"]["max_steps"] = 1
+        self.settings.data["agent"]["stall_steps"] = 0
+        agent = self._agent()
+        agent.tools.readiness = lambda: self._not_ready()
+        calls: list[int] = []
+        seen: list[list[dict]] = []
+
+        def fake_model(messages, tools, *, temperature=0.3):
+            calls.append(len(calls) + 1)
+            seen.append([dict(item) for item in messages])
+            index = len(calls)
+            return ChatResult(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id=f"call_{index}",
+                        name="run_command",
+                        arguments={"command": f"echo {index}"},
+                    )
+                ],
+            )
+
+        def fake_tool(name, arguments=None):
+            return json.dumps({"ok": True})
+
+        agent._call_model = fake_model
+        agent.tools.call = fake_tool
+        agent.run("First task")
+        self.assertTrue(agent.incomplete_reason)
+        self.assertFalse(agent.finished)
+        first_length = len(agent.messages)
+
+        before = len(seen)
+        agent.run("Continue the same task", continue_conversation=True)
+        self.assertGreater(len(seen), before)
+        payload = json.dumps(seen[before], ensure_ascii=False)
+        # The continuation must carry the earlier tool call and its result,
+        # rather than starting a fresh conversation.
+        self.assertIn("call_1", payload)
+        self.assertIn("Continue the same task", payload)
+        self.assertGreater(len(agent.messages), first_length)
 
     def test_stall_guard_never_stops_a_project_that_already_passes(self) -> None:
         self.settings.data["agent"]["stall_steps"] = 2

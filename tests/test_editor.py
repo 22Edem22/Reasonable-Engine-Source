@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -91,6 +92,18 @@ class EditorTests(unittest.TestCase):
         for attribute in ("prompts_edit", "width_spin", "height_spin", "orientation_combo", "style_combo"):
             self.assertFalse(hasattr(self.wizard, attribute), attribute)
         self.assertIn("Интерфейс:", self.wizard.summary_label.text())
+
+    def test_wizard_offers_site_and_other_project_modes(self) -> None:
+        self.assertEqual(
+            set(self.wizard.type_buttons), {"game", "app", "site", "other"}
+        )
+        self.wizard.type_buttons["site"].setChecked(True)
+        self.assertEqual(self.wizard.project_type(), "site")
+        self.assertIn("Сайт", self.wizard.summary_label.text())
+        self.assertFalse(self.wizard.level_checks["standard"].isVisibleTo(self.wizard))
+        self.wizard.type_buttons["other"].setChecked(True)
+        self.assertEqual(self.wizard.project_type(), "other")
+        self.assertIn("Другое", self.wizard.summary_label.text())
 
     def test_wizard_mode_toggle_refreshes_summary(self) -> None:
         # Regression: toggling mode used to call a missing method.
@@ -332,6 +345,78 @@ class EditorTests(unittest.TestCase):
             card.deleteLater()
             self.app.processEvents()
 
+    def test_parallel_specialist_tool_calls_use_call_ids_and_agent_labels(self) -> None:
+        from reasonable.ai.agent import AgentEvent
+        from reasonable.editor.chat import ChatPanel
+
+        panel = ChatPanel(self.project, self.settings)
+        try:
+            panel._on_event(
+                AgentEvent(
+                    "tool_start",
+                    "",
+                    data={
+                        "tool": "edit_file",
+                        "arguments": {"path": "main.py"},
+                        "call_id": "call-a",
+                        "agent": "code-1",
+                    },
+                )
+            )
+            panel._on_event(
+                AgentEvent(
+                    "tool_start",
+                    "",
+                    data={
+                        "tool": "draw_sprite",
+                        "arguments": {"name": "coin"},
+                        "call_id": "call-b",
+                        "agent": "assets-2",
+                    },
+                )
+            )
+            first = panel._tool_cards["call-a"]
+            second = panel._tool_cards["call-b"]
+            self.assertIn("code-1", first.header.text())
+            self.assertIn("assets-2", second.header.text())
+
+            # Results may arrive in a different order than the starts; each
+            # must land on its own card instead of the last active one.
+            panel._on_event(
+                AgentEvent(
+                    "tool_result",
+                    "",
+                    data={
+                        "tool": "draw_sprite",
+                        "result": '{"ok": false, "error": "boom"}',
+                        "success": False,
+                        "call_id": "call-b",
+                        "agent": "assets-2",
+                    },
+                )
+            )
+            panel._on_event(
+                AgentEvent(
+                    "tool_result",
+                    "",
+                    data={
+                        "tool": "edit_file",
+                        "result": '{"ok": true, "message": "saved"}',
+                        "success": True,
+                        "call_id": "call-a",
+                        "agent": "code-1",
+                    },
+                )
+            )
+            self.assertTrue(first.success)
+            self.assertFalse(second.success)
+            self.assertIn("✓", first.header.text())
+            self.assertIn("×", second.header.text())
+            self.assertNotIn("✓", second.header.text())
+        finally:
+            panel.deleteLater()
+            self.app.processEvents()
+
     def test_server_error_offers_continue_and_can_auto_continue(self) -> None:
         from reasonable.ai.agent import AgentEvent
         from reasonable.core.settings import Settings
@@ -518,6 +603,63 @@ class EditorTests(unittest.TestCase):
             dialog.reject()
             dialog.deleteLater()
 
+    def test_opening_a_folder_without_manifest_registers_it(self) -> None:
+        from reasonable.core.project import default_manifest
+        from reasonable.editor.main_window import MainWindow
+
+        folder = self.base / "existing-project"
+        folder.mkdir()
+        (folder / "game.py").write_text("print('hello')\n", encoding="utf-8")
+
+        class FakeDialog:
+            def __init__(self, target, parent=None) -> None:
+                self.manifest = default_manifest(target.name, template="blank")
+                self.manifest["entry"] = "game.py"
+
+            def exec(self) -> int:
+                return 1
+
+        window = MainWindow()
+        try:
+            with mock.patch(
+                "reasonable.editor.main_window.ImportProjectDialog", FakeDialog
+            ):
+                window.open_project(folder)
+            self.assertTrue((folder / "project.json").is_file())
+            project = Project.load(folder)
+            self.assertEqual(project.manifest["entry"], "game.py")
+            self.assertEqual(project.name, "existing-project")
+            self.assertIsNotNone(window.current_page)
+            self.assertEqual(window.current_page.project.root, folder.resolve())
+        finally:
+            window.current_page.shutdown()
+            window.close()
+            window.deleteLater()
+
+    def test_import_dialog_builds_a_manifest(self) -> None:
+        from reasonable.editor.import_project import ImportProjectDialog
+
+        folder = self.base / "plain-app"
+        folder.mkdir()
+        (folder / "app.py").write_text("print('app')\n", encoding="utf-8")
+        dialog = ImportProjectDialog(folder)
+        try:
+            self.assertEqual(dialog.entry_edit.text(), "app.py")
+            dialog.name_edit.setText("Imported app")
+            dialog.goal_edit.setText("Do something useful")
+            dialog.type_combo.setCurrentIndex(1)
+            dialog._accept()
+            self.assertIsNotNone(dialog.manifest)
+            self.assertEqual(dialog.manifest["name"], "Imported app")
+            self.assertEqual(dialog.manifest["type"], "app")
+            self.assertEqual(dialog.manifest["entry"], "app.py")
+            self.assertEqual(
+                dialog.manifest["goal"], "Do something useful"
+            )
+            self.assertTrue(dialog.manifest["engine_version"])
+        finally:
+            dialog.deleteLater()
+
     def test_main_window_opens_project(self) -> None:
         from reasonable.editor.main_window import MainWindow
 
@@ -537,7 +679,7 @@ class EditorTests(unittest.TestCase):
             self.assertIn("·", page.header_model.text())
             self.assertIn("Интерфейс:", page.side_meta.text())
             self.assertNotIn("×", page.side_meta.text())
-            self.assertEqual(page.platform_badge.text(), "WINDOWS")
+            self.assertEqual(page.type_badge.text(), "ИГРА")
             self.assertEqual(page.convert_button.text(), "Конвертировать…")
             for index in range(4):
                 window._show_section(index)

@@ -879,9 +879,30 @@ class SettingsDialog(QDialog):
         self.context_tokens.setSingleStep(2_000)
         self.context_tokens.setSpecialValueText(t("settings.context_tokens_auto"))
         form.addRow(self._label(t("settings.label_context_tokens")), self.context_tokens)
+        self.context_mode = QComboBox()
+        self.context_mode.addItem(t("settings.context_mode_auto"), "auto")
+        self.context_mode.addItem(t("settings.context_mode_balanced"), "balanced")
+        self.context_mode.addItem(t("settings.context_mode_cache"), "cache")
+        self.context_mode.setToolTip(t("settings.context_mode_tip"))
+        form.addRow(self._label(t("settings.label_context_mode")), self.context_mode)
+        self.run_token_budget = QSpinBox()
+        self.run_token_budget.setRange(0, 10_000_000)
+        self.run_token_budget.setSingleStep(50_000)
+        self.run_token_budget.setSpecialValueText(t("settings.run_budget_off"))
+        self.run_token_budget.setToolTip(t("settings.run_budget_tip"))
+        form.addRow(self._label(t("settings.label_run_budget")), self.run_token_budget)
         self.compaction_box = QCheckBox(t("settings.compaction_check"))
         self.compaction_box.setToolTip(t("settings.compaction_tip"))
         form.addRow(self.compaction_box)
+        self.resume_box = QCheckBox(t("settings.resume_runs_check"))
+        self.resume_box.setToolTip(t("settings.resume_runs_tip"))
+        form.addRow(self.resume_box)
+        self.stream_box = QCheckBox(t("settings.stream_check"))
+        self.stream_box.setToolTip(t("settings.stream_tip"))
+        form.addRow(self.stream_box)
+        self.confirm_box = QCheckBox(t("settings.confirm_changes_check"))
+        self.confirm_box.setToolTip(t("settings.confirm_changes_tip"))
+        form.addRow(self.confirm_box)
         card.layout().addLayout(form)
         layout.addWidget(card)
 
@@ -902,6 +923,12 @@ class SettingsDialog(QDialog):
         self.supervisor_box = QCheckBox(t("settings.supervisor_check"))
         self.supervisor_box.setToolTip(t("settings.supervisor_check_tip"))
         supervisor.layout().addWidget(self.supervisor_box)
+        aux_form = QFormLayout()
+        aux_form.setSpacing(8)
+        self.aux_model = QComboBox()
+        self.aux_model.setToolTip(t("settings.aux_model_tip"))
+        aux_form.addRow(self._label(t("settings.aux_model")), self.aux_model)
+        supervisor.layout().addLayout(aux_form)
         layout.addWidget(supervisor)
 
         parallel = Card(soft=True)
@@ -918,6 +945,27 @@ class SettingsDialog(QDialog):
         self.parallel_rounds = QSpinBox()
         self.parallel_rounds.setRange(1, 5)
         parallel_form.addRow(self._label(t("settings.parallel_rounds")), self.parallel_rounds)
+        self.specialist_minutes = QSpinBox()
+        self.specialist_minutes.setRange(0, 240)
+        self.specialist_minutes.setSpecialValueText(t("settings.specialist_unlimited"))
+        self.specialist_minutes.setToolTip(t("settings.specialist_minutes_tip"))
+        parallel_form.addRow(
+            self._label(t("settings.label_specialist_minutes")), self.specialist_minutes
+        )
+        self.specialist_steps = QSpinBox()
+        self.specialist_steps.setRange(0, 200)
+        self.specialist_steps.setSpecialValueText(t("settings.specialist_unlimited"))
+        self.specialist_steps.setToolTip(t("settings.specialist_steps_tip"))
+        parallel_form.addRow(
+            self._label(t("settings.label_specialist_steps")), self.specialist_steps
+        )
+        self.run_minutes = QSpinBox()
+        self.run_minutes.setRange(0, 600)
+        self.run_minutes.setSpecialValueText(t("settings.specialist_unlimited"))
+        self.run_minutes.setToolTip(t("settings.run_minutes_tip"))
+        parallel_form.addRow(
+            self._label(t("settings.label_run_minutes")), self.run_minutes
+        )
         parallel.layout().addLayout(parallel_form)
         layout.addWidget(parallel)
 
@@ -978,14 +1026,42 @@ class SettingsDialog(QDialog):
         self.temperature.setValue(float(agent.get("temperature", 0.3)))
         self.context_messages.setValue(int(agent.get("context_messages", 36)))
         self.context_tokens.setValue(int(agent.get("context_tokens", 0) or 0))
+        index = self.context_mode.findData(str(agent.get("context_mode") or "auto"))
+        self.context_mode.setCurrentIndex(max(0, index))
+        self.run_token_budget.setValue(int(agent.get("run_token_budget", 0) or 0))
         self.compaction_box.setChecked(bool(agent.get("compaction", True)))
+        self.resume_box.setChecked(bool(agent.get("resume_runs", True)))
+        self.stream_box.setChecked(bool(agent.get("stream", False)))
+        self.confirm_box.setChecked(bool(agent.get("confirm_changes", False)))
         enabled = set(self.settings.auto_continue_kinds())
         for kind, box in self.auto_continue_boxes.items():
             box.setChecked(kind in enabled)
         self.supervisor_box.setChecked(self.settings.supervisor_enabled())
+        self.aux_model.clear()
+        self.aux_model.addItem(t("settings.aux_model_same"), "")
+        try:
+            preset = get_provider(self._current_provider)
+            hints = list(preset.models_hint)
+        except Exception:
+            hints = []
+        current_aux = str(agent.get("aux_model") or "").strip()
+        existing = {
+            self.aux_model.itemData(index)
+            for index in range(self.aux_model.count())
+        }
+        for name in hints:
+            if name and str(name) not in existing:
+                self.aux_model.addItem(str(name), str(name))
+                existing.add(str(name))
+        if current_aux and current_aux not in existing:
+            self.aux_model.addItem(current_aux, current_aux)
+        self.aux_model.setCurrentIndex(max(0, self.aux_model.findData(current_aux)))
         self.parallel_box.setChecked(bool(agent.get("parallel", True)))
         self.parallel_workers.setValue(int(agent.get("parallel_workers", 3) or 3))
         self.parallel_rounds.setValue(int(agent.get("parallel_rounds", 3) or 3))
+        self.specialist_minutes.setValue(int(agent.get("specialist_timeout_minutes", 15) or 0))
+        self.specialist_steps.setValue(int(agent.get("specialist_max_steps", 60) or 0))
+        self.run_minutes.setValue(int(agent.get("max_run_minutes", 90) or 0))
         self.projects_dir_edit.setText(str(self.settings.data.get("projects_dir") or ""))
 
     # ------------------------------------------------------------------
@@ -1002,16 +1078,25 @@ class SettingsDialog(QDialog):
                 "temperature": float(self.temperature.value()),
                 "context_messages": int(self.context_messages.value()),
                 "context_tokens": int(self.context_tokens.value()),
+                "context_mode": str(self.context_mode.currentData() or "auto"),
+                "run_token_budget": int(self.run_token_budget.value()),
                 "compaction": self.compaction_box.isChecked(),
+                "resume_runs": self.resume_box.isChecked(),
+                "stream": self.stream_box.isChecked(),
+                "confirm_changes": self.confirm_box.isChecked(),
                 "auto_continue_errors": [
                     kind
                     for kind, box in self.auto_continue_boxes.items()
                     if box.isChecked()
                 ],
                 "supervisor": self.supervisor_box.isChecked(),
+                "aux_model": str(self.aux_model.currentData() or ""),
                 "parallel": self.parallel_box.isChecked(),
                 "parallel_workers": int(self.parallel_workers.value()),
                 "parallel_rounds": int(self.parallel_rounds.value()),
+                "specialist_timeout_minutes": int(self.specialist_minutes.value()),
+                "specialist_max_steps": int(self.specialist_steps.value()),
+                "max_run_minutes": int(self.run_minutes.value()),
             }
         )
         self.settings.data["projects_dir"] = (

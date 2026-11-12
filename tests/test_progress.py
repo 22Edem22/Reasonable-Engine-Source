@@ -134,7 +134,7 @@ class ProgressTests(unittest.TestCase):
         }
         self.assertEqual(derived_percent(state), 50.0)
         state["tasks"][2]["status"] = "skipped"
-        self.assertEqual(derived_percent(state), 75.0)
+        self.assertEqual(derived_percent(state), 50.0)
 
     def test_task_updates_lift_stored_percent(self) -> None:
         set_plan(self.root, ["Раз", "Два", "Три", "Четыре"])
@@ -142,11 +142,18 @@ class ProgressTests(unittest.TestCase):
         update_task(self.root, "t1", "done")
         state = read_state(self.root)
         self.assertEqual(state["percent"], 25.0)
-        # An explicitly reported percent is never lowered by task updates.
+        # The task plan is authoritative: a new plan resets a stale 100%.
         set_progress(self.root, 80)
         update_task(self.root, "t2", "done")
         state = read_state(self.root)
-        self.assertEqual(state["percent"], 80.0)
+        self.assertEqual(state["percent"], 50.0)
+
+    def test_a_new_plan_resets_a_stale_hundred_percent(self) -> None:
+        set_progress(self.root, 100, stage="Готово")
+        set_plan(self.root, ["Проверить интерфейс", "Убрать временные файлы"])
+        state = read_state(self.root)
+        self.assertEqual(state["percent"], 0.0)
+        self.assertEqual(state["status"], "running")
 
 
 if __name__ == "__main__":
